@@ -1,0 +1,137 @@
+.vault-spotlight-modal {
+	padding: 0;
+	width: 640px;
+	max-width: 92vw;
+}
+
+.vault-spotlight-input-wrap {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 12px 14px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.vault-spotlight-input-wrap input {
+	flex: 1;
+	font-size: 16px;
+	border: none;
+	background: transparent;
+	box-shadow: none;
+	padding: 4px 0;
+}
+
+.vault-spotlight-mode-badge {
+	font-size: 11px;
+	padding: 2px 8px;
+	border-radius: 10px;
+	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.vault-spotlight-mode-badge.is-pro {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.vault-spotlight-results {
+	max-height: 380px;
+	overflow-y: auto;
+	padding: 6px 0;
+}
+
+.vault-spotlight-item {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 8px 14px;
+	cursor: pointer;
+	border-left: 3px solid transparent;
+}
+
+.vault-spotlight-item.is-selected {
+	background: var(--background-modifier-hover);
+}
+
+.vault-spotlight-item.is-checked {
+	border-left-color: var(--interactive-accent);
+}
+
+.vault-spotlight-item-icon {
+	margin-top: 2px;
+	color: var(--text-muted);
+}
+
+.vault-spotlight-item-body {
+	flex: 1;
+	min-width: 0;
+}
+
+.vault-spotlight-item-title {
+	font-weight: 500;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.vault-spotlight-item-title mark {
+	background: var(--text-highlight-bg);
+	color: var(--text-normal);
+	border-radius: 2px;
+	padding: 0 1px;
+}
+
+.vault-spotlight-item-meta {
+	font-size: 12px;
+	color: var(--text-muted);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.vault-spotlight-item-snippet {
+	font-size: 12px;
+	color: var(--text-muted);
+	margin-top: 2px;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+.vault-spotlight-footer {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 8px 14px;
+	border-top: 1px solid var(--background-modifier-border);
+	font-size: 11px;
+	color: var(--text-muted);
+}
+
+.vault-spotlight-footer kbd {
+	font-size: 10px;
+	padding: 1px 5px;
+	border-radius: 4px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+}
+
+.vault-spotlight-empty {
+	padding: 24px 14px;
+	text-align: center;
+	color: var(--text-muted);
+}
+
+.vault-spotlight-pro-cta {
+	padding: 10px 14px;
+	background: var(--background-secondary);
+	border-top: 1px solid var(--background-modifier-border);
+	font-size: 12px;
+	color: var(--text-muted);
+}
+
+.vault-spotlight-pro-cta a {
+	color: var(--text-accent);
+}

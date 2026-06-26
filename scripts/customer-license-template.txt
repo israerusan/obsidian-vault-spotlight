@@ -1,0 +1,18 @@
+Thanks for purchasing Vault Spotlight Pro!
+
+Your license key:
+{{LICENSE_KEY}}
+
+How to activate:
+1. Open Obsidian → Settings → Community plugins → Vault Spotlight
+2. Paste your license key into the License key field
+3. Pro features unlock immediately (offline — no login required)
+
+Pro features:
+- Content search (prefix your query with >)
+- Batch open with Ctrl+Space multi-select
+- Save custom searches with Ctrl+S
+
+Need help? Reply to this email.
+
+— Vault Spotlight
