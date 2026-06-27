@@ -3046,7 +3046,7 @@ var SpotlightModal = class extends import_obsidian3.Modal {
 var import_tweetnacl = __toESM(require_nacl_fast(), 1);
 
 // src/license/publicKey.ts
-var LICENSE_PUBLIC_KEY = "6+T/RFI68U7fMjodeZB+haI6C/CUg+R/z22rS1s3bxg=";
+var LICENSE_PUBLIC_KEY = "8ybB+nBmz0Tiz5RYCYJsOgEW5+YmROAumf3HHPeC1E0=";
 
 // src/license/LicenseManager.ts
 var _LicenseManager = class _LicenseManager {

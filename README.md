@@ -41,8 +41,9 @@ Search **Vault Spotlight** in Obsidian Settings → Community plugins after subm
 npm install
 npm run build
 npm test
-npm run license:generate -- customer@email.com
 ```
+
+License keys for buyers are generated privately by the plugin author — not from the public repo.
 
 ## Pricing label
 

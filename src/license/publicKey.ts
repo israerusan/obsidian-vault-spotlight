@@ -1,1 +1,1 @@
-export const LICENSE_PUBLIC_KEY = "6+T/RFI68U7fMjodeZB+haI6C/CUg+R/z22rS1s3bxg=";
+export const LICENSE_PUBLIC_KEY = "8ybB+nBmz0Tiz5RYCYJsOgEW5+YmROAumf3HHPeC1E0=";

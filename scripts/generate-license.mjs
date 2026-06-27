@@ -1,3 +1,4 @@
+// Author-only tool. Requires scripts/.license-private.key (never commit or publish).
 import fs from "fs";
 import path from "path";
 import nacl from "tweetnacl";

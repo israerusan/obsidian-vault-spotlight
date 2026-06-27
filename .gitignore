@@ -2,4 +2,7 @@ node_modules/
 main.js.map
 .DS_Store
 scripts/.license-private.key
+TEST_LICENSE.txt
+GUMROAD_LISTING.txt
+PAYMENT_OPTIONS.txt
 *.log

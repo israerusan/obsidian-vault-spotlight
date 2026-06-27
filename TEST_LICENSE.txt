@@ -1,5 +1,0 @@
-Vault Spotlight Pro — test license for iavil@test.local
-
-eyJwcm9kdWN0IjoidmF1bHQtc3BvdGxpZ2h0IiwiZW1haWwiOiJpYXZpbEB0ZXN0LmxvY2FsIiwiaXNzdWVkIjoiMjAyNi0wNi0yNlQyMzoxODoxMS45MjBaIn0.dAt5Yc9KXkOmGmPudsDc-TZjI7yFtkGdP6mhUttTLzghpJDqknlJa1ARYafKzmiWDZ9KdObLXjd1UoXpR2T5DA
-
-Paste in Obsidian → Settings → Vault Spotlight → License key
