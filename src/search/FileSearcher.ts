@@ -112,7 +112,7 @@ export class FileSearcher {
 
 		for (const prop of options.properties) {
 			const fm = cache.frontmatter ?? {};
-			const raw = fm[prop.key];
+			const raw: unknown = fm[prop.key];
 			if (raw === undefined || raw === null) return false;
 			const value = String(raw).toLowerCase();
 			if (prop.value === null) continue;

@@ -2297,7 +2297,6 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian.Setting(containerEl).setName("Vault Spotlight").setHeading();
     new import_obsidian.Setting(containerEl).setName("License key").setDesc("Enter your Pro license key. Verified offline \u2014 no account or server required.").addText(
       (text) => text.setPlaceholder("payload.signature").setValue(this.plugin.settings.licenseKey).onChange(async (value) => {
         this.plugin.settings.licenseKey = value;
@@ -3053,7 +3052,9 @@ var import_tweetnacl = __toESM(require_nacl_fast(), 1);
 var LICENSE_PUBLIC_KEY = "8ybB+nBmz0Tiz5RYCYJsOgEW5+YmROAumf3HHPeC1E0=";
 
 // src/license/LicenseManager.ts
-var verifyDetached = import_tweetnacl.default.sign.detached.verify.bind(import_tweetnacl.default.sign.detached);
+function verifyDetached(message, signature, publicKey) {
+  return import_tweetnacl.default.sign.detached.verify(message, signature, publicKey);
+}
 var _LicenseManager = class _LicenseManager {
   static verify(licenseKey) {
     const trimmed = licenseKey.trim();
@@ -3415,7 +3416,8 @@ var VaultSpotlightPlugin = class extends import_obsidian4.Plugin {
     await this.saveSettings();
   }
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const data = await this.loadData();
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
   }
   async saveSettings() {
     await this.saveData(this.settings);

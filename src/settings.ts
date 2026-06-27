@@ -51,8 +51,6 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		new Setting(containerEl).setName("Vault Spotlight").setHeading();
-
 		new Setting(containerEl)
 			.setName("License key")
 			.setDesc("Enter your Pro license key. Verified offline — no account or server required.")

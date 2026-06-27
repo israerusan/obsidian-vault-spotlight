@@ -1,9 +1,9 @@
 import nacl from "tweetnacl";
 import { LICENSE_PUBLIC_KEY } from "./publicKey";
 
-type DetachedVerify = (message: Uint8Array, signature: Uint8Array, publicKey: Uint8Array) => boolean;
-
-const verifyDetached: DetachedVerify = nacl.sign.detached.verify.bind(nacl.sign.detached);
+function verifyDetached(message: Uint8Array, signature: Uint8Array, publicKey: Uint8Array): boolean {
+	return nacl.sign.detached.verify(message, signature, publicKey);
+}
 
 export interface LicensePayload {
 	product: string;
