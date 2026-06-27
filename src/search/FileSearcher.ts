@@ -1,18 +1,26 @@
 import { App, TFile, getAllTags } from "obsidian";
 import { fuzzyMatch } from "./fuzzy";
+import { getSearchableFiles, getVaultFileKind, type VaultFileKind } from "./vaultFiles";
 
 export interface FileSearchResult {
 	file: TFile;
 	score: number;
 	matchIndices: number[];
 	modifiedLabel: string;
+	fileKind: VaultFileKind;
+	isRecent: boolean;
+	isStarred: boolean;
 }
 
 export interface FileSearchOptions {
 	textTokens: string[];
 	tags: string[];
 	properties: Array<{ key: string; value: string | null }>;
+	extFilters: string[];
 	recentPaths: string[];
+	starredPaths: string[];
+	includeCanvas: boolean;
+	includePdf: boolean;
 	limit?: number;
 }
 
@@ -20,15 +28,18 @@ export class FileSearcher {
 	constructor(private app: App) {}
 
 	async search(options: FileSearchOptions): Promise<FileSearchResult[]> {
-		const files = this.app.vault.getMarkdownFiles();
-		const cache = this.app.metadataCache;
+		const files = getSearchableFiles(this.app, {
+			includeCanvas: options.includeCanvas,
+			includePdf: options.includePdf,
+		});
 		const limit = options.limit ?? 50;
 		const results: FileSearchResult[] = [];
 		const recentSet = new Map(options.recentPaths.map((p, i) => [p, i]));
-
+		const starredSet = new Map(options.starredPaths.map((p, i) => [p, i]));
 		const isBrowseMode = options.textTokens.length === 0;
 
 		for (const file of files) {
+			if (!this.matchesExtFilter(file, options.extFilters)) continue;
 			if (!(await this.matchesFilters(file, options))) continue;
 
 			const basename = file.basename;
@@ -51,6 +62,11 @@ export class FileSearcher {
 
 			if (score <= 0) continue;
 
+			const starredRank = starredSet.get(file.path);
+			if (starredRank !== undefined) {
+				score += 2000 - starredRank * 10;
+			}
+
 			const recentRank = recentSet.get(file.path);
 			if (recentRank !== undefined) {
 				score += 1000 - recentRank * 10;
@@ -65,13 +81,25 @@ export class FileSearcher {
 				score,
 				matchIndices: indices,
 				modifiedLabel: formatRelativeTime(file.stat.mtime),
+				fileKind: getVaultFileKind(file),
+				isRecent: recentSet.has(file.path),
+				isStarred: starredSet.has(file.path),
 			});
 		}
 
 		return results.sort((a, b) => b.score - a.score).slice(0, limit);
 	}
 
+	private matchesExtFilter(file: TFile, extFilters: string[]): boolean {
+		if (extFilters.length === 0) return true;
+		return extFilters.includes(file.extension.toLowerCase());
+	}
+
 	private async matchesFilters(file: TFile, options: FileSearchOptions): Promise<boolean> {
+		if (file.extension !== "md") {
+			return options.tags.length === 0 && options.properties.length === 0;
+		}
+
 		const cache = this.app.metadataCache.getFileCache(file);
 		if (!cache) return options.tags.length === 0 && options.properties.length === 0;
 

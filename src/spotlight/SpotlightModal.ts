@@ -1,8 +1,8 @@
 import { App, Modal, TFile, setIcon } from "obsidian";
 import type VaultSpotlightPlugin from "../main";
 import { FileSearcher } from "../search/FileSearcher";
-import { ContentSearcher } from "../search/ContentSearcher";
 import { highlightMatches, tokenizeQuery } from "../search/fuzzy";
+import { iconForFileKind, type VaultFileKind } from "../search/vaultFiles";
 
 type ResultItem =
 	| {
@@ -11,7 +11,9 @@ type ResultItem =
 			score: number;
 			matchIndices: number[];
 			modifiedLabel: string;
+			fileKind: VaultFileKind;
 			isRecent: boolean;
+			isStarred: boolean;
 	  }
 	| {
 			kind: "content";
@@ -19,6 +21,7 @@ type ResultItem =
 			line: number;
 			snippet: string;
 			score: number;
+			engine: "ripgrep" | "vault" | "canvas";
 	  };
 
 export class SpotlightModal extends Modal {
@@ -35,7 +38,6 @@ export class SpotlightModal extends Modal {
 	private searchGeneration = 0;
 	private isLoading = false;
 	private fileSearcher: FileSearcher;
-	private contentSearcher: ContentSearcher;
 	private initialQuery: string;
 
 	constructor(
@@ -45,7 +47,6 @@ export class SpotlightModal extends Modal {
 	) {
 		super(app);
 		this.fileSearcher = new FileSearcher(app);
-		this.contentSearcher = new ContentSearcher(app);
 		this.initialQuery = initialQuery;
 	}
 
@@ -84,7 +85,7 @@ export class SpotlightModal extends Modal {
 			const cta = contentEl.createDiv({ cls: "vault-spotlight-pro-cta" });
 			cta.createDiv({
 				cls: "vault-spotlight-pro-cta-text",
-				text: "Unlock content search, batch open, and saved commands.",
+				text: "Unlock ripgrep search, starred pins, canvas/PDF, batch open, and more.",
 			});
 			const link = cta.createEl("a", {
 				cls: "vault-spotlight-pro-btn",
@@ -120,6 +121,10 @@ export class SpotlightModal extends Modal {
 				evt.preventDefault();
 				void this.saveCustomSearch();
 			});
+			this.scope.register(["Mod"], "d", (evt) => {
+				evt.preventDefault();
+				this.toggleStarSelected();
+			});
 		}
 
 		this.inputEl.focus();
@@ -141,7 +146,11 @@ export class SpotlightModal extends Modal {
 		if (isPro) {
 			this.hintEl.appendText(" · ");
 			this.hintEl.createEl("code", { text: "> phrase" });
-			this.hintEl.appendText(" for content · Tab to switch modes");
+			this.hintEl.appendText(" · ");
+			this.hintEl.createEl("code", { text: "ext:pdf" });
+			this.hintEl.appendText(" · ");
+			this.hintEl.createEl("code", { text: "Ctrl+D" });
+			this.hintEl.appendText(" star");
 		}
 	}
 
@@ -156,11 +165,12 @@ export class SpotlightModal extends Modal {
 		const parsed = tokenizeQuery(query);
 		const isContent = parsed.contentMode;
 		const isEmptyQuery = query.trim().length === 0;
+		const isPro = this.plugin.settings.isPro;
 
 		this.isLoading = true;
 		this.renderLoading();
 
-		if (isContent && !this.plugin.settings.isPro) {
+		if (isContent && !isPro) {
 			this.modeBadgeEl.setText("Pro");
 			this.modeBadgeEl.removeClass("is-content");
 			this.modeBadgeEl.addClass("is-pro");
@@ -186,7 +196,11 @@ export class SpotlightModal extends Modal {
 
 		if (isContent) {
 			const text = parsed.textTokens.join(" ");
-			const contentResults = await this.contentSearcher.search(text);
+			const contentResults = await this.plugin.contentSearcher.search(text, {
+				useRipgrep: isPro,
+				ripgrepCommand: this.plugin.settings.ripgrepCommand,
+				includeCanvas: isPro && this.plugin.settings.includeCanvas,
+			});
 			if (generation !== this.searchGeneration) return;
 			this.items = contentResults.map((r) => ({
 				kind: "content" as const,
@@ -194,15 +208,19 @@ export class SpotlightModal extends Modal {
 				line: r.line,
 				snippet: r.snippet,
 				score: r.score,
+				engine: r.engine,
 			}));
 		} else {
-			const recentSet = new Set(this.plugin.settings.recentPaths);
 			const fileResults = await this.fileSearcher.search({
 				textTokens: parsed.textTokens,
 				tags: parsed.tags,
 				properties: parsed.properties,
+				extFilters: isPro ? parsed.extFilters : [],
 				recentPaths: this.plugin.settings.recentPaths,
-				limit: isEmptyQuery ? 30 : 50,
+				starredPaths: isPro ? this.plugin.settings.starredPaths : [],
+				includeCanvas: isPro && this.plugin.settings.includeCanvas,
+				includePdf: isPro && this.plugin.settings.includePdf,
+				limit: isEmptyQuery ? 40 : 50,
 			});
 			if (generation !== this.searchGeneration) return;
 			this.items = fileResults.map((r) => ({
@@ -211,7 +229,9 @@ export class SpotlightModal extends Modal {
 				score: r.score,
 				matchIndices: r.matchIndices,
 				modifiedLabel: r.modifiedLabel,
-				isRecent: recentSet.has(r.file.path),
+				fileKind: r.fileKind,
+				isRecent: r.isRecent,
+				isStarred: r.isStarred,
 			}));
 		}
 
@@ -219,6 +239,13 @@ export class SpotlightModal extends Modal {
 		this.selectedIndex = 0;
 		this.renderResults();
 		this.updateStatus(this.items.length);
+	}
+
+	private getBrowseSection(item: ResultItem): string | null {
+		if (item.kind !== "file" || this.inputEl.value.trim().length > 0) return null;
+		if (item.isStarred) return "Starred";
+		if (item.isRecent) return "Recent";
+		return "All notes";
 	}
 
 	private renderLoading(): void {
@@ -253,7 +280,7 @@ export class SpotlightModal extends Modal {
 				);
 			} else {
 				this.renderEmptyState(
-					"search-x",
+					"search",
 					"No matches found",
 					"Try a shorter query, fewer filters, or check your spelling."
 				);
@@ -262,20 +289,13 @@ export class SpotlightModal extends Modal {
 		}
 
 		const isEmptyQuery = this.inputEl.value.trim().length === 0;
-		const showSections =
-			isEmptyQuery &&
-			this.items[0]?.kind === "file" &&
-			this.items.some((i) => i.kind === "file" && i.isRecent);
-
 		let lastSection = "";
 
 		this.items.forEach((item, index) => {
-			if (showSections && item.kind === "file") {
-				const section = item.isRecent ? "Recent" : "All notes";
-				if (section !== lastSection) {
-					this.resultsEl.createDiv({ cls: "vault-spotlight-section-label", text: section });
-					lastSection = section;
-				}
+			const section = this.getBrowseSection(item);
+			if (section && section !== lastSection) {
+				this.resultsEl.createDiv({ cls: "vault-spotlight-section-label", text: section });
+				lastSection = section;
 			}
 
 			const row = this.resultsEl.createDiv({ cls: "vault-spotlight-item" });
@@ -290,7 +310,12 @@ export class SpotlightModal extends Modal {
 			}
 
 			const iconWrap = row.createDiv({ cls: "vault-spotlight-item-icon-wrap" });
-			setIcon(iconWrap, item.kind === "content" ? "text" : "file-text");
+			if (item.kind === "file") {
+				setIcon(iconWrap, iconForFileKind(item.fileKind));
+				row.toggleClass("is-starred", item.isStarred);
+			} else {
+				setIcon(iconWrap, item.file.extension === "canvas" ? "layout-dashboard" : "text");
+			}
 
 			const body = row.createDiv({ cls: "vault-spotlight-item-body" });
 			const titleRow = body.createDiv({ cls: "vault-spotlight-item-title-row" });
@@ -298,8 +323,16 @@ export class SpotlightModal extends Modal {
 
 			if (item.kind === "file") {
 				title.innerHTML = highlightMatches(item.file.basename, item.matchIndices);
-				if (item.isRecent && !isEmptyQuery) {
+				if (item.isStarred && !isEmptyQuery) {
+					titleRow.createSpan({ cls: "vault-spotlight-item-badge is-star", text: "Starred" });
+				} else if (item.isRecent && !isEmptyQuery) {
 					titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Recent" });
+				}
+				if (item.fileKind !== "markdown") {
+					titleRow.createSpan({
+						cls: "vault-spotlight-item-badge is-type",
+						text: item.fileKind.toUpperCase(),
+					});
 				}
 				if (this.plugin.settings.showModifiedTime) {
 					titleRow.createSpan({ cls: "vault-spotlight-item-time", text: item.modifiedLabel });
@@ -308,9 +341,23 @@ export class SpotlightModal extends Modal {
 				body.createDiv({ cls: "vault-spotlight-item-meta", text: folder });
 			} else {
 				title.setText(item.file.basename);
-				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: `Line ${item.line}` });
+				const engineLabel =
+					item.engine === "ripgrep" ? "Ripgrep" : item.engine === "canvas" ? "Canvas" : "Match";
+				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: `${engineLabel} · L${item.line}` });
 				body.createDiv({ cls: "vault-spotlight-item-snippet", text: item.snippet });
 				body.createDiv({ cls: "vault-spotlight-item-meta", text: item.file.path });
+			}
+
+			if (this.plugin.settings.isPro && item.kind === "file") {
+				const starBtn = row.createDiv({ cls: "vault-spotlight-star-btn" });
+				setIcon(starBtn, item.isStarred ? "star" : "star-off");
+				starBtn.setAttr("aria-label", item.isStarred ? "Unstar" : "Star");
+				starBtn.addEventListener("mousedown", (evt) => {
+					evt.preventDefault();
+					evt.stopPropagation();
+					this.plugin.toggleStar(item.file.path);
+					void this.runSearch();
+				});
 			}
 
 			row.addEventListener("mouseenter", () => {
@@ -318,6 +365,7 @@ export class SpotlightModal extends Modal {
 				this.updateSelectionHighlight();
 			});
 			row.addEventListener("mousedown", (evt) => {
+				if ((evt.target as HTMLElement).closest(".vault-spotlight-star-btn")) return;
 				evt.preventDefault();
 				this.selectedIndex = index;
 				void this.activateSelection();
@@ -351,6 +399,7 @@ export class SpotlightModal extends Modal {
 		this.addShortcut(shortcuts, ["↵"], "open");
 
 		if (this.plugin.settings.isPro) {
+			this.addShortcut(shortcuts, ["Ctrl", "D"], "star");
 			this.addShortcut(shortcuts, ["Ctrl", "Space"], "select");
 			this.addShortcut(shortcuts, ["Tab"], "mode");
 		}
@@ -397,6 +446,13 @@ export class SpotlightModal extends Modal {
 		this.updateStatus(this.items.length);
 	}
 
+	private toggleStarSelected(): void {
+		const item = this.items[this.selectedIndex];
+		if (!item || item.kind !== "file") return;
+		this.plugin.toggleStar(item.file.path);
+		void this.runSearch();
+	}
+
 	private async activateSelection(): Promise<void> {
 		const targets =
 			this.checkedPaths.size > 0
@@ -417,7 +473,7 @@ export class SpotlightModal extends Modal {
 	private async openItem(item: ResultItem, newTab: boolean): Promise<void> {
 		const leaf = this.app.workspace.getLeaf(newTab);
 		await leaf.openFile(item.file);
-		if (item.kind === "content") {
+		if (item.kind === "content" && item.file.extension === "md") {
 			const view = leaf.view;
 			if ("editor" in view && view.editor) {
 				view.editor.setCursor({ line: item.line - 1, ch: 0 });

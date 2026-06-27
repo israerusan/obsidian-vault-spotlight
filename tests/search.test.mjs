@@ -32,8 +32,10 @@ function tokenizeQuery(raw) {
 	const textTokens = [];
 	const tags = [];
 	const properties = [];
+	const extFilters = [];
 	for (const part of parts) {
-		if (part.startsWith("#") && part.length > 1) tags.push(part.slice(1).toLowerCase());
+		if (part.startsWith("ext:") && part.length > 4) extFilters.push(part.slice(4).toLowerCase());
+		else if (part.startsWith("#") && part.length > 1) tags.push(part.slice(1).toLowerCase());
 		else if (part.startsWith("@")) {
 			const prop = part.slice(1);
 			const colon = prop.indexOf(":");
@@ -41,7 +43,7 @@ function tokenizeQuery(raw) {
 			else properties.push({ key: prop.slice(0, colon).toLowerCase(), value: prop.slice(colon + 1).toLowerCase() || null });
 		} else textTokens.push(part.toLowerCase());
 	}
-	return { textTokens, tags, properties, contentMode };
+	return { textTokens, tags, properties, extFilters, contentMode };
 }
 
 const meeting = fuzzyMatch("meet", "Team Meeting Notes");
@@ -55,5 +57,9 @@ assert.equal(parsed.contentMode, true);
 assert.deepEqual(parsed.textTokens, ["project"]);
 assert.deepEqual(parsed.tags, ["work"]);
 assert.deepEqual(parsed.properties, [{ key: "status", value: "done" }]);
+
+const extParsed = tokenizeQuery("report ext:pdf ext:canvas");
+assert.deepEqual(extParsed.extFilters, ["pdf", "canvas"]);
+assert.deepEqual(extParsed.textTokens, ["report"]);
 
 console.log("search tests passed");

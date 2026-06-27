@@ -1,6 +1,5 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type VaultSpotlightPlugin from "./main";
-import { LicenseManager } from "./license/LicenseManager";
 
 export interface CustomSearch {
 	id: string;
@@ -14,9 +13,14 @@ export interface VaultSpotlightSettings {
 	licenseEmail: string;
 	purchaseUrl: string;
 	recentPaths: string[];
+	starredPaths: string[];
 	maxRecent: number;
+	maxStarred: number;
 	customSearches: CustomSearch[];
 	showModifiedTime: boolean;
+	ripgrepCommand: string;
+	includeCanvas: boolean;
+	includePdf: boolean;
 }
 
 export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
@@ -25,9 +29,14 @@ export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	licenseEmail: "",
 	purchaseUrl: "https://ivala6.gumroad.com/l/vault-spotlight",
 	recentPaths: [],
+	starredPaths: [],
 	maxRecent: 30,
+	maxStarred: 50,
 	customSearches: [],
 	showModifiedTime: true,
+	ripgrepCommand: "rg",
+	includeCanvas: true,
+	includePdf: true,
 };
 
 export class VaultSpotlightSettingTab extends PluginSettingTab {
@@ -64,7 +73,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 				text: `Pro active${this.plugin.settings.licenseEmail ? ` (${this.plugin.settings.licenseEmail})` : ""}.`,
 			});
 		} else {
-			status.createEl("p", { text: "Free tier active. Upgrade to unlock batch open, content search, and custom commands." });
+			status.createEl("p", { text: "Free tier active. Upgrade to unlock batch open, content search, and saved commands." });
 			const link = status.createEl("a", {
 				text: "Get Vault Spotlight Pro ($8)",
 				href: this.plugin.settings.purchaseUrl,
@@ -94,6 +103,71 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				})
 			);
+
+		containerEl.createEl("h3", { text: "Pro search" });
+
+		const proSearch = (name: string, desc: string, render: (setting: Setting) => void) => {
+			const setting = new Setting(containerEl).setName(name).setDesc(desc);
+			if (!this.plugin.settings.isPro) {
+				setting.settingEl.addClass("vault-spotlight-setting-locked");
+				setting.descEl.appendText(" (Pro)");
+				return;
+			}
+			render(setting);
+		};
+
+		proSearch(
+			"Ripgrep command",
+			"Faster content search when ripgrep (rg) is installed. Leave as rg if it's on your PATH.",
+			(setting) =>
+				setting.addText((text) =>
+					text
+						.setPlaceholder("rg")
+						.setValue(this.plugin.settings.ripgrepCommand)
+						.onChange(async (value) => {
+							this.plugin.settings.ripgrepCommand = value.trim() || "rg";
+							this.plugin.contentSearcher.setRipgrepCommand(this.plugin.settings.ripgrepCommand);
+							await this.plugin.saveSettings();
+						})
+				)
+		);
+
+		proSearch("Include Canvas files", "Search .canvas files by name and search text inside canvas nodes.", (setting) =>
+			setting.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.includeCanvas).onChange(async (value) => {
+					this.plugin.settings.includeCanvas = value;
+					await this.plugin.saveSettings();
+				})
+			)
+		);
+
+		proSearch("Include PDF files", "Show PDFs in file search (filename). PDF body text search is not supported.", (setting) =>
+			setting.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.includePdf).onChange(async (value) => {
+					this.plugin.settings.includePdf = value;
+					await this.plugin.saveSettings();
+				})
+			)
+		);
+
+		containerEl.createEl("h3", { text: "Starred files (Pro)" });
+		const starredList = containerEl.createDiv();
+		if (!this.plugin.settings.isPro) {
+			starredList.createEl("p", { text: "Pin important files with Ctrl+D in the spotlight." });
+		} else if (this.plugin.settings.starredPaths.length === 0) {
+			starredList.createEl("p", { text: "No starred files yet. Select a result and press Ctrl+D." });
+		} else {
+			for (const path of this.plugin.settings.starredPaths) {
+				const row = starredList.createDiv({ cls: "vault-spotlight-starred-row" });
+				row.createSpan({ text: path });
+				const btn = row.createEl("button", { text: "Remove" });
+				btn.addEventListener("click", async () => {
+					this.plugin.settings.starredPaths = this.plugin.settings.starredPaths.filter((p) => p !== path);
+					await this.plugin.saveSettings();
+					this.display();
+				});
+			}
+		}
 
 		containerEl.createEl("h3", { text: "Custom searches (Pro)" });
 		const customList = containerEl.createDiv();

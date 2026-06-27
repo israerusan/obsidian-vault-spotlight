@@ -6,13 +6,13 @@ import { ContentSearcher } from "./search/ContentSearcher";
 
 export default class VaultSpotlightPlugin extends Plugin {
 	settings: VaultSpotlightSettings = DEFAULT_SETTINGS;
-	private contentSearcher!: ContentSearcher;
+	contentSearcher!: ContentSearcher;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
 		await this.refreshLicense();
 
-		this.contentSearcher = new ContentSearcher(this.app);
+		this.contentSearcher = new ContentSearcher(this.app, this.settings.ripgrepCommand);
 
 		this.addRibbonIcon("search", "Vault Spotlight", () => this.openSpotlight());
 		this.addCommand({
@@ -22,18 +22,29 @@ export default class VaultSpotlightPlugin extends Plugin {
 			callback: () => this.openSpotlight(),
 		});
 
+		this.addCommand({
+			id: "toggle-star-current-file",
+			name: "Toggle star on current file",
+			checkCallback: (checking) => {
+				if (!this.settings.isPro) return false;
+				const file = this.app.workspace.getActiveFile();
+				if (!file) return false;
+				if (!checking) this.toggleStar(file.path);
+				return true;
+			},
+		});
+
 		for (const search of this.settings.customSearches) {
 			this.registerCustomSearchCommand(search);
 		}
 
+		this.registerEvent(this.app.vault.on("modify", () => this.contentSearcher.invalidate()));
+		this.registerEvent(this.app.vault.on("create", () => this.contentSearcher.invalidate()));
 		this.registerEvent(
-			this.app.vault.on("modify", () => this.contentSearcher.invalidate())
-		);
-		this.registerEvent(
-			this.app.vault.on("create", () => this.contentSearcher.invalidate())
-		);
-		this.registerEvent(
-			this.app.vault.on("delete", () => this.contentSearcher.invalidate())
+			this.app.vault.on("delete", (file) => {
+				this.contentSearcher.invalidate();
+				if ("path" in file) this.untrackPath(file.path);
+			})
 		);
 		this.registerEvent(
 			this.app.workspace.on("file-open", (file) => {
@@ -62,6 +73,30 @@ export default class VaultSpotlightPlugin extends Plugin {
 		const recent = this.settings.recentPaths.filter((p) => p !== path);
 		recent.unshift(path);
 		this.settings.recentPaths = recent.slice(0, this.settings.maxRecent);
+		void this.saveSettings();
+	}
+
+	toggleStar(path: string): boolean {
+		if (!this.settings.isPro) return false;
+		if (this.settings.starredPaths.includes(path)) {
+			this.settings.starredPaths = this.settings.starredPaths.filter((p) => p !== path);
+			void this.saveSettings();
+			return false;
+		}
+		const starred = this.settings.starredPaths.filter((p) => p !== path);
+		starred.unshift(path);
+		this.settings.starredPaths = starred.slice(0, this.settings.maxStarred);
+		void this.saveSettings();
+		return true;
+	}
+
+	isStarred(path: string): boolean {
+		return this.settings.starredPaths.includes(path);
+	}
+
+	private untrackPath(path: string): void {
+		this.settings.recentPaths = this.settings.recentPaths.filter((p) => p !== path);
+		this.settings.starredPaths = this.settings.starredPaths.filter((p) => p !== path);
 		void this.saveSettings();
 	}
 

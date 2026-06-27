@@ -67,6 +67,7 @@ export function tokenizeQuery(raw: string): {
 	textTokens: string[];
 	tags: string[];
 	properties: Array<{ key: string; value: string | null }>;
+	extFilters: string[];
 	contentMode: boolean;
 } {
 	const trimmed = raw.trim();
@@ -76,9 +77,12 @@ export function tokenizeQuery(raw: string): {
 	const textTokens: string[] = [];
 	const tags: string[] = [];
 	const properties: Array<{ key: string; value: string | null }> = [];
+	const extFilters: string[] = [];
 
 	for (const part of parts) {
-		if (part.startsWith("#") && part.length > 1) {
+		if (part.startsWith("ext:") && part.length > 4) {
+			extFilters.push(part.slice(4).toLowerCase());
+		} else if (part.startsWith("#") && part.length > 1) {
 			tags.push(part.slice(1).toLowerCase());
 		} else if (part.startsWith("@")) {
 			const prop = part.slice(1);
@@ -95,5 +99,5 @@ export function tokenizeQuery(raw: string): {
 		}
 	}
 
-	return { textTokens, tags, properties, contentMode };
+	return { textTokens, tags, properties, extFilters, contentMode };
 }
