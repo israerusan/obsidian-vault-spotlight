@@ -111,7 +111,8 @@ export class FileSearcher {
 		}
 
 		for (const prop of options.properties) {
-			const fm = cache.frontmatter ?? {};
+			const fm = cache.frontmatter as Record<string, unknown> | null | undefined;
+			if (!fm) return false;
 			const raw: unknown = fm[prop.key];
 			if (raw === undefined || raw === null) return false;
 			const value = String(raw).toLowerCase();

@@ -1,4 +1,4 @@
-import { App, TFile } from "obsidian";
+import { App } from "obsidian";
 import type { ContentSearchResult } from "./ContentSearcher";
 
 interface CanvasNode {

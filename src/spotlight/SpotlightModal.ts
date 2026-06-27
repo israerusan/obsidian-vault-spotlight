@@ -2,6 +2,7 @@ import { App, MarkdownView, Modal, TFile, setIcon } from "obsidian";
 import type VaultSpotlightPlugin from "../main";
 import { FileSearcher } from "../search/FileSearcher";
 import { renderHighlightedText, tokenizeQuery } from "../search/fuzzy";
+import { SaveSearchPromptModal } from "./SaveSearchPromptModal";
 import { iconForFileKind, type VaultFileKind } from "../search/vaultFiles";
 
 type ResultItem =
@@ -119,7 +120,7 @@ export class SpotlightModal extends Modal {
 			});
 			this.scope.register(["Mod"], "s", (evt) => {
 				evt.preventDefault();
-				void this.saveCustomSearch();
+				this.saveCustomSearch();
 			});
 			this.scope.register(["Mod"], "d", (evt) => {
 				evt.preventDefault();
@@ -483,20 +484,20 @@ export class SpotlightModal extends Modal {
 		}
 	}
 
-	private async saveCustomSearch(): Promise<void> {
+	private saveCustomSearch(): void {
 		const query = this.inputEl.value.trim();
 		if (!query) return;
-		const name = prompt("Name this custom search:");
-		if (!name) return;
 
-		const entry = {
-			id: crypto.randomUUID(),
-			name,
-			query,
-		};
-		this.plugin.settings.customSearches.push(entry);
-		await this.plugin.saveSettings();
-		this.plugin.registerCustomSearchCommand(entry);
+		new SaveSearchPromptModal(this.app, (name) => {
+			const entry = {
+				id: crypto.randomUUID(),
+				name,
+				query,
+			};
+			this.plugin.settings.customSearches.push(entry);
+			void this.plugin.saveSettings();
+			this.plugin.registerCustomSearchCommand(entry);
+		}).open();
 	}
 
 	private onKeydown(evt: KeyboardEvent): void {

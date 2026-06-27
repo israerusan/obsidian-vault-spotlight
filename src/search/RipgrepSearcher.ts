@@ -1,9 +1,28 @@
 import { App, TFile } from "obsidian";
-import { execFile } from "child_process";
-import { promisify } from "util";
 import type { ContentSearchResult } from "./ContentSearcher";
 
-const execFileAsync = promisify(execFile);
+interface ExecResult {
+	stdout: string;
+	stderr: string;
+}
+
+type ExecFileFn = (
+	command: string,
+	args: string[],
+	options: Record<string, unknown>
+) => Promise<ExecResult>;
+
+function getExecFileAsync(): ExecFileFn | null {
+	try {
+		const req = (globalThis as { require?: (id: string) => unknown }).require;
+		if (!req) return null;
+		const childProcess = req("child_process") as { execFile: (...args: unknown[]) => void };
+		const util = req("util") as { promisify: (fn: unknown) => ExecFileFn };
+		return util.promisify(childProcess.execFile);
+	} catch {
+		return null;
+	}
+}
 
 export class RipgrepSearcher {
 	private available: boolean | null = null;
@@ -15,6 +34,11 @@ export class RipgrepSearcher {
 
 	async isAvailable(): Promise<boolean> {
 		if (this.available !== null) return this.available;
+		const execFileAsync = getExecFileAsync();
+		if (!execFileAsync) {
+			this.available = false;
+			return false;
+		}
 		try {
 			await execFileAsync(this.command, ["--version"], { timeout: 3000, windowsHide: true });
 			this.available = true;
@@ -29,7 +53,8 @@ export class RipgrepSearcher {
 		options: { includeCanvas: boolean; limit: number }
 	): Promise<ContentSearchResult[]> {
 		if (!query.trim()) return [];
-		if (!(await this.isAvailable())) return [];
+		const execFileAsync = getExecFileAsync();
+		if (!execFileAsync || !(await this.isAvailable())) return [];
 
 		const vaultPath = (this.app.vault.adapter as { basePath?: string }).basePath;
 		if (!vaultPath) return [];

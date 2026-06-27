@@ -17,8 +17,7 @@ export default class VaultSpotlightPlugin extends Plugin {
 		this.addRibbonIcon("search", "Vault Spotlight", () => this.openSpotlight());
 		this.addCommand({
 			id: "open-spotlight",
-			name: "Open Vault Spotlight",
-			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "o" }],
+			name: "Open spotlight",
 			callback: () => this.openSpotlight(),
 		});
 
@@ -64,7 +63,7 @@ export default class VaultSpotlightPlugin extends Plugin {
 	registerCustomSearchCommand(search: CustomSearch): void {
 		this.addCommand({
 			id: `custom-search-${search.id}`,
-			name: `Spotlight: ${search.name}`,
+			name: search.name,
 			callback: () => this.openSpotlight(search.query),
 		});
 	}
@@ -114,8 +113,10 @@ export default class VaultSpotlightPlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		const data = (await this.loadData()) as Partial<VaultSpotlightSettings> | null;
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+		const data: unknown = await this.loadData();
+		const loaded =
+			data !== null && typeof data === "object" ? (data as Partial<VaultSpotlightSettings>) : {};
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
 	}
 
 	async saveSettings(): Promise<void> {

@@ -58,10 +58,9 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 				text
 					.setPlaceholder("payload.signature")
 					.setValue(this.plugin.settings.licenseKey)
-					.onChange(async (value) => {
+					.onChange((value) => {
 						this.plugin.settings.licenseKey = value;
-						await this.plugin.refreshLicense();
-						this.display();
+						void this.plugin.refreshLicense().then(() => this.display());
 					})
 			);
 
@@ -73,7 +72,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 		} else {
 			status.createEl("p", { text: "Free tier active. Upgrade to unlock batch open, content search, and saved commands." });
 			const link = status.createEl("a", {
-				text: "Get Vault Spotlight Pro on Buy Me a Coffee",
+				text: "Get Pro on Buy Me a Coffee",
 				href: this.plugin.settings.purchaseUrl,
 			});
 			link.setAttr("target", "_blank");
@@ -86,9 +85,9 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 				text
 					.setPlaceholder("https://your-store.com/product")
 					.setValue(this.plugin.settings.purchaseUrl)
-					.onChange(async (value) => {
+					.onChange((value) => {
 						this.plugin.settings.purchaseUrl = value.trim() || DEFAULT_SETTINGS.purchaseUrl;
-						await this.plugin.saveSettings();
+						void this.plugin.saveSettings();
 					})
 			);
 
@@ -96,9 +95,9 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			.setName("Show modified time")
 			.setDesc("Display relative modified time in search results.")
 			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.showModifiedTime).onChange(async (value) => {
+				toggle.setValue(this.plugin.settings.showModifiedTime).onChange((value) => {
 					this.plugin.settings.showModifiedTime = value;
-					await this.plugin.saveSettings();
+					void this.plugin.saveSettings();
 				})
 			);
 
@@ -122,28 +121,28 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 					text
 						.setPlaceholder("rg")
 						.setValue(this.plugin.settings.ripgrepCommand)
-						.onChange(async (value) => {
+						.onChange((value) => {
 							this.plugin.settings.ripgrepCommand = value.trim() || "rg";
 							this.plugin.contentSearcher.setRipgrepCommand(this.plugin.settings.ripgrepCommand);
-							await this.plugin.saveSettings();
+							void this.plugin.saveSettings();
 						})
 				)
 		);
 
 		proSearch("Include Canvas files", "Search .canvas files by name and search text inside canvas nodes.", (setting) =>
 			setting.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.includeCanvas).onChange(async (value) => {
+				toggle.setValue(this.plugin.settings.includeCanvas).onChange((value) => {
 					this.plugin.settings.includeCanvas = value;
-					await this.plugin.saveSettings();
+					void this.plugin.saveSettings();
 				})
 			)
 		);
 
 		proSearch("Include PDF files", "Show PDFs in file search (filename). PDF body text search is not supported.", (setting) =>
 			setting.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.includePdf).onChange(async (value) => {
+				toggle.setValue(this.plugin.settings.includePdf).onChange((value) => {
 					this.plugin.settings.includePdf = value;
-					await this.plugin.saveSettings();
+					void this.plugin.saveSettings();
 				})
 			)
 		);
@@ -159,10 +158,9 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 				const row = starredList.createDiv({ cls: "vault-spotlight-starred-row" });
 				row.createSpan({ text: path });
 				const btn = row.createEl("button", { text: "Remove" });
-				btn.addEventListener("click", async () => {
+				btn.addEventListener("click", () => {
 					this.plugin.settings.starredPaths = this.plugin.settings.starredPaths.filter((p) => p !== path);
-					await this.plugin.saveSettings();
-					this.display();
+					void this.plugin.saveSettings().then(() => this.display());
 				});
 			}
 		}

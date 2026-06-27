@@ -2270,7 +2270,7 @@ __export(main_exports, {
   default: () => VaultSpotlightPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian4 = require("obsidian");
+var import_obsidian5 = require("obsidian");
 
 // src/settings.ts
 var import_obsidian = require("obsidian");
@@ -2298,10 +2298,9 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     new import_obsidian.Setting(containerEl).setName("License key").setDesc("Enter your Pro license key. Verified offline \u2014 no account or server required.").addText(
-      (text) => text.setPlaceholder("payload.signature").setValue(this.plugin.settings.licenseKey).onChange(async (value) => {
+      (text) => text.setPlaceholder("payload.signature").setValue(this.plugin.settings.licenseKey).onChange((value) => {
         this.plugin.settings.licenseKey = value;
-        await this.plugin.refreshLicense();
-        this.display();
+        void this.plugin.refreshLicense().then(() => this.display());
       })
     );
     const status = containerEl.createDiv({ cls: "vault-spotlight-license-status" });
@@ -2312,21 +2311,21 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
     } else {
       status.createEl("p", { text: "Free tier active. Upgrade to unlock batch open, content search, and saved commands." });
       const link = status.createEl("a", {
-        text: "Get Vault Spotlight Pro on Buy Me a Coffee",
+        text: "Get Pro on Buy Me a Coffee",
         href: this.plugin.settings.purchaseUrl
       });
       link.setAttr("target", "_blank");
     }
     new import_obsidian.Setting(containerEl).setName("Purchase page URL").setDesc("Link shown for Pro upgrades. Defaults to Buy Me a Coffee.").addText(
-      (text) => text.setPlaceholder("https://your-store.com/product").setValue(this.plugin.settings.purchaseUrl).onChange(async (value) => {
+      (text) => text.setPlaceholder("https://your-store.com/product").setValue(this.plugin.settings.purchaseUrl).onChange((value) => {
         this.plugin.settings.purchaseUrl = value.trim() || DEFAULT_SETTINGS.purchaseUrl;
-        await this.plugin.saveSettings();
+        void this.plugin.saveSettings();
       })
     );
     new import_obsidian.Setting(containerEl).setName("Show modified time").setDesc("Display relative modified time in search results.").addToggle(
-      (toggle) => toggle.setValue(this.plugin.settings.showModifiedTime).onChange(async (value) => {
+      (toggle) => toggle.setValue(this.plugin.settings.showModifiedTime).onChange((value) => {
         this.plugin.settings.showModifiedTime = value;
-        await this.plugin.saveSettings();
+        void this.plugin.saveSettings();
       })
     );
     new import_obsidian.Setting(containerEl).setName("Pro search").setHeading();
@@ -2343,10 +2342,10 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
       "Ripgrep command",
       "Faster content search when ripgrep (rg) is installed. Leave as rg if it's on your PATH.",
       (setting) => setting.addText(
-        (text) => text.setPlaceholder("rg").setValue(this.plugin.settings.ripgrepCommand).onChange(async (value) => {
+        (text) => text.setPlaceholder("rg").setValue(this.plugin.settings.ripgrepCommand).onChange((value) => {
           this.plugin.settings.ripgrepCommand = value.trim() || "rg";
           this.plugin.contentSearcher.setRipgrepCommand(this.plugin.settings.ripgrepCommand);
-          await this.plugin.saveSettings();
+          void this.plugin.saveSettings();
         })
       )
     );
@@ -2354,9 +2353,9 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
       "Include Canvas files",
       "Search .canvas files by name and search text inside canvas nodes.",
       (setting) => setting.addToggle(
-        (toggle) => toggle.setValue(this.plugin.settings.includeCanvas).onChange(async (value) => {
+        (toggle) => toggle.setValue(this.plugin.settings.includeCanvas).onChange((value) => {
           this.plugin.settings.includeCanvas = value;
-          await this.plugin.saveSettings();
+          void this.plugin.saveSettings();
         })
       )
     );
@@ -2364,9 +2363,9 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
       "Include PDF files",
       "Show PDFs in file search (filename). PDF body text search is not supported.",
       (setting) => setting.addToggle(
-        (toggle) => toggle.setValue(this.plugin.settings.includePdf).onChange(async (value) => {
+        (toggle) => toggle.setValue(this.plugin.settings.includePdf).onChange((value) => {
           this.plugin.settings.includePdf = value;
-          await this.plugin.saveSettings();
+          void this.plugin.saveSettings();
         })
       )
     );
@@ -2381,10 +2380,9 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
         const row = starredList.createDiv({ cls: "vault-spotlight-starred-row" });
         row.createSpan({ text: path });
         const btn = row.createEl("button", { text: "Remove" });
-        btn.addEventListener("click", async () => {
+        btn.addEventListener("click", () => {
           this.plugin.settings.starredPaths = this.plugin.settings.starredPaths.filter((p) => p !== path);
-          await this.plugin.saveSettings();
-          this.display();
+          void this.plugin.saveSettings().then(() => this.display());
         });
       }
     }
@@ -2403,7 +2401,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
 };
 
 // src/spotlight/SpotlightModal.ts
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 
 // src/search/FileSearcher.ts
 var import_obsidian2 = require("obsidian");
@@ -2589,7 +2587,6 @@ var FileSearcher = class {
     return extFilters.includes(file.extension.toLowerCase());
   }
   async matchesFilters(file, options) {
-    var _a;
     if (file.extension !== "md") {
       return options.tags.length === 0 && options.properties.length === 0;
     }
@@ -2602,7 +2599,8 @@ var FileSearcher = class {
       }
     }
     for (const prop of options.properties) {
-      const fm = (_a = cache.frontmatter) != null ? _a : {};
+      const fm = cache.frontmatter;
+      if (!fm) return false;
       const raw = fm[prop.key];
       if (raw === void 0 || raw === null) return false;
       const value = String(raw).toLowerCase();
@@ -2624,8 +2622,47 @@ function formatRelativeTime(mtime) {
   return new Date(mtime).toLocaleDateString();
 }
 
+// src/spotlight/SaveSearchPromptModal.ts
+var import_obsidian3 = require("obsidian");
+var SaveSearchPromptModal = class extends import_obsidian3.Modal {
+  constructor(app, onSubmit) {
+    super(app);
+    this.onSubmit = onSubmit;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    new import_obsidian3.Setting(contentEl).setName("Name this search").setHeading();
+    new import_obsidian3.Setting(contentEl).setName("Search name").addText((text) => {
+      this.inputEl = text.inputEl;
+      text.setPlaceholder("Weekly review notes").onChange(() => {
+      });
+    }).addButton(
+      (btn) => btn.setButtonText("Save").setCta().onClick(() => {
+        const name = this.inputEl.value.trim();
+        if (!name) return;
+        this.onSubmit(name);
+        this.close();
+      })
+    );
+    this.inputEl.focus();
+    this.inputEl.addEventListener("keydown", (evt) => {
+      if (evt.key === "Enter") {
+        evt.preventDefault();
+        const name = this.inputEl.value.trim();
+        if (!name) return;
+        this.onSubmit(name);
+        this.close();
+      }
+    });
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+
 // src/spotlight/SpotlightModal.ts
-var SpotlightModal = class extends import_obsidian3.Modal {
+var SpotlightModal = class extends import_obsidian4.Modal {
   constructor(app, plugin, initialQuery = "") {
     super(app);
     this.plugin = plugin;
@@ -2649,7 +2686,7 @@ var SpotlightModal = class extends import_obsidian3.Modal {
     this.modeBadgeEl = titleRow.createSpan({ cls: "vault-spotlight-mode-badge", text: "Files" });
     const inputWrap = header.createDiv({ cls: "vault-spotlight-input-wrap" });
     const searchIcon = inputWrap.createSpan({ cls: "vault-spotlight-search-icon" });
-    (0, import_obsidian3.setIcon)(searchIcon, "search");
+    (0, import_obsidian4.setIcon)(searchIcon, "search");
     this.inputEl = inputWrap.createEl("input", {
       type: "text",
       placeholder: "Search notes, tags, or properties\u2026",
@@ -2697,7 +2734,7 @@ var SpotlightModal = class extends import_obsidian3.Modal {
       });
       this.scope.register(["Mod"], "s", (evt) => {
         evt.preventDefault();
-        void this.saveCustomSearch();
+        this.saveCustomSearch();
       });
       this.scope.register(["Mod"], "d", (evt) => {
         evt.preventDefault();
@@ -2826,7 +2863,7 @@ var SpotlightModal = class extends import_obsidian3.Modal {
     this.resultsEl.removeClass("vault-spotlight-loading");
     const empty = this.resultsEl.createDiv({ cls: "vault-spotlight-empty" });
     const iconWrap = empty.createDiv({ cls: "vault-spotlight-empty-icon" });
-    (0, import_obsidian3.setIcon)(iconWrap, icon);
+    (0, import_obsidian4.setIcon)(iconWrap, icon);
     empty.createDiv({ cls: "vault-spotlight-empty-title", text: title });
     empty.createDiv({ cls: "vault-spotlight-empty-desc", text: desc });
   }
@@ -2865,15 +2902,15 @@ var SpotlightModal = class extends import_obsidian3.Modal {
       if (this.plugin.settings.isPro) {
         const check = row.createDiv({ cls: "vault-spotlight-check" });
         if (this.checkedPaths.has(item.file.path)) {
-          (0, import_obsidian3.setIcon)(check, "check");
+          (0, import_obsidian4.setIcon)(check, "check");
         }
       }
       const iconWrap = row.createDiv({ cls: "vault-spotlight-item-icon-wrap" });
       if (item.kind === "file") {
-        (0, import_obsidian3.setIcon)(iconWrap, iconForFileKind(item.fileKind));
+        (0, import_obsidian4.setIcon)(iconWrap, iconForFileKind(item.fileKind));
         row.toggleClass("is-starred", item.isStarred);
       } else {
-        (0, import_obsidian3.setIcon)(iconWrap, item.file.extension === "canvas" ? "layout-dashboard" : "text");
+        (0, import_obsidian4.setIcon)(iconWrap, item.file.extension === "canvas" ? "layout-dashboard" : "text");
       }
       const body = row.createDiv({ cls: "vault-spotlight-item-body" });
       const titleRow = body.createDiv({ cls: "vault-spotlight-item-title-row" });
@@ -2905,7 +2942,7 @@ var SpotlightModal = class extends import_obsidian3.Modal {
       }
       if (this.plugin.settings.isPro && item.kind === "file") {
         const starBtn = row.createDiv({ cls: "vault-spotlight-star-btn" });
-        (0, import_obsidian3.setIcon)(starBtn, item.isStarred ? "star" : "star-off");
+        (0, import_obsidian4.setIcon)(starBtn, item.isStarred ? "star" : "star-off");
         starBtn.setAttr("aria-label", item.isStarred ? "Unstar" : "Star");
         starBtn.addEventListener("mousedown", (evt) => {
           evt.preventDefault();
@@ -3008,7 +3045,7 @@ var SpotlightModal = class extends import_obsidian3.Modal {
   async openItem(item, newTab) {
     const leaf = this.app.workspace.getLeaf(newTab);
     await leaf.openFile(item.file);
-    if (item.kind === "content" && item.file.extension === "md" && leaf.view instanceof import_obsidian3.MarkdownView) {
+    if (item.kind === "content" && item.file.extension === "md" && leaf.view instanceof import_obsidian4.MarkdownView) {
       const editor = leaf.view.editor;
       editor.setCursor({ line: item.line - 1, ch: 0 });
       editor.scrollIntoView(
@@ -3017,19 +3054,19 @@ var SpotlightModal = class extends import_obsidian3.Modal {
       );
     }
   }
-  async saveCustomSearch() {
+  saveCustomSearch() {
     const query = this.inputEl.value.trim();
     if (!query) return;
-    const name = prompt("Name this custom search:");
-    if (!name) return;
-    const entry = {
-      id: crypto.randomUUID(),
-      name,
-      query
-    };
-    this.plugin.settings.customSearches.push(entry);
-    await this.plugin.saveSettings();
-    this.plugin.registerCustomSearchCommand(entry);
+    new SaveSearchPromptModal(this.app, (name) => {
+      const entry = {
+        id: crypto.randomUUID(),
+        name,
+        query
+      };
+      this.plugin.settings.customSearches.push(entry);
+      void this.plugin.saveSettings();
+      this.plugin.registerCustomSearchCommand(entry);
+    }).open();
   }
   onKeydown(evt) {
     if (evt.key === "Tab" && this.plugin.settings.isPro) {
@@ -3052,9 +3089,6 @@ var import_tweetnacl = __toESM(require_nacl_fast(), 1);
 var LICENSE_PUBLIC_KEY = "8ybB+nBmz0Tiz5RYCYJsOgEW5+YmROAumf3HHPeC1E0=";
 
 // src/license/LicenseManager.ts
-function verifyDetached(message, signature, publicKey) {
-  return import_tweetnacl.default.sign.detached.verify(message, signature, publicKey);
-}
 var _LicenseManager = class _LicenseManager {
   static verify(licenseKey) {
     const trimmed = licenseKey.trim();
@@ -3069,7 +3103,7 @@ var _LicenseManager = class _LicenseManager {
       const payloadBytes = base64ToBytes(parts[0]);
       const signature = base64ToBytes(parts[1]);
       const publicKey = base64ToBytes(LICENSE_PUBLIC_KEY);
-      if (!verifyDetached(payloadBytes, signature, publicKey)) {
+      if (!import_tweetnacl.default.sign.detached.verify(payloadBytes, signature, publicKey)) {
         return { valid: false, error: "Invalid license signature." };
       }
       const payload = JSON.parse(new TextDecoder().decode(payloadBytes));
@@ -3096,9 +3130,17 @@ function base64ToBytes(value) {
 }
 
 // src/search/RipgrepSearcher.ts
-var import_child_process = require("child_process");
-var import_util = require("util");
-var execFileAsync = (0, import_util.promisify)(import_child_process.execFile);
+function getExecFileAsync() {
+  try {
+    const req = globalThis.require;
+    if (!req) return null;
+    const childProcess = req("child_process");
+    const util = req("util");
+    return util.promisify(childProcess.execFile);
+  } catch (e) {
+    return null;
+  }
+}
 var RipgrepSearcher = class {
   constructor(app, command) {
     this.app = app;
@@ -3107,6 +3149,11 @@ var RipgrepSearcher = class {
   }
   async isAvailable() {
     if (this.available !== null) return this.available;
+    const execFileAsync = getExecFileAsync();
+    if (!execFileAsync) {
+      this.available = false;
+      return false;
+    }
     try {
       await execFileAsync(this.command, ["--version"], { timeout: 3e3, windowsHide: true });
       this.available = true;
@@ -3117,7 +3164,8 @@ var RipgrepSearcher = class {
   }
   async search(query, options) {
     if (!query.trim()) return [];
-    if (!await this.isAvailable()) return [];
+    const execFileAsync = getExecFileAsync();
+    if (!execFileAsync || !await this.isAvailable()) return [];
     const vaultPath = this.app.vault.adapter.basePath;
     if (!vaultPath) return [];
     const args = [
@@ -3318,7 +3366,7 @@ var ContentSearcher = class {
 };
 
 // src/main.ts
-var VaultSpotlightPlugin = class extends import_obsidian4.Plugin {
+var VaultSpotlightPlugin = class extends import_obsidian5.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
@@ -3330,8 +3378,7 @@ var VaultSpotlightPlugin = class extends import_obsidian4.Plugin {
     this.addRibbonIcon("search", "Vault Spotlight", () => this.openSpotlight());
     this.addCommand({
       id: "open-spotlight",
-      name: "Open Vault Spotlight",
-      hotkeys: [{ modifiers: ["Mod", "Shift"], key: "o" }],
+      name: "Open spotlight",
       callback: () => this.openSpotlight()
     });
     this.addCommand({
@@ -3371,7 +3418,7 @@ var VaultSpotlightPlugin = class extends import_obsidian4.Plugin {
   registerCustomSearchCommand(search) {
     this.addCommand({
       id: `custom-search-${search.id}`,
-      name: `Spotlight: ${search.name}`,
+      name: search.name,
       callback: () => this.openSpotlight(search.query)
     });
   }
@@ -3417,7 +3464,8 @@ var VaultSpotlightPlugin = class extends import_obsidian4.Plugin {
   }
   async loadSettings() {
     const data = await this.loadData();
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+    const loaded = data !== null && typeof data === "object" ? data : {};
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
   }
   async saveSettings() {
     await this.saveData(this.settings);
