@@ -5,7 +5,7 @@
 	"minAppVersion": "1.5.0",
 	"description": "Spotlight-style vault launcher with fuzzy search, recent files, and property filters. Pro unlocks ripgrep search, starred pins, canvas/PDF, batch open, and custom commands.",
 	"author": "iavil",
-	"authorUrl": "https://github.com/iavil",
+	"authorUrl": "https://github.com/israerusan",
 	"fundingUrl": "https://ivala6.gumroad.com/l/vault-spotlight",
 	"isDesktopOnly": false
 }
