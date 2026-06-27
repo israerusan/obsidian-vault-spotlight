@@ -14,13 +14,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - run: npm ci
-      - run: npm run build
+      - name: Verify release files exist
+        run: test -f main.js && test -f manifest.json && test -f styles.css
 
       - uses: softprops/action-gh-release@v2
         with:
