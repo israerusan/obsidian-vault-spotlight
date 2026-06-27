@@ -69,7 +69,7 @@ export class SpotlightModal extends Modal {
 		if (!this.plugin.settings.isPro) {
 			const cta = contentEl.createDiv({ cls: "vault-spotlight-pro-cta" });
 			cta.createSpan({ text: "Pro: batch open, content search, custom commands — " });
-			const link = cta.createEl("a", { text: "$8 one-time", href: "https://iavil.gumroad.com/l/vault-spotlight" });
+			const link = cta.createEl("a", { text: "$8 one-time", href: "https://ivala6.gumroad.com/l/vault-spotlight" });
 			link.setAttr("target", "_blank");
 		}
 

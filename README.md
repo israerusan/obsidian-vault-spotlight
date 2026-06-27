@@ -15,7 +15,7 @@ Spotlight-style vault launcher for [Obsidian](https://obsidian.md). Fuzzy file s
 - **Batch open** — multi-select with `Ctrl+Space`, open all at once
 - **Custom search commands** — save queries as palette commands (`Ctrl+S` in spotlight)
 
-Purchase: [Gumroad — Vault Spotlight Pro](https://iavil.gumroad.com/l/vault-spotlight)
+Purchase: [Gumroad — Vault Spotlight Pro](https://ivala6.gumroad.com/l/vault-spotlight)
 
 License keys are verified **offline** (Ed25519). No account, server, or subscription.
 

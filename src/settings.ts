@@ -65,7 +65,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			status.createEl("p", { text: "Free tier active. Upgrade to unlock batch open, content search, and custom commands." });
 			const link = status.createEl("a", {
 				text: "Get Vault Spotlight Pro ($8)",
-				href: "https://iavil.gumroad.com/l/vault-spotlight",
+				href: "https://ivala6.gumroad.com/l/vault-spotlight",
 			});
 			link.setAttr("target", "_blank");
 		}
