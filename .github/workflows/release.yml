@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Verify release files exist
-        run: test -f main.js && test -f manifest.json && test -f styles.css
+        run: test -f main.js && test -f manifest.json && test -f styles.css && test -f versions.json
 
       - uses: softprops/action-gh-release@v2
         with:
@@ -23,4 +23,5 @@ jobs:
             main.js
             manifest.json
             styles.css
+            versions.json
           generate_release_notes: true
