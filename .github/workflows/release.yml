@@ -1,4 +1,4 @@
-name: Release plugin
+name: Release Obsidian plugin
 
 on:
   push:
@@ -9,19 +9,35 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify release files exist
-        run: test -f main.js && test -f manifest.json && test -f styles.css && test -f versions.json
-
-      - uses: softprops/action-gh-release@v2
+      - uses: actions/setup-node@v4
         with:
-          files: |
-            main.js
-            manifest.json
-            styles.css
-            versions.json
-          generate_release_notes: true
+          node-version: 20
+          cache: npm
+
+      - name: Install and build
+        run: |
+          npm ci --legacy-peer-deps
+          npm run build
+
+      - name: Verify plugin files
+        run: |
+          test -f main.js
+          test -f manifest.json
+          test -f styles.css
+          test -f versions.json
+          node -e "const m=require('./manifest.json'); const v=require('./versions.json'); if(!v[m.version]) { console.error('versions.json missing', m.version); process.exit(1); }"
+
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          gh release create "$tag" \
+            --title="$tag" \
+            --generate-notes \
+            main.js manifest.json styles.css versions.json

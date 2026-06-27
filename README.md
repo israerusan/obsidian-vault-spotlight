@@ -43,7 +43,7 @@ npm run build
 npm test
 ```
 
-License keys for buyers are generated privately by the plugin author — not from the public repo.
+Pro license keys are delivered to buyers after purchase.
 
 ## Pricing label
 
