@@ -27,7 +27,7 @@ export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	licenseKey: "",
 	isPro: false,
 	licenseEmail: "",
-	purchaseUrl: "https://ivala6.gumroad.com/l/vault-spotlight",
+	purchaseUrl: "https://buymeacoffee.com/vaultspotlight",
 	recentPaths: [],
 	starredPaths: [],
 	maxRecent: 30,
@@ -51,7 +51,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl("h2", { text: "Vault Spotlight" });
+		new Setting(containerEl).setName("Vault Spotlight").setHeading();
 
 		new Setting(containerEl)
 			.setName("License key")
@@ -75,7 +75,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 		} else {
 			status.createEl("p", { text: "Free tier active. Upgrade to unlock batch open, content search, and saved commands." });
 			const link = status.createEl("a", {
-				text: "Get Vault Spotlight Pro ($8)",
+				text: "Get Vault Spotlight Pro on Buy Me a Coffee",
 				href: this.plugin.settings.purchaseUrl,
 			});
 			link.setAttr("target", "_blank");
@@ -83,7 +83,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Purchase page URL")
-			.setDesc("Link shown for Pro upgrades. Change this if you move to Lemon Squeezy, Payhip, Stripe, etc.")
+			.setDesc("Link shown for Pro upgrades. Defaults to Buy Me a Coffee.")
 			.addText((text) =>
 				text
 					.setPlaceholder("https://your-store.com/product")
@@ -104,7 +104,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 				})
 			);
 
-		containerEl.createEl("h3", { text: "Pro search" });
+		new Setting(containerEl).setName("Pro search").setHeading();
 
 		const proSearch = (name: string, desc: string, render: (setting: Setting) => void) => {
 			const setting = new Setting(containerEl).setName(name).setDesc(desc);
@@ -150,7 +150,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			)
 		);
 
-		containerEl.createEl("h3", { text: "Starred files (Pro)" });
+		new Setting(containerEl).setName("Starred files (Pro)").setHeading();
 		const starredList = containerEl.createDiv();
 		if (!this.plugin.settings.isPro) {
 			starredList.createEl("p", { text: "Pin important files with Ctrl+D in the spotlight." });
@@ -169,7 +169,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			}
 		}
 
-		containerEl.createEl("h3", { text: "Custom searches (Pro)" });
+		new Setting(containerEl).setName("Custom searches (Pro)").setHeading();
 		const customList = containerEl.createDiv();
 		if (!this.plugin.settings.isPro) {
 			customList.createEl("p", { text: "Unlock Pro to save custom search commands." });

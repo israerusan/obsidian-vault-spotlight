@@ -39,28 +39,29 @@ export function fuzzyMatch(query: string, text: string): FuzzyMatch | null {
 	return { score, indices };
 }
 
-export function highlightMatches(text: string, indices: number[]): string {
-	if (indices.length === 0) return escapeHtml(text);
+export function renderHighlightedText(parent: HTMLElement, text: string, indices: number[]): void {
+	parent.empty();
+	if (indices.length === 0) {
+		parent.setText(text);
+		return;
+	}
 
 	const set = new Set(indices);
-	let out = "";
-	for (let i = 0; i < text.length; i++) {
-		const ch = text[i];
-		if (set.has(i)) {
-			out += `<mark>${escapeHtml(ch)}</mark>`;
-		} else {
-			out += escapeHtml(ch);
+	let i = 0;
+	while (i < text.length) {
+		const highlight = set.has(i);
+		let j = i + 1;
+		while (j < text.length && set.has(j) === highlight) {
+			j++;
 		}
+		const chunk = text.slice(i, j);
+		if (highlight) {
+			parent.createEl("mark", { text: chunk });
+		} else {
+			parent.appendText(chunk);
+		}
+		i = j;
 	}
-	return out;
-}
-
-function escapeHtml(text: string): string {
-	return text
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;");
 }
 
 export function tokenizeQuery(raw: string): {

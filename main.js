@@ -2278,7 +2278,7 @@ var DEFAULT_SETTINGS = {
   licenseKey: "",
   isPro: false,
   licenseEmail: "",
-  purchaseUrl: "https://ivala6.gumroad.com/l/vault-spotlight",
+  purchaseUrl: "https://buymeacoffee.com/vaultspotlight",
   recentPaths: [],
   starredPaths: [],
   maxRecent: 30,
@@ -2297,7 +2297,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Vault Spotlight" });
+    new import_obsidian.Setting(containerEl).setName("Vault Spotlight").setHeading();
     new import_obsidian.Setting(containerEl).setName("License key").setDesc("Enter your Pro license key. Verified offline \u2014 no account or server required.").addText(
       (text) => text.setPlaceholder("payload.signature").setValue(this.plugin.settings.licenseKey).onChange(async (value) => {
         this.plugin.settings.licenseKey = value;
@@ -2313,12 +2313,12 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
     } else {
       status.createEl("p", { text: "Free tier active. Upgrade to unlock batch open, content search, and saved commands." });
       const link = status.createEl("a", {
-        text: "Get Vault Spotlight Pro ($8)",
+        text: "Get Vault Spotlight Pro on Buy Me a Coffee",
         href: this.plugin.settings.purchaseUrl
       });
       link.setAttr("target", "_blank");
     }
-    new import_obsidian.Setting(containerEl).setName("Purchase page URL").setDesc("Link shown for Pro upgrades. Change this if you move to Lemon Squeezy, Payhip, Stripe, etc.").addText(
+    new import_obsidian.Setting(containerEl).setName("Purchase page URL").setDesc("Link shown for Pro upgrades. Defaults to Buy Me a Coffee.").addText(
       (text) => text.setPlaceholder("https://your-store.com/product").setValue(this.plugin.settings.purchaseUrl).onChange(async (value) => {
         this.plugin.settings.purchaseUrl = value.trim() || DEFAULT_SETTINGS.purchaseUrl;
         await this.plugin.saveSettings();
@@ -2330,7 +2330,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    containerEl.createEl("h3", { text: "Pro search" });
+    new import_obsidian.Setting(containerEl).setName("Pro search").setHeading();
     const proSearch = (name, desc, render) => {
       const setting = new import_obsidian.Setting(containerEl).setName(name).setDesc(desc);
       if (!this.plugin.settings.isPro) {
@@ -2371,7 +2371,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
         })
       )
     );
-    containerEl.createEl("h3", { text: "Starred files (Pro)" });
+    new import_obsidian.Setting(containerEl).setName("Starred files (Pro)").setHeading();
     const starredList = containerEl.createDiv();
     if (!this.plugin.settings.isPro) {
       starredList.createEl("p", { text: "Pin important files with Ctrl+D in the spotlight." });
@@ -2389,7 +2389,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
         });
       }
     }
-    containerEl.createEl("h3", { text: "Custom searches (Pro)" });
+    new import_obsidian.Setting(containerEl).setName("Custom searches (Pro)").setHeading();
     const customList = containerEl.createDiv();
     if (!this.plugin.settings.isPro) {
       customList.createEl("p", { text: "Unlock Pro to save custom search commands." });
@@ -2441,22 +2441,28 @@ function fuzzyMatch(query, text) {
   if (t.startsWith(q)) score += 30;
   return { score, indices };
 }
-function highlightMatches(text, indices) {
-  if (indices.length === 0) return escapeHtml(text);
-  const set = new Set(indices);
-  let out = "";
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (set.has(i)) {
-      out += `<mark>${escapeHtml(ch)}</mark>`;
-    } else {
-      out += escapeHtml(ch);
-    }
+function renderHighlightedText(parent, text, indices) {
+  parent.empty();
+  if (indices.length === 0) {
+    parent.setText(text);
+    return;
   }
-  return out;
-}
-function escapeHtml(text) {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const set = new Set(indices);
+  let i = 0;
+  while (i < text.length) {
+    const highlight = set.has(i);
+    let j = i + 1;
+    while (j < text.length && set.has(j) === highlight) {
+      j++;
+    }
+    const chunk = text.slice(i, j);
+    if (highlight) {
+      parent.createEl("mark", { text: chunk });
+    } else {
+      parent.appendText(chunk);
+    }
+    i = j;
+  }
 }
 function tokenizeQuery(raw) {
   const trimmed = raw.trim();
@@ -2665,7 +2671,7 @@ var SpotlightModal = class extends import_obsidian3.Modal {
       });
       const link = cta.createEl("a", {
         cls: "vault-spotlight-pro-btn",
-        text: "Get Pro \u2014 $8",
+        text: "Get Pro on Buy Me a Coffee",
         href: this.plugin.settings.purchaseUrl
       });
       link.setAttr("target", "_blank");
@@ -2874,7 +2880,7 @@ var SpotlightModal = class extends import_obsidian3.Modal {
       const titleRow = body.createDiv({ cls: "vault-spotlight-item-title-row" });
       const title = titleRow.createDiv({ cls: "vault-spotlight-item-title" });
       if (item.kind === "file") {
-        title.innerHTML = highlightMatches(item.file.basename, item.matchIndices);
+        renderHighlightedText(title, item.file.basename, item.matchIndices);
         if (item.isStarred && !isEmptyQuery) {
           titleRow.createSpan({ cls: "vault-spotlight-item-badge is-star", text: "Starred" });
         } else if (item.isRecent && !isEmptyQuery) {
@@ -3003,15 +3009,13 @@ var SpotlightModal = class extends import_obsidian3.Modal {
   async openItem(item, newTab) {
     const leaf = this.app.workspace.getLeaf(newTab);
     await leaf.openFile(item.file);
-    if (item.kind === "content" && item.file.extension === "md") {
-      const view = leaf.view;
-      if ("editor" in view && view.editor) {
-        view.editor.setCursor({ line: item.line - 1, ch: 0 });
-        view.editor.scrollIntoView(
-          { from: { line: item.line - 1, ch: 0 }, to: { line: item.line - 1, ch: 0 } },
-          true
-        );
-      }
+    if (item.kind === "content" && item.file.extension === "md" && leaf.view instanceof import_obsidian3.MarkdownView) {
+      const editor = leaf.view.editor;
+      editor.setCursor({ line: item.line - 1, ch: 0 });
+      editor.scrollIntoView(
+        { from: { line: item.line - 1, ch: 0 }, to: { line: item.line - 1, ch: 0 } },
+        true
+      );
     }
   }
   async saveCustomSearch() {
@@ -3049,6 +3053,7 @@ var import_tweetnacl = __toESM(require_nacl_fast(), 1);
 var LICENSE_PUBLIC_KEY = "8ybB+nBmz0Tiz5RYCYJsOgEW5+YmROAumf3HHPeC1E0=";
 
 // src/license/LicenseManager.ts
+var verifyDetached = import_tweetnacl.default.sign.detached.verify.bind(import_tweetnacl.default.sign.detached);
 var _LicenseManager = class _LicenseManager {
   static verify(licenseKey) {
     const trimmed = licenseKey.trim();
@@ -3063,7 +3068,7 @@ var _LicenseManager = class _LicenseManager {
       const payloadBytes = base64ToBytes(parts[0]);
       const signature = base64ToBytes(parts[1]);
       const publicKey = base64ToBytes(LICENSE_PUBLIC_KEY);
-      if (!import_tweetnacl.default.sign.detached.verify(payloadBytes, signature, publicKey)) {
+      if (!verifyDetached(payloadBytes, signature, publicKey)) {
         return { valid: false, error: "Invalid license signature." };
       }
       const payload = JSON.parse(new TextDecoder().decode(payloadBytes));

@@ -1,6 +1,10 @@
 import nacl from "tweetnacl";
 import { LICENSE_PUBLIC_KEY } from "./publicKey";
 
+type DetachedVerify = (message: Uint8Array, signature: Uint8Array, publicKey: Uint8Array) => boolean;
+
+const verifyDetached: DetachedVerify = nacl.sign.detached.verify.bind(nacl.sign.detached);
+
 export interface LicensePayload {
 	product: string;
 	email: string;
@@ -26,7 +30,7 @@ export class LicenseManager {
 			const signature = base64ToBytes(parts[1]);
 			const publicKey = base64ToBytes(LICENSE_PUBLIC_KEY);
 
-			if (!nacl.sign.detached.verify(payloadBytes, signature, publicKey)) {
+			if (!verifyDetached(payloadBytes, signature, publicKey)) {
 				return { valid: false, error: "Invalid license signature." };
 			}
 

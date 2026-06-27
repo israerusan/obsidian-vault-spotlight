@@ -1,7 +1,7 @@
-import { App, Modal, TFile, setIcon } from "obsidian";
+import { App, MarkdownView, Modal, TFile, setIcon } from "obsidian";
 import type VaultSpotlightPlugin from "../main";
 import { FileSearcher } from "../search/FileSearcher";
-import { highlightMatches, tokenizeQuery } from "../search/fuzzy";
+import { renderHighlightedText, tokenizeQuery } from "../search/fuzzy";
 import { iconForFileKind, type VaultFileKind } from "../search/vaultFiles";
 
 type ResultItem =
@@ -89,7 +89,7 @@ export class SpotlightModal extends Modal {
 			});
 			const link = cta.createEl("a", {
 				cls: "vault-spotlight-pro-btn",
-				text: "Get Pro — $8",
+				text: "Get Pro on Buy Me a Coffee",
 				href: this.plugin.settings.purchaseUrl,
 			});
 			link.setAttr("target", "_blank");
@@ -322,7 +322,7 @@ export class SpotlightModal extends Modal {
 			const title = titleRow.createDiv({ cls: "vault-spotlight-item-title" });
 
 			if (item.kind === "file") {
-				title.innerHTML = highlightMatches(item.file.basename, item.matchIndices);
+				renderHighlightedText(title, item.file.basename, item.matchIndices);
 				if (item.isStarred && !isEmptyQuery) {
 					titleRow.createSpan({ cls: "vault-spotlight-item-badge is-star", text: "Starred" });
 				} else if (item.isRecent && !isEmptyQuery) {
@@ -473,15 +473,13 @@ export class SpotlightModal extends Modal {
 	private async openItem(item: ResultItem, newTab: boolean): Promise<void> {
 		const leaf = this.app.workspace.getLeaf(newTab);
 		await leaf.openFile(item.file);
-		if (item.kind === "content" && item.file.extension === "md") {
-			const view = leaf.view;
-			if ("editor" in view && view.editor) {
-				view.editor.setCursor({ line: item.line - 1, ch: 0 });
-				view.editor.scrollIntoView(
-					{ from: { line: item.line - 1, ch: 0 }, to: { line: item.line - 1, ch: 0 } },
-					true
-				);
-			}
+		if (item.kind === "content" && item.file.extension === "md" && leaf.view instanceof MarkdownView) {
+			const editor = leaf.view.editor;
+			editor.setCursor({ line: item.line - 1, ch: 0 });
+			editor.scrollIntoView(
+				{ from: { line: item.line - 1, ch: 0 }, to: { line: item.line - 1, ch: 0 } },
+				true
+			);
 		}
 	}
 

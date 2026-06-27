@@ -1,4 +1,4 @@
-Thanks for purchasing Vault Spotlight Pro!
+Thanks for supporting Vault Spotlight Pro on Buy Me a Coffee!
 
 Your license key:
 {{LICENSE_KEY}}
@@ -10,6 +10,9 @@ How to activate:
 
 Pro features:
 - Content search (prefix your query with >)
+- Ripgrep-powered search
+- Starred pins (Ctrl+D)
+- Canvas & PDF search
 - Batch open with Ctrl+Space multi-select
 - Save custom searches with Ctrl+S
 

@@ -12,10 +12,13 @@ Spotlight-style vault launcher for [Obsidian](https://obsidian.md). Fuzzy file s
 ## Pro features ($8 one-time)
 
 - **Content search** — prefix query with `>` to search inside note bodies
+- **Ripgrep search** — faster content search when `rg` is installed
+- **Starred pins** — pin files with `Ctrl+D`
+- **Canvas & PDF** — search canvas files and show PDFs in results
 - **Batch open** — multi-select with `Ctrl+Space`, open all at once
 - **Custom search commands** — save queries as palette commands (`Ctrl+S` in spotlight)
 
-Purchase: [Gumroad — Vault Spotlight Pro](https://ivala6.gumroad.com/l/vault-spotlight)
+Purchase: [Buy Me a Coffee — Vault Spotlight Pro](https://buymeacoffee.com/vaultspotlight)
 
 License keys are verified **offline** (Ed25519). No account, server, or subscription.
 
@@ -31,9 +34,10 @@ Search **Vault Spotlight** in Obsidian Settings → Community plugins after subm
 
 ## Activate Pro
 
-1. Settings → Vault Spotlight
-2. Paste your license key from Gumroad
-3. Pro unlocks immediately (offline verification)
+1. Purchase on [Buy Me a Coffee](https://buymeacoffee.com/vaultspotlight)
+2. You will receive a license key by email (usually within 24 hours)
+3. Open Obsidian → Settings → Vault Spotlight
+4. Paste your license key — Pro unlocks immediately (offline verification)
 
 ## Development
 
@@ -42,8 +46,6 @@ npm install
 npm run build
 npm test
 ```
-
-Pro license keys are delivered to buyers after purchase.
 
 ## Pricing label
 
