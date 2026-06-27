@@ -26,6 +26,8 @@ export class FileSearcher {
 		const results: FileSearchResult[] = [];
 		const recentSet = new Map(options.recentPaths.map((p, i) => [p, i]));
 
+		const isBrowseMode = options.textTokens.length === 0;
+
 		for (const file of files) {
 			if (!(await this.matchesFilters(file, options))) continue;
 
@@ -33,7 +35,7 @@ export class FileSearcher {
 			let score = 0;
 			let indices: number[] = [];
 
-			if (options.textTokens.length === 0) {
+			if (isBrowseMode) {
 				score = 1;
 			} else {
 				for (const token of options.textTokens) {
@@ -51,10 +53,12 @@ export class FileSearcher {
 
 			const recentRank = recentSet.get(file.path);
 			if (recentRank !== undefined) {
-				score += 50 - recentRank;
+				score += 1000 - recentRank * 10;
+			} else if (isBrowseMode) {
+				score += Math.max(0, 100 - Math.floor((Date.now() - file.stat.mtime) / 3600000));
+			} else {
+				score += Math.max(0, 10 - Math.floor((Date.now() - file.stat.mtime) / 86400000));
 			}
-
-			score += Math.max(0, 10 - Math.floor((Date.now() - file.stat.mtime) / 86400000));
 
 			results.push({
 				file,

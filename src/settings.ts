@@ -12,6 +12,7 @@ export interface VaultSpotlightSettings {
 	licenseKey: string;
 	isPro: boolean;
 	licenseEmail: string;
+	purchaseUrl: string;
 	recentPaths: string[];
 	maxRecent: number;
 	customSearches: CustomSearch[];
@@ -22,6 +23,7 @@ export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	licenseKey: "",
 	isPro: false,
 	licenseEmail: "",
+	purchaseUrl: "https://ivala6.gumroad.com/l/vault-spotlight",
 	recentPaths: [],
 	maxRecent: 30,
 	customSearches: [],
@@ -65,10 +67,23 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			status.createEl("p", { text: "Free tier active. Upgrade to unlock batch open, content search, and custom commands." });
 			const link = status.createEl("a", {
 				text: "Get Vault Spotlight Pro ($8)",
-				href: "https://ivala6.gumroad.com/l/vault-spotlight",
+				href: this.plugin.settings.purchaseUrl,
 			});
 			link.setAttr("target", "_blank");
 		}
+
+		new Setting(containerEl)
+			.setName("Purchase page URL")
+			.setDesc("Link shown for Pro upgrades. Change this if you move to Lemon Squeezy, Payhip, Stripe, etc.")
+			.addText((text) =>
+				text
+					.setPlaceholder("https://your-store.com/product")
+					.setValue(this.plugin.settings.purchaseUrl)
+					.onChange(async (value) => {
+						this.plugin.settings.purchaseUrl = value.trim() || DEFAULT_SETTINGS.purchaseUrl;
+						await this.plugin.saveSettings();
+					})
+			);
 
 		new Setting(containerEl)
 			.setName("Show modified time")
