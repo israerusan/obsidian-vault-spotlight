@@ -2676,7 +2676,8 @@ var SpotlightModal = class extends import_obsidian4.Modal {
     this.initialQuery = initialQuery;
   }
   onOpen() {
-    this.modalEl.addClass("vault-spotlight-container");
+    this.containerEl.addClass("vault-spotlight-container");
+    this.titleEl.empty();
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("vault-spotlight-modal");
@@ -2745,7 +2746,7 @@ var SpotlightModal = class extends import_obsidian4.Modal {
     void this.runSearch();
   }
   onClose() {
-    this.modalEl.removeClass("vault-spotlight-container");
+    this.containerEl.removeClass("vault-spotlight-container");
     this.contentEl.empty();
   }
   updateHint() {
@@ -3379,6 +3380,7 @@ var VaultSpotlightPlugin = class extends import_obsidian5.Plugin {
     this.addCommand({
       id: "open-spotlight",
       name: "Open spotlight",
+      hotkeys: [{ modifiers: ["Mod", "Shift"], key: "o" }],
       callback: () => this.openSpotlight()
     });
     this.addCommand({
@@ -3452,20 +3454,27 @@ var VaultSpotlightPlugin = class extends import_obsidian5.Plugin {
   async refreshLicense() {
     var _a;
     if (!this.settings.licenseKey) {
+      if (!this.settings.isPro && !this.settings.licenseEmail) return;
       this.settings.isPro = false;
       this.settings.licenseEmail = "";
       await this.saveSettings();
       return;
     }
     const result = LicenseManager.verify(this.settings.licenseKey);
-    this.settings.isPro = result.valid;
-    this.settings.licenseEmail = (_a = result.email) != null ? _a : "";
+    const isPro = result.valid;
+    const licenseEmail = (_a = result.email) != null ? _a : "";
+    if (this.settings.isPro === isPro && this.settings.licenseEmail === licenseEmail) return;
+    this.settings.isPro = isPro;
+    this.settings.licenseEmail = licenseEmail;
     await this.saveSettings();
   }
   async loadSettings() {
     const data = await this.loadData();
     const loaded = data !== null && typeof data === "object" ? data : {};
     this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
+    if (!Array.isArray(this.settings.recentPaths)) this.settings.recentPaths = [];
+    if (!Array.isArray(this.settings.starredPaths)) this.settings.starredPaths = [];
+    if (!Array.isArray(this.settings.customSearches)) this.settings.customSearches = [];
   }
   async saveSettings() {
     await this.saveData(this.settings);

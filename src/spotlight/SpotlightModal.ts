@@ -52,7 +52,8 @@ export class SpotlightModal extends Modal {
 	}
 
 	onOpen(): void {
-		this.modalEl.addClass("vault-spotlight-container");
+		this.containerEl.addClass("vault-spotlight-container");
+		this.titleEl.empty();
 		const { contentEl } = this;
 		contentEl.empty();
 		contentEl.addClass("vault-spotlight-modal");
@@ -133,7 +134,7 @@ export class SpotlightModal extends Modal {
 	}
 
 	onClose(): void {
-		this.modalEl.removeClass("vault-spotlight-container");
+		this.containerEl.removeClass("vault-spotlight-container");
 		this.contentEl.empty();
 	}
 

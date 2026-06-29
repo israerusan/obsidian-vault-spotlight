@@ -18,6 +18,7 @@ export default class VaultSpotlightPlugin extends Plugin {
 		this.addCommand({
 			id: "open-spotlight",
 			name: "Open spotlight",
+			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "o" }],
 			callback: () => this.openSpotlight(),
 		});
 
@@ -101,14 +102,18 @@ export default class VaultSpotlightPlugin extends Plugin {
 
 	async refreshLicense(): Promise<void> {
 		if (!this.settings.licenseKey) {
+			if (!this.settings.isPro && !this.settings.licenseEmail) return;
 			this.settings.isPro = false;
 			this.settings.licenseEmail = "";
 			await this.saveSettings();
 			return;
 		}
 		const result = LicenseManager.verify(this.settings.licenseKey);
-		this.settings.isPro = result.valid;
-		this.settings.licenseEmail = result.email ?? "";
+		const isPro = result.valid;
+		const licenseEmail = result.email ?? "";
+		if (this.settings.isPro === isPro && this.settings.licenseEmail === licenseEmail) return;
+		this.settings.isPro = isPro;
+		this.settings.licenseEmail = licenseEmail;
 		await this.saveSettings();
 	}
 
@@ -117,6 +122,9 @@ export default class VaultSpotlightPlugin extends Plugin {
 		const loaded =
 			data !== null && typeof data === "object" ? (data as Partial<VaultSpotlightSettings>) : {};
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
+		if (!Array.isArray(this.settings.recentPaths)) this.settings.recentPaths = [];
+		if (!Array.isArray(this.settings.starredPaths)) this.settings.starredPaths = [];
+		if (!Array.isArray(this.settings.customSearches)) this.settings.customSearches = [];
 	}
 
 	async saveSettings(): Promise<void> {

@@ -3,6 +3,10 @@
 	padding: 0;
 }
 
+.modal-container.vault-spotlight-container .modal-title {
+	display: none;
+}
+
 .modal-container.vault-spotlight-container .modal {
 	padding: 0;
 	margin: 0;
