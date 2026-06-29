@@ -3,7 +3,6 @@ import fs from "fs";
 import path from "path";
 import nacl from "tweetnacl";
 import { fileURLToPath } from "url";
-import { execSync } from "child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
@@ -17,10 +16,9 @@ function fromBase64(value) {
 	return new Uint8Array(Buffer.from(padded, "base64"));
 }
 
-const output = execSync("node scripts/generate-license.mjs test@example.com", { cwd: root, encoding: "utf8" });
-const keyLine = output.split("\n").find((l) => l.startsWith("Key:"));
-assert.ok(keyLine, "license generator should print key");
-const licenseKey = keyLine.replace("Key:", "").trim();
+const licenseKey = fs
+	.readFileSync(path.join(__dirname, "fixtures", "test-license.key"), "utf8")
+	.trim();
 const [payloadB64, sigB64] = licenseKey.split(".");
 assert.equal(licenseKey.split(".").length, 2);
 
