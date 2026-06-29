@@ -20,6 +20,8 @@ jobs:
           cache: npm
 
       - name: Install and build
+        env:
+          VAULT_ROOT: ""
         run: |
           npm ci
           npm run build
