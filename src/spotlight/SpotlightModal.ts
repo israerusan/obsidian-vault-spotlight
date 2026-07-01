@@ -1,4 +1,4 @@
-import { App, Keymap, MarkdownView, Modal, TFile, setIcon } from "obsidian";
+import { App, MarkdownView, Modal, TFile, setIcon } from "obsidian";
 import type VaultSpotlightPlugin from "../main";
 import { FileSearcher } from "../search/FileSearcher";
 import { renderHighlightedText, tokenizeQuery } from "../search/fuzzy";
@@ -99,7 +99,6 @@ export class SpotlightModal extends Modal {
 		}
 
 		this.inputEl.addEventListener("input", () => this.scheduleSearch());
-		this.inputEl.addEventListener("keydown", (evt) => this.onInputKeydown(evt));
 
 		this.registerScopeShortcuts();
 
@@ -492,105 +491,80 @@ export class SpotlightModal extends Modal {
 		}).open();
 	}
 
-	private registerScopeShortcuts(): void {
-		const guard = (evt: KeyboardEvent): boolean => {
-			if (document.activeElement === this.inputEl) return false;
-			evt.preventDefault();
-			this.focusInput();
-			return true;
-		};
+	private toggleContentMode(): void {
+		const val = this.inputEl.value;
+		if (val.startsWith(">")) {
+			this.inputEl.value = val.slice(1).trim();
+		} else {
+			this.inputEl.value = val ? `> ${val}` : "> ";
+		}
+		this.focusInput();
+		void this.runSearch();
+	}
 
+	private registerScopeShortcuts(): void {
+		// The modal's Scope is pushed onto Obsidian's keymap while the modal is
+		// open, so these fire regardless of which element inside the modal holds
+		// DOM focus. That is what makes navigation and the Pro shortcuts work
+		// even before the user clicks into the search box. Typed characters are
+		// left untouched here so they flow into the focused input natively.
 		this.scope.register([], "ArrowDown", (evt) => {
-			if (!guard(evt)) return;
+			evt.preventDefault();
 			this.moveSelection(1);
+			return false;
 		});
 		this.scope.register([], "ArrowUp", (evt) => {
-			if (!guard(evt)) return;
+			evt.preventDefault();
 			this.moveSelection(-1);
+			return false;
 		});
 		this.scope.register([], "Enter", (evt) => {
-			if (!guard(evt)) return;
+			evt.preventDefault();
 			void this.activateSelection();
+			return false;
 		});
 		this.scope.register([], "Escape", (evt) => {
 			evt.preventDefault();
 			this.close();
+			return false;
+		});
+
+		if (!this.plugin.settings.isPro) return;
+
+		this.scope.register(["Mod"], " ", (evt) => {
+			evt.preventDefault();
+			this.toggleCheck();
+			return false;
+		});
+		this.scope.register(["Mod"], "d", (evt) => {
+			evt.preventDefault();
+			this.toggleStarSelected();
+			return false;
+		});
+		this.scope.register(["Mod"], "s", (evt) => {
+			evt.preventDefault();
+			this.saveCustomSearch();
+			return false;
+		});
+		this.scope.register([], "Tab", (evt) => {
+			evt.preventDefault();
+			this.toggleContentMode();
+			return false;
 		});
 	}
 
 	private focusInput(): void {
 		const applyFocus = () => {
 			if (!this.inputEl?.isConnected) return;
+			if (document.activeElement === this.inputEl) return;
 			this.inputEl.focus({ preventScroll: true });
 			const end = this.inputEl.value.length;
 			this.inputEl.setSelectionRange(end, end);
 		};
 
 		applyFocus();
-		window.requestAnimationFrame(() => {
-			applyFocus();
-			window.requestAnimationFrame(applyFocus);
-		});
-		window.setTimeout(applyFocus, 10);
+		window.requestAnimationFrame(applyFocus);
+		window.setTimeout(applyFocus, 0);
 		window.setTimeout(applyFocus, 50);
-	}
-
-	private onInputKeydown(evt: KeyboardEvent): void {
-		if (evt.isComposing) return;
-
-		switch (evt.key) {
-			case "ArrowDown":
-				evt.preventDefault();
-				evt.stopPropagation();
-				this.moveSelection(1);
-				return;
-			case "ArrowUp":
-				evt.preventDefault();
-				evt.stopPropagation();
-				this.moveSelection(-1);
-				return;
-			case "Enter":
-				evt.preventDefault();
-				evt.stopPropagation();
-				void this.activateSelection();
-				return;
-			case "Escape":
-				evt.preventDefault();
-				evt.stopPropagation();
-				this.close();
-				return;
-		}
-
-		if (!this.plugin.settings.isPro) return;
-
-		if (evt.key === " " && Keymap.isModifier(evt, "Mod")) {
-			evt.preventDefault();
-			evt.stopPropagation();
-			this.toggleCheck();
-			return;
-		}
-		if (evt.key === "d" && Keymap.isModifier(evt, "Mod")) {
-			evt.preventDefault();
-			evt.stopPropagation();
-			this.toggleStarSelected();
-			return;
-		}
-		if (evt.key === "s" && Keymap.isModifier(evt, "Mod")) {
-			evt.preventDefault();
-			evt.stopPropagation();
-			this.saveCustomSearch();
-			return;
-		}
-		if (evt.key === "Tab") {
-			evt.preventDefault();
-			evt.stopPropagation();
-			const val = this.inputEl.value;
-			if (val.startsWith(">")) {
-				this.inputEl.value = val.slice(1).trim();
-			} else {
-				this.inputEl.value = val ? `> ${val}` : "> ";
-			}
-			void this.runSearch();
-		}
 	}
 }

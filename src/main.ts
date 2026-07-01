@@ -59,9 +59,14 @@ export default class VaultSpotlightPlugin extends Plugin {
 	onunload(): void {}
 
 	openSpotlight(initialQuery = ""): void {
-		this.activeSpotlight?.close();
-		this.activeSpotlight = new SpotlightModal(this.app, this, initialQuery);
-		this.activeSpotlight.open();
+		if (this.activeSpotlight) {
+			this.activeSpotlight.close();
+			this.activeSpotlight = null;
+		}
+		window.requestAnimationFrame(() => {
+			this.activeSpotlight = new SpotlightModal(this.app, this, initialQuery);
+			this.activeSpotlight.open();
+		});
 	}
 
 	onSpotlightClosed(modal: SpotlightModal): void {
