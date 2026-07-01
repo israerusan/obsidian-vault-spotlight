@@ -47,6 +47,7 @@ export class SpotlightModal extends Modal {
 		initialQuery = ""
 	) {
 		super(app);
+		this.shouldRestoreSelection = false;
 		this.fileSearcher = new FileSearcher(app);
 		this.initialQuery = initialQuery;
 	}
@@ -100,6 +101,8 @@ export class SpotlightModal extends Modal {
 		this.inputEl.addEventListener("input", () => this.scheduleSearch());
 		this.inputEl.addEventListener("keydown", (evt) => this.onInputKeydown(evt));
 
+		this.registerScopeShortcuts();
+
 		this.registerEvent(
 			this.app.metadataCache.on("resolved", () => {
 				if (this.hasMetadataFilters()) this.scheduleSearch();
@@ -111,6 +114,12 @@ export class SpotlightModal extends Modal {
 	}
 
 	onClose(): void {
+		this.searchGeneration++;
+		if (this.searchTimer !== null) {
+			window.clearTimeout(this.searchTimer);
+			this.searchTimer = null;
+		}
+		this.plugin.onSpotlightClosed(this);
 		this.containerEl.removeClass("vault-spotlight-container");
 		this.contentEl.empty();
 	}
@@ -445,13 +454,13 @@ export class SpotlightModal extends Modal {
 
 		if (targets.length === 0) return;
 
+		this.checkedPaths.clear();
+		this.close();
+
 		for (const item of targets) {
 			await this.openItem(item, targets.length > 1);
 			this.plugin.trackRecent(item.file.path);
 		}
-
-		this.checkedPaths.clear();
-		this.close();
 	}
 
 	private async openItem(item: ResultItem, newTab: boolean): Promise<void> {
@@ -483,12 +492,47 @@ export class SpotlightModal extends Modal {
 		}).open();
 	}
 
+	private registerScopeShortcuts(): void {
+		const guard = (evt: KeyboardEvent): boolean => {
+			if (document.activeElement === this.inputEl) return false;
+			evt.preventDefault();
+			this.focusInput();
+			return true;
+		};
+
+		this.scope.register([], "ArrowDown", (evt) => {
+			if (!guard(evt)) return;
+			this.moveSelection(1);
+		});
+		this.scope.register([], "ArrowUp", (evt) => {
+			if (!guard(evt)) return;
+			this.moveSelection(-1);
+		});
+		this.scope.register([], "Enter", (evt) => {
+			if (!guard(evt)) return;
+			void this.activateSelection();
+		});
+		this.scope.register([], "Escape", (evt) => {
+			evt.preventDefault();
+			this.close();
+		});
+	}
+
 	private focusInput(): void {
-		window.setTimeout(() => {
-			this.inputEl.focus();
+		const applyFocus = () => {
+			if (!this.inputEl?.isConnected) return;
+			this.inputEl.focus({ preventScroll: true });
 			const end = this.inputEl.value.length;
 			this.inputEl.setSelectionRange(end, end);
-		}, 0);
+		};
+
+		applyFocus();
+		window.requestAnimationFrame(() => {
+			applyFocus();
+			window.requestAnimationFrame(applyFocus);
+		});
+		window.setTimeout(applyFocus, 10);
+		window.setTimeout(applyFocus, 50);
 	}
 
 	private onInputKeydown(evt: KeyboardEvent): void {

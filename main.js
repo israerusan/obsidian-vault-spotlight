@@ -2723,6 +2723,7 @@ var SpotlightModal = class extends import_obsidian4.Modal {
     this.searchTimer = null;
     this.searchGeneration = 0;
     this.isLoading = false;
+    this.shouldRestoreSelection = false;
     this.fileSearcher = new FileSearcher(app);
     this.initialQuery = initialQuery;
   }
@@ -2766,6 +2767,7 @@ var SpotlightModal = class extends import_obsidian4.Modal {
     }
     this.inputEl.addEventListener("input", () => this.scheduleSearch());
     this.inputEl.addEventListener("keydown", (evt) => this.onInputKeydown(evt));
+    this.registerScopeShortcuts();
     this.registerEvent(
       this.app.metadataCache.on("resolved", () => {
         if (this.hasMetadataFilters()) this.scheduleSearch();
@@ -2775,6 +2777,12 @@ var SpotlightModal = class extends import_obsidian4.Modal {
     void this.runSearch().then(() => this.focusInput());
   }
   onClose() {
+    this.searchGeneration++;
+    if (this.searchTimer !== null) {
+      window.clearTimeout(this.searchTimer);
+      this.searchTimer = null;
+    }
+    this.plugin.onSpotlightClosed(this);
     this.containerEl.removeClass("vault-spotlight-container");
     this.contentEl.empty();
   }
@@ -3070,12 +3078,12 @@ var SpotlightModal = class extends import_obsidian4.Modal {
   async activateSelection() {
     const targets = this.checkedPaths.size > 0 ? this.items.filter((i) => this.checkedPaths.has(i.file.path)) : [this.items[this.selectedIndex]].filter(Boolean);
     if (targets.length === 0) return;
+    this.checkedPaths.clear();
+    this.close();
     for (const item of targets) {
       await this.openItem(item, targets.length > 1);
       this.plugin.trackRecent(item.file.path);
     }
-    this.checkedPaths.clear();
-    this.close();
   }
   async openItem(item, newTab) {
     const leaf = this.app.workspace.getLeaf(newTab);
@@ -3103,12 +3111,45 @@ var SpotlightModal = class extends import_obsidian4.Modal {
       this.plugin.registerCustomSearchCommand(entry);
     }).open();
   }
+  registerScopeShortcuts() {
+    const guard = (evt) => {
+      if (document.activeElement === this.inputEl) return false;
+      evt.preventDefault();
+      this.focusInput();
+      return true;
+    };
+    this.scope.register([], "ArrowDown", (evt) => {
+      if (!guard(evt)) return;
+      this.moveSelection(1);
+    });
+    this.scope.register([], "ArrowUp", (evt) => {
+      if (!guard(evt)) return;
+      this.moveSelection(-1);
+    });
+    this.scope.register([], "Enter", (evt) => {
+      if (!guard(evt)) return;
+      void this.activateSelection();
+    });
+    this.scope.register([], "Escape", (evt) => {
+      evt.preventDefault();
+      this.close();
+    });
+  }
   focusInput() {
-    window.setTimeout(() => {
-      this.inputEl.focus();
+    const applyFocus = () => {
+      var _a;
+      if (!((_a = this.inputEl) == null ? void 0 : _a.isConnected)) return;
+      this.inputEl.focus({ preventScroll: true });
       const end = this.inputEl.value.length;
       this.inputEl.setSelectionRange(end, end);
-    }, 0);
+    };
+    applyFocus();
+    window.requestAnimationFrame(() => {
+      applyFocus();
+      window.requestAnimationFrame(applyFocus);
+    });
+    window.setTimeout(applyFocus, 10);
+    window.setTimeout(applyFocus, 50);
   }
   onInputKeydown(evt) {
     if (evt.isComposing) return;
@@ -3455,6 +3496,7 @@ var VaultSpotlightPlugin = class extends import_obsidian5.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
+    this.activeSpotlight = null;
   }
   async onload() {
     await this.loadSettings();
@@ -3499,7 +3541,15 @@ var VaultSpotlightPlugin = class extends import_obsidian5.Plugin {
   onunload() {
   }
   openSpotlight(initialQuery = "") {
-    new SpotlightModal(this.app, this, initialQuery).open();
+    var _a;
+    (_a = this.activeSpotlight) == null ? void 0 : _a.close();
+    this.activeSpotlight = new SpotlightModal(this.app, this, initialQuery);
+    this.activeSpotlight.open();
+  }
+  onSpotlightClosed(modal) {
+    if (this.activeSpotlight === modal) {
+      this.activeSpotlight = null;
+    }
   }
   registerCustomSearchCommand(search) {
     this.addCommand({

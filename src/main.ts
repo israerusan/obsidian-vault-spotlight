@@ -7,6 +7,7 @@ import { ContentSearcher } from "./search/ContentSearcher";
 export default class VaultSpotlightPlugin extends Plugin {
 	settings: VaultSpotlightSettings = DEFAULT_SETTINGS;
 	contentSearcher!: ContentSearcher;
+	private activeSpotlight: SpotlightModal | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -58,7 +59,15 @@ export default class VaultSpotlightPlugin extends Plugin {
 	onunload(): void {}
 
 	openSpotlight(initialQuery = ""): void {
-		new SpotlightModal(this.app, this, initialQuery).open();
+		this.activeSpotlight?.close();
+		this.activeSpotlight = new SpotlightModal(this.app, this, initialQuery);
+		this.activeSpotlight.open();
+	}
+
+	onSpotlightClosed(modal: SpotlightModal): void {
+		if (this.activeSpotlight === modal) {
+			this.activeSpotlight = null;
+		}
 	}
 
 	registerCustomSearchCommand(search: CustomSearch): void {
