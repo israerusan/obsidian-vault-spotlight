@@ -1,4 +1,4 @@
-import { App, MarkdownView, Modal, TFile, setIcon } from "obsidian";
+import { App, type EventRef, MarkdownView, Modal, TFile, setIcon } from "obsidian";
 import type VaultSpotlightPlugin from "../main";
 import { FileSearcher } from "../search/FileSearcher";
 import { renderHighlightedText, tokenizeQuery } from "../search/fuzzy";
@@ -40,6 +40,7 @@ export class SpotlightModal extends Modal {
 	private isLoading = false;
 	private fileSearcher: FileSearcher;
 	private initialQuery: string;
+	private metadataRef: EventRef | null = null;
 
 	constructor(
 		app: App,
@@ -102,17 +103,21 @@ export class SpotlightModal extends Modal {
 
 		this.registerScopeShortcuts();
 
-		this.registerEvent(
-			this.app.metadataCache.on("resolved", () => {
-				if (this.hasMetadataFilters()) this.scheduleSearch();
-			})
-		);
+		// Modal is not a Component, so it has no registerEvent(); track the ref
+		// ourselves and release it in onClose().
+		this.metadataRef = this.app.metadataCache.on("resolved", () => {
+			if (this.hasMetadataFilters()) this.scheduleSearch();
+		});
 
 		this.focusInput();
 		void this.runSearch().then(() => this.focusInput());
 	}
 
 	onClose(): void {
+		if (this.metadataRef) {
+			this.app.metadataCache.offref(this.metadataRef);
+			this.metadataRef = null;
+		}
 		this.searchGeneration++;
 		if (this.searchTimer !== null) {
 			window.clearTimeout(this.searchTimer);

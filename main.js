@@ -2723,6 +2723,7 @@ var SpotlightModal = class extends import_obsidian4.Modal {
     this.searchTimer = null;
     this.searchGeneration = 0;
     this.isLoading = false;
+    this.metadataRef = null;
     this.shouldRestoreSelection = false;
     this.fileSearcher = new FileSearcher(app);
     this.initialQuery = initialQuery;
@@ -2767,15 +2768,17 @@ var SpotlightModal = class extends import_obsidian4.Modal {
     }
     this.inputEl.addEventListener("input", () => this.scheduleSearch());
     this.registerScopeShortcuts();
-    this.registerEvent(
-      this.app.metadataCache.on("resolved", () => {
-        if (this.hasMetadataFilters()) this.scheduleSearch();
-      })
-    );
+    this.metadataRef = this.app.metadataCache.on("resolved", () => {
+      if (this.hasMetadataFilters()) this.scheduleSearch();
+    });
     this.focusInput();
     void this.runSearch().then(() => this.focusInput());
   }
   onClose() {
+    if (this.metadataRef) {
+      this.app.metadataCache.offref(this.metadataRef);
+      this.metadataRef = null;
+    }
     this.searchGeneration++;
     if (this.searchTimer !== null) {
       window.clearTimeout(this.searchTimer);
