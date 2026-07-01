@@ -2742,7 +2742,7 @@ var SpotlightModal = class extends import_obsidian4.Modal {
     this.inputEl = inputWrap.createEl("input", {
       type: "text",
       placeholder: "Search notes, tags, or properties\u2026",
-      attr: { spellcheck: "false", autocomplete: "off" }
+      attr: { spellcheck: "false", autocomplete: "off", autofocus: "true" }
     });
     this.inputEl.value = this.initialQuery;
     this.hintEl = header.createDiv({ cls: "vault-spotlight-hint" });
@@ -2765,41 +2765,14 @@ var SpotlightModal = class extends import_obsidian4.Modal {
       link.setAttr("target", "_blank");
     }
     this.inputEl.addEventListener("input", () => this.scheduleSearch());
-    this.inputEl.addEventListener("keydown", (evt) => this.onKeydown(evt));
+    this.inputEl.addEventListener("keydown", (evt) => this.onInputKeydown(evt));
     this.registerEvent(
       this.app.metadataCache.on("resolved", () => {
         if (this.hasMetadataFilters()) this.scheduleSearch();
       })
     );
-    this.scope.register([], "ArrowDown", (evt) => {
-      evt.preventDefault();
-      this.moveSelection(1);
-    });
-    this.scope.register([], "ArrowUp", (evt) => {
-      evt.preventDefault();
-      this.moveSelection(-1);
-    });
-    this.scope.register([], "Enter", (evt) => {
-      evt.preventDefault();
-      void this.activateSelection();
-    });
-    this.scope.register([], "Escape", () => this.close());
-    if (this.plugin.settings.isPro) {
-      this.scope.register(["Mod"], " ", (evt) => {
-        evt.preventDefault();
-        this.toggleCheck();
-      });
-      this.scope.register(["Mod"], "s", (evt) => {
-        evt.preventDefault();
-        this.saveCustomSearch();
-      });
-      this.scope.register(["Mod"], "d", (evt) => {
-        evt.preventDefault();
-        this.toggleStarSelected();
-      });
-    }
-    this.inputEl.focus();
-    void this.runSearch();
+    this.focusInput();
+    void this.runSearch().then(() => this.focusInput());
   }
   onClose() {
     this.containerEl.removeClass("vault-spotlight-container");
@@ -3130,9 +3103,59 @@ var SpotlightModal = class extends import_obsidian4.Modal {
       this.plugin.registerCustomSearchCommand(entry);
     }).open();
   }
-  onKeydown(evt) {
-    if (evt.key === "Tab" && this.plugin.settings.isPro) {
+  focusInput() {
+    window.setTimeout(() => {
+      this.inputEl.focus();
+      const end = this.inputEl.value.length;
+      this.inputEl.setSelectionRange(end, end);
+    }, 0);
+  }
+  onInputKeydown(evt) {
+    if (evt.isComposing) return;
+    switch (evt.key) {
+      case "ArrowDown":
+        evt.preventDefault();
+        evt.stopPropagation();
+        this.moveSelection(1);
+        return;
+      case "ArrowUp":
+        evt.preventDefault();
+        evt.stopPropagation();
+        this.moveSelection(-1);
+        return;
+      case "Enter":
+        evt.preventDefault();
+        evt.stopPropagation();
+        void this.activateSelection();
+        return;
+      case "Escape":
+        evt.preventDefault();
+        evt.stopPropagation();
+        this.close();
+        return;
+    }
+    if (!this.plugin.settings.isPro) return;
+    if (evt.key === " " && import_obsidian4.Keymap.isModifier(evt, "Mod")) {
       evt.preventDefault();
+      evt.stopPropagation();
+      this.toggleCheck();
+      return;
+    }
+    if (evt.key === "d" && import_obsidian4.Keymap.isModifier(evt, "Mod")) {
+      evt.preventDefault();
+      evt.stopPropagation();
+      this.toggleStarSelected();
+      return;
+    }
+    if (evt.key === "s" && import_obsidian4.Keymap.isModifier(evt, "Mod")) {
+      evt.preventDefault();
+      evt.stopPropagation();
+      this.saveCustomSearch();
+      return;
+    }
+    if (evt.key === "Tab") {
+      evt.preventDefault();
+      evt.stopPropagation();
       const val = this.inputEl.value;
       if (val.startsWith(">")) {
         this.inputEl.value = val.slice(1).trim();

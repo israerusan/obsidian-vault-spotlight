@@ -1,4 +1,4 @@
-import { App, MarkdownView, Modal, TFile, setIcon } from "obsidian";
+import { App, Keymap, MarkdownView, Modal, TFile, setIcon } from "obsidian";
 import type VaultSpotlightPlugin from "../main";
 import { FileSearcher } from "../search/FileSearcher";
 import { renderHighlightedText, tokenizeQuery } from "../search/fuzzy";
@@ -70,7 +70,7 @@ export class SpotlightModal extends Modal {
 		this.inputEl = inputWrap.createEl("input", {
 			type: "text",
 			placeholder: "Search notes, tags, or properties…",
-			attr: { spellcheck: "false", autocomplete: "off" },
+			attr: { spellcheck: "false", autocomplete: "off", autofocus: "true" },
 		});
 		this.inputEl.value = this.initialQuery;
 
@@ -98,7 +98,7 @@ export class SpotlightModal extends Modal {
 		}
 
 		this.inputEl.addEventListener("input", () => this.scheduleSearch());
-		this.inputEl.addEventListener("keydown", (evt) => this.onKeydown(evt));
+		this.inputEl.addEventListener("keydown", (evt) => this.onInputKeydown(evt));
 
 		this.registerEvent(
 			this.app.metadataCache.on("resolved", () => {
@@ -106,37 +106,8 @@ export class SpotlightModal extends Modal {
 			})
 		);
 
-		this.scope.register([], "ArrowDown", (evt) => {
-			evt.preventDefault();
-			this.moveSelection(1);
-		});
-		this.scope.register([], "ArrowUp", (evt) => {
-			evt.preventDefault();
-			this.moveSelection(-1);
-		});
-		this.scope.register([], "Enter", (evt) => {
-			evt.preventDefault();
-			void this.activateSelection();
-		});
-		this.scope.register([], "Escape", () => this.close());
-
-		if (this.plugin.settings.isPro) {
-			this.scope.register(["Mod"], " ", (evt) => {
-				evt.preventDefault();
-				this.toggleCheck();
-			});
-			this.scope.register(["Mod"], "s", (evt) => {
-				evt.preventDefault();
-				this.saveCustomSearch();
-			});
-			this.scope.register(["Mod"], "d", (evt) => {
-				evt.preventDefault();
-				this.toggleStarSelected();
-			});
-		}
-
-		this.inputEl.focus();
-		void this.runSearch();
+		this.focusInput();
+		void this.runSearch().then(() => this.focusInput());
 	}
 
 	onClose(): void {
@@ -512,9 +483,63 @@ export class SpotlightModal extends Modal {
 		}).open();
 	}
 
-	private onKeydown(evt: KeyboardEvent): void {
-		if (evt.key === "Tab" && this.plugin.settings.isPro) {
+	private focusInput(): void {
+		window.setTimeout(() => {
+			this.inputEl.focus();
+			const end = this.inputEl.value.length;
+			this.inputEl.setSelectionRange(end, end);
+		}, 0);
+	}
+
+	private onInputKeydown(evt: KeyboardEvent): void {
+		if (evt.isComposing) return;
+
+		switch (evt.key) {
+			case "ArrowDown":
+				evt.preventDefault();
+				evt.stopPropagation();
+				this.moveSelection(1);
+				return;
+			case "ArrowUp":
+				evt.preventDefault();
+				evt.stopPropagation();
+				this.moveSelection(-1);
+				return;
+			case "Enter":
+				evt.preventDefault();
+				evt.stopPropagation();
+				void this.activateSelection();
+				return;
+			case "Escape":
+				evt.preventDefault();
+				evt.stopPropagation();
+				this.close();
+				return;
+		}
+
+		if (!this.plugin.settings.isPro) return;
+
+		if (evt.key === " " && Keymap.isModifier(evt, "Mod")) {
 			evt.preventDefault();
+			evt.stopPropagation();
+			this.toggleCheck();
+			return;
+		}
+		if (evt.key === "d" && Keymap.isModifier(evt, "Mod")) {
+			evt.preventDefault();
+			evt.stopPropagation();
+			this.toggleStarSelected();
+			return;
+		}
+		if (evt.key === "s" && Keymap.isModifier(evt, "Mod")) {
+			evt.preventDefault();
+			evt.stopPropagation();
+			this.saveCustomSearch();
+			return;
+		}
+		if (evt.key === "Tab") {
+			evt.preventDefault();
+			evt.stopPropagation();
 			const val = this.inputEl.value;
 			if (val.startsWith(">")) {
 				this.inputEl.value = val.slice(1).trim();
