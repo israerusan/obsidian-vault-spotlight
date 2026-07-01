@@ -1,31 +1,35 @@
 # Vault Spotlight
 
-Spotlight-style vault launcher for [Obsidian](https://obsidian.md). Fuzzy file search, recent files, tag and property filters — with optional Pro features.
+Spotlight-style vault launcher for [Obsidian](https://obsidian.md). Open notes, run commands, filter by metadata, and turn repeated searches into reusable Pro workflows — all from a keyboard-first modal.
+
+## What it does
+
+Vault Spotlight is a fast command center for large vaults: type a few letters to jump to notes, search by tags/properties, run commands, reopen recent work, and use Pro tools for content search, saved collections, result export, and batch actions.
 
 ## Free features
 
-- Fuzzy file name search with recent-file boosting and light typo tolerance
-- Filter by tag (`#work`) and frontmatter (`@status:done`)
-- **Command palette mode** — prefix query with `:` (or `Tab` to it) to search and run any Obsidian command
-- Core **Bookmarks** surfaced in the browse view
-- `Tab` cycles search modes; relative modified time in results
-- Keyboard-first modal (`Ctrl+Shift+O`) with screen-reader (ARIA) support
+- **Fast fuzzy file launcher** — find notes by partial names, initials, or light typos, with recent files boosted automatically.
+- **Tag and property filters** — narrow results with queries like `#work`, `@status:done`, or a filename plus metadata filters.
+- **Command palette mode** — prefix with `:` or press `Tab` to search and run commands without leaving Spotlight.
+- **Bookmarks in browse view** — core Bookmarks appear alongside recent files so important notes are available before typing.
+- **Keyboard-first navigation** — open with `Ctrl+Shift+O`, cycle modes with `Tab`, navigate with arrows, and open with Enter.
+- **Accessible result list** — ARIA combobox/listbox attributes and visible modified-time labels keep the modal usable and readable.
 
 ## Pro features ($8 one-time)
 
-- **Content search** — prefix query with `>` to search inside note bodies (multi-word = match all words on a line)
-- **Ripgrep search** — faster content search when `rg` is installed
-- **Heading jump** — jump straight to any heading across the vault
-- **Preview pane** — live preview beside results, auto-scrolled to the matched passage
-- **Search history** — recent searches resurface on the empty content view
-- **Keyboard action palette** — press `Ctrl+K` on a result to search actions such as open, copy, rename, star, export, and batch tag
-- **Smart collections** — saved searches appear in the browse view and can be pinned as reusable vault views
-- **Starred pins** — pin files with `Ctrl+D`
-- **Canvas & PDF** — search canvas files and show PDFs in results
-- **Batch open** — multi-select with `Ctrl+Space`, open all at once
-- **Export results** — copy selected/current results as Markdown links or export them to a new note
-- **Batch actions** — add tags to selected Markdown notes from Spotlight
-- **Custom search commands** — save queries as palette commands (`Ctrl+S` in spotlight)
+- **Content search** — prefix with `>` to search inside note bodies; multi-word queries require every word on the matching line.
+- **Ripgrep acceleration** — use `rg` when available for faster full-vault content search, with safe fallback to the built-in vault index.
+- **Heading jump** — search headings across the vault and open directly at the matching section.
+- **Live preview pane** — show rendered Markdown beside results and auto-scroll to the matched heading or passage.
+- **Search history** — recently used content searches resurface so repeated research queries are one Enter away.
+- **Keyboard action palette** — press `Ctrl+K` on a result to search actions like open, copy link/path, rename, star, export, or batch tag.
+- **Smart collections** — saved searches become reusable vault views in the browse screen; pin the ones you use daily.
+- **Starred pins** — press `Ctrl+D` to keep high-value files at the top of browse and search results.
+- **Canvas & PDF discovery** — include Canvas files and PDFs in file search, plus text search inside Canvas nodes.
+- **Batch open** — select multiple results with `Ctrl+Space` and open the whole working set at once.
+- **Export results** — copy selected/current results as Markdown links or create a search-results note for handoff and review.
+- **Batch actions** — apply actions such as adding a tag to selected Markdown notes directly from Spotlight.
+- **Custom search commands** — save a useful query with `Ctrl+S` and run it later from the command palette.
 
 Purchase: [Buy Me a Coffee — Vault Spotlight Pro](https://buymeacoffee.com/vaultspotlight)
 

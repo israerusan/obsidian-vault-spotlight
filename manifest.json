@@ -3,7 +3,7 @@
 	"name": "Vault Spotlight",
 	"version": "1.6.0",
 	"minAppVersion": "1.5.0",
-	"description": "Spotlight-style vault launcher: fuzzy file search, command palette, tag/property filters, and core bookmarks. Pro unlocks content & heading search, ripgrep, live preview, starred pins, canvas/PDF, and batch open.",
+	"description": "Fast keyboard launcher for vault files, commands, tags, properties, saved searches, and Pro power workflows.",
 	"author": "iavil",
 	"authorUrl": "https://github.com/israerusan",
 	"fundingUrl": "https://buymeacoffee.com/vaultspotlight",
