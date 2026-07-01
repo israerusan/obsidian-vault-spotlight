@@ -24,6 +24,12 @@ assert.ok(spotlight.includes("togglePinnedCollection"), "spotlight should let us
 assert.ok(spotlight.includes("exportResultsToNote"), "spotlight should export search results to a Markdown note");
 assert.ok(spotlight.includes("copyResultsAsMarkdown"), "spotlight should copy selected/search results as Markdown links");
 assert.ok(spotlight.includes("batchAddTag"), "spotlight should support a Pro batch add-tag action");
+assert.ok(spotlight.includes("batchRemoveTag"), "spotlight should support a Pro batch remove-tag action");
+assert.ok(spotlight.includes("batchSetProperty"), "spotlight should support a Pro batch set-property action");
+assert.ok(spotlight.includes("batchMoveFiles"), "spotlight should support a Pro batch move action");
+assert.ok(spotlight.includes("createMocFromResults"), "spotlight should support MOC generation from results");
+assert.ok(spotlight.includes("appendLinksToActiveNote"), "spotlight should append result links to the active note");
+assert.ok(settings.includes("searchAliases"), "settings should persist Pro query aliases");
 assert.ok(readme.includes("Keyboard action palette"), "README should document the action palette");
 assert.ok(readme.includes("Smart collections"), "README should document smart collections");
 assert.ok(readme.includes("Export results"), "README should document result export");

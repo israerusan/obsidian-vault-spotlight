@@ -3,6 +3,8 @@ export interface FuzzyMatch {
 	indices: number[];
 }
 
+import { parseAdvancedQuery } from "../core/advancedQuery.mjs";
+
 export function fuzzyMatch(query: string, text: string): FuzzyMatch | null {
 	if (!query) {
 		return { score: 0, indices: [] };
@@ -118,46 +120,22 @@ export function renderHighlightedText(parent: HTMLElement, text: string, indices
 
 export function tokenizeQuery(raw: string): {
 	textTokens: string[];
+	phrases: string[];
+	exclusions: string[];
+	folderIncludes: string[];
+	pathTerms: string[];
+	nameTerms: string[];
 	tags: string[];
 	properties: Array<{ key: string; value: string | null }>;
 	extFilters: string[];
+	isStarred: boolean;
+	isBookmarked: boolean;
+	modifiedDays: number | null;
+	createdDays: number | null;
 	contentMode: boolean;
 } {
 	const trimmed = raw.trim();
 	const contentMode = trimmed.startsWith(">");
 	const body = contentMode ? trimmed.slice(1).trim() : trimmed;
-	const parts = body.split(/\s+/).filter(Boolean);
-	const textTokens: string[] = [];
-	const tags: string[] = [];
-	const properties: Array<{ key: string; value: string | null }> = [];
-	const extFilters: string[] = [];
-
-	for (const part of parts) {
-		if (part.startsWith("ext:") && part.length > 4) {
-			extFilters.push(part.slice(4).toLowerCase());
-		} else if (part.startsWith("#") && part.length > 1) {
-			tags.push(part.slice(1).toLowerCase());
-		} else if (part.startsWith("@") && part.length > 1) {
-			const prop = part.slice(1);
-			const colon = prop.indexOf(":");
-			if (colon === -1) {
-				properties.push({ key: prop.toLowerCase(), value: null });
-			} else {
-				const key = prop.slice(0, colon).toLowerCase();
-				const value = prop.slice(colon + 1);
-				// A bare "@key:" with no key is meaningless; skip it rather than
-				// emitting an empty-key filter that excludes every file.
-				if (key.length > 0) {
-					properties.push({ key, value: value.length ? value.toLowerCase() : null });
-				}
-			}
-		} else if (part === "#" || part === "@" || part === "ext:") {
-			// Lone operator characters are no-ops, not literal search text.
-			continue;
-		} else {
-			textTokens.push(part.toLowerCase());
-		}
-	}
-
-	return { textTokens, tags, properties, extFilters, contentMode };
+	return { ...parseAdvancedQuery(body), contentMode };
 }

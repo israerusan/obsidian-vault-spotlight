@@ -37,6 +37,7 @@ export interface VaultSpotlightSettings {
 	pinnedCustomSearchIds: string[];
 	searchProfiles: SearchProfile[];
 	activeProfileId: string;
+	searchAliases: string;
 	showModifiedTime: boolean;
 	ripgrepCommand: string;
 	includeCanvas: boolean;
@@ -64,6 +65,7 @@ export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	pinnedCustomSearchIds: [],
 	searchProfiles: [],
 	activeProfileId: "",
+	searchAliases: "",
 	showModifiedTime: true,
 	ripgrepCommand: "rg",
 	includeCanvas: true,
@@ -243,6 +245,19 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 				});
 			}
 		}
+
+		new Setting(containerEl)
+			.setName("Search aliases (Pro)")
+			.setDesc("One alias per line, e.g. crm = in:Clients @type:client. Aliases expand before search.")
+			.addTextArea((area) => {
+				area.setPlaceholder("crm = in:Clients @type:client\nwaiting = #waiting");
+				area.setValue(this.plugin.settings.searchAliases);
+				area.inputEl.rows = 4;
+				area.onChange((value) => {
+					this.plugin.settings.searchAliases = value;
+					void this.plugin.saveSettings();
+				});
+			});
 
 		new Setting(containerEl).setName("Search profiles (Pro)").setHeading();
 		const profileList = containerEl.createDiv();

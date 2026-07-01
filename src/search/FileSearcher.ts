@@ -26,9 +26,18 @@ export interface FrecencyEntry {
 
 export interface FileSearchOptions {
 	textTokens: string[];
+	phrases?: string[];
+	exclusions?: string[];
+	folderIncludes?: string[];
+	pathTerms?: string[];
+	nameTerms?: string[];
 	tags: string[];
 	properties: Array<{ key: string; value: string | null }>;
 	extFilters: string[];
+	isStarred?: boolean;
+	isBookmarked?: boolean;
+	modifiedDays?: number | null;
+	createdDays?: number | null;
 	recentPaths: string[];
 	starredPaths: string[];
 	bookmarkedPaths?: string[];
@@ -60,6 +69,7 @@ export class FileSearcher {
 
 		for (const file of files) {
 			if (!this.matchesExtFilter(file, options.extFilters)) continue;
+			if (!this.matchesAdvancedFileFilters(file, options, starredSet.has(file.path), bookmarkedSet.has(file.path))) continue;
 			if (!this.matchesFilters(file, options)) continue;
 
 			const basename = file.basename;
@@ -72,7 +82,7 @@ export class FileSearcher {
 				score = 100;
 			} else {
 				let matched = true;
-				for (const token of options.textTokens) {
+				for (const token of [...(options.nameTerms ?? []), ...options.textTokens]) {
 					const basenameMatch = fuzzyMatch(token, basename);
 					if (basenameMatch) {
 						score += basenameMatch.score;
@@ -162,6 +172,36 @@ export class FileSearcher {
 			if (!frontmatterValueMatches(raw, prop.value)) return false;
 		}
 
+		return true;
+	}
+
+	private matchesAdvancedFileFilters(file: TFile, options: FileSearchOptions, isStarred: boolean, isBookmarked: boolean): boolean {
+		const lowerPath = file.path.toLowerCase();
+		const lowerName = file.basename.toLowerCase();
+		if (options.isStarred && !isStarred) return false;
+		if (options.isBookmarked && !isBookmarked) return false;
+		for (const folder of options.folderIncludes ?? []) {
+			const normalized = folder.toLowerCase().replace(/\/$/, "");
+			if (!lowerPath.startsWith(`${normalized}/`) && !lowerPath.includes(`/${normalized}/`)) return false;
+		}
+		for (const term of options.pathTerms ?? []) {
+			if (!lowerPath.includes(term.toLowerCase())) return false;
+		}
+		for (const term of options.nameTerms ?? []) {
+			if (!lowerName.includes(term.toLowerCase()) && !fuzzyMatch(term, lowerName)) return false;
+		}
+		for (const phrase of options.phrases ?? []) {
+			if (!lowerPath.includes(phrase.toLowerCase())) return false;
+		}
+		for (const exclusion of options.exclusions ?? []) {
+			if (lowerPath.includes(exclusion.toLowerCase())) return false;
+		}
+		if (options.modifiedDays !== null && options.modifiedDays !== undefined) {
+			if (Date.now() - file.stat.mtime > options.modifiedDays * 86400000) return false;
+		}
+		if (options.createdDays !== null && options.createdDays !== undefined) {
+			if (Date.now() - file.stat.ctime > options.createdDays * 86400000) return false;
+		}
 		return true;
 	}
 }

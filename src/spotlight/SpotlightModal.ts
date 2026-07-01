@@ -19,8 +19,8 @@ import { renderHighlightedText, tokenizeQuery } from "../search/fuzzy";
 import { SaveSearchPromptModal } from "./SaveSearchPromptModal";
 import { PromptModal } from "./PromptModal";
 import { iconForFileKind, type VaultFileKind } from "../search/vaultFiles";
-import { applyTagToMarkdown } from "../core/frontmatterTags.mjs";
-import { buildResultMarkdown } from "../core/resultMarkdown.mjs";
+import { applyTagToMarkdown, removeTagFromMarkdown, setFrontmatterProperty } from "../core/frontmatterTags.mjs";
+import { buildMocMarkdown, buildResultMarkdown } from "../core/resultMarkdown.mjs";
 import { activeProfile, createProfileFromSettings } from "../core/searchProfiles.mjs";
 
 export type SpotlightMode = "files" | "content" | "headings" | "commands";
@@ -280,6 +280,19 @@ export class SpotlightModal extends Modal {
 		return parsed.tags.length > 0 || parsed.properties.length > 0;
 	}
 
+	private expandAliases(raw: string): string {
+		if (!this.plugin.settings.isPro || !this.plugin.settings.searchAliases.trim()) return raw;
+		const parts = raw.trim().split(/\s+/);
+		if (parts.length === 0) return raw;
+		const first = parts[0].toLowerCase();
+		for (const line of this.plugin.settings.searchAliases.split("\n")) {
+			const match = line.match(/^\s*([^=]+?)\s*=\s*(.+)$/);
+			if (!match) continue;
+			if (match[1].trim().toLowerCase() === first) return [match[2].trim(), ...parts.slice(1)].join(" ");
+		}
+		return raw;
+	}
+
 	private scheduleSearch(): void {
 		if (this.searchTimer !== null) window.clearTimeout(this.searchTimer);
 		this.searchTimer = window.setTimeout(() => void this.runSearch(), 60);
@@ -295,7 +308,7 @@ export class SpotlightModal extends Modal {
 
 	private async runSearch(): Promise<void> {
 		const generation = ++this.searchGeneration;
-		const raw = this.inputEl.value;
+		const raw = this.expandAliases(this.inputEl.value);
 		const trimmed = raw.trim();
 		const mode = this.effectiveMode(trimmed);
 		const isEmptyQuery = trimmed.length === 0;
@@ -407,9 +420,18 @@ export class SpotlightModal extends Modal {
 				const parsed = tokenizeQuery(raw);
 				const fileResults = await this.fileSearcher.search({
 					textTokens: parsed.textTokens,
+					phrases: isPro ? parsed.phrases : [],
+					exclusions: isPro ? parsed.exclusions : [],
+					folderIncludes: isPro ? parsed.folderIncludes : [],
+					pathTerms: isPro ? parsed.pathTerms : [],
+					nameTerms: isPro ? parsed.nameTerms : [],
 					tags: parsed.tags,
 					properties: parsed.properties,
 					extFilters: isPro ? parsed.extFilters : [],
+					isStarred: isPro ? parsed.isStarred : false,
+					isBookmarked: isPro ? parsed.isBookmarked : false,
+					modifiedDays: isPro ? parsed.modifiedDays : null,
+					createdDays: isPro ? parsed.createdDays : null,
 					recentPaths: this.plugin.settings.recentPaths,
 					starredPaths: isPro ? this.plugin.settings.starredPaths : [],
 					bookmarkedPaths: this.plugin.getBookmarkedPaths(),
@@ -461,7 +483,18 @@ export class SpotlightModal extends Modal {
 
 				// Offer to create a note when a plain name search finds nothing.
 				const noFilters =
-					parsed.tags.length === 0 && parsed.properties.length === 0 && parsed.extFilters.length === 0;
+					parsed.tags.length === 0 &&
+					parsed.properties.length === 0 &&
+					parsed.extFilters.length === 0 &&
+					parsed.phrases.length === 0 &&
+					parsed.exclusions.length === 0 &&
+					parsed.folderIncludes.length === 0 &&
+					parsed.pathTerms.length === 0 &&
+					parsed.nameTerms.length === 0 &&
+					!parsed.isStarred &&
+					!parsed.isBookmarked &&
+					parsed.modifiedDays === null &&
+					parsed.createdDays === null;
 				if (this.items.length === 0 && !isEmptyQuery && noFilters) {
 					this.items = [{ kind: "create", name: trimmed }];
 				}
@@ -1068,6 +1101,55 @@ export class SpotlightModal extends Modal {
 				description: "Append a tag to selected Markdown files.",
 				requiresPro: true,
 				run: () => this.batchAddTag(),
+			},
+			{
+				id: "batch-remove-tag",
+				name: "Batch remove tag",
+				description: "Remove a tag from selected Markdown files.",
+				requiresPro: true,
+				run: () => this.batchRemoveTag(),
+			},
+			{
+				id: "batch-set-property",
+				name: "Batch set property",
+				description: "Set a frontmatter property on selected Markdown files.",
+				requiresPro: true,
+				run: () => this.batchSetProperty(),
+			},
+			{
+				id: "batch-move",
+				name: "Batch move files",
+				description: "Move selected files into a target folder.",
+				requiresPro: true,
+				run: () => this.batchMoveFiles(),
+			},
+			{
+				id: "batch-star",
+				name: "Batch star results",
+				description: "Add selected/current result files to Starred pins.",
+				requiresPro: true,
+				run: () => this.batchSetStarred(true),
+			},
+			{
+				id: "batch-unstar",
+				name: "Batch unstar results",
+				description: "Remove selected/current result files from Starred pins.",
+				requiresPro: true,
+				run: () => this.batchSetStarred(false),
+			},
+			{
+				id: "create-moc",
+				name: "Create MOC from results",
+				description: "Create a grouped index note from selected/current results.",
+				requiresPro: true,
+				run: () => this.createMocFromResults(),
+			},
+			{
+				id: "append-links",
+				name: "Append links to active note",
+				description: "Append selected/current result links to the active Markdown note.",
+				requiresPro: true,
+				run: () => this.appendLinksToActiveNote(),
 			}
 		);
 		return actions;
@@ -1128,9 +1210,7 @@ export class SpotlightModal extends Modal {
 	}
 
 	private batchAddTag(): void {
-		const files = this.resultItemsForBatch()
-			.map((item) => this.itemFile(item))
-			.filter((file): file is TFile => !!file && file.extension === "md");
+		const files = this.markdownFilesForBatch();
 		if (files.length === 0) {
 			new Notice("Vault Spotlight: select Markdown notes first.");
 			return;
@@ -1142,16 +1222,140 @@ export class SpotlightModal extends Modal {
 			onSubmit: (raw) => {
 				const cleaned = raw.replace(/^#/, "").trim().replace(/\s+/g, "-");
 				if (!cleaned) return;
-				void Promise.all(
-					files.map(async (file) => {
-						const content = await this.app.vault.cachedRead(file);
-						const next = applyTagToMarkdown(content, cleaned);
-						if (next === content) return;
-						await this.app.vault.modify(file, next);
-					})
-				).then(() => new Notice(`Vault Spotlight: tag added to ${files.length} note${files.length === 1 ? "" : "s"}.`));
+				void Promise.all(files.map((file) => this.modifyMarkdownFile(file, (content) => applyTagToMarkdown(content, cleaned))))
+					.then(() => new Notice(`Vault Spotlight: tag added to ${files.length} note${files.length === 1 ? "" : "s"}.`));
 			},
 		}).open();
+	}
+
+	private batchRemoveTag(): void {
+		const files = this.markdownFilesForBatch();
+		if (files.length === 0) {
+			new Notice("Vault Spotlight: select Markdown notes first.");
+			return;
+		}
+		new PromptModal(this.app, {
+			title: "Remove tag from selected notes",
+			initial: "spotlight",
+			cta: "Remove tag",
+			onSubmit: (raw) => {
+				const cleaned = raw.replace(/^#/, "").trim().replace(/\s+/g, "-");
+				if (!cleaned) return;
+				void Promise.all(files.map((file) => this.modifyMarkdownFile(file, (content) => removeTagFromMarkdown(content, cleaned))))
+					.then(() => new Notice(`Vault Spotlight: tag removed from ${files.length} note${files.length === 1 ? "" : "s"}.`));
+			},
+		}).open();
+	}
+
+	private batchSetProperty(): void {
+		const files = this.markdownFilesForBatch();
+		if (files.length === 0) {
+			new Notice("Vault Spotlight: select Markdown notes first.");
+			return;
+		}
+		new PromptModal(this.app, {
+			title: "Set property on selected notes",
+			initial: "status=active",
+			cta: "Set property",
+			onSubmit: (raw) => {
+				const sep = raw.indexOf("=");
+				if (sep <= 0) {
+					new Notice("Vault Spotlight: use key=value.");
+					return;
+				}
+				const key = raw.slice(0, sep).trim();
+				const value = raw.slice(sep + 1).trim();
+				void Promise.all(files.map((file) => this.modifyMarkdownFile(file, (content) => setFrontmatterProperty(content, key, value))))
+					.then(() => new Notice(`Vault Spotlight: property set on ${files.length} note${files.length === 1 ? "" : "s"}.`));
+			},
+		}).open();
+	}
+
+	private batchMoveFiles(): void {
+		const files = this.filesForBatch();
+		if (files.length === 0) return;
+		new PromptModal(this.app, {
+			title: "Move selected files to folder",
+			initial: "Archive",
+			cta: "Move files",
+			onSubmit: (raw) => {
+				const folder = normalizePath(raw.trim());
+				if (!folder) return;
+				void (async () => {
+					if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+					for (const file of files) {
+						await this.app.fileManager.renameFile(file, normalizePath(`${folder}/${file.name}`));
+					}
+					new Notice(`Vault Spotlight: moved ${files.length} file${files.length === 1 ? "" : "s"}.`);
+				})();
+			},
+		}).open();
+	}
+
+	private batchSetStarred(starred: boolean): void {
+		const files = this.filesForBatch();
+		for (const file of files) {
+			const isStarred = this.plugin.isStarred(file.path);
+			if (starred !== isStarred) this.plugin.toggleStar(file.path);
+		}
+		new Notice(`Vault Spotlight: ${starred ? "starred" : "unstarred"} ${files.length} file${files.length === 1 ? "" : "s"}.`);
+		void this.runSearch();
+	}
+
+	private createMocFromResults(): void {
+		const rows = this.resultItemsForBatch().map((item) => {
+			const file = this.itemFile(item);
+			if (!file) return null;
+			return {
+				link: this.app.fileManager.generateMarkdownLink(file, ""),
+				folder: file.parent?.path || "/",
+				snippet: item.kind === "content" ? item.snippet : item.kind === "heading" ? item.heading : "",
+			};
+		}).filter(Boolean) as Array<{ link: string; folder: string; snippet?: string }>;
+		if (rows.length === 0) return;
+		const stamp = new Date().toISOString().slice(0, 10);
+		const note = buildMocMarkdown(rows, { title: `Vault Spotlight MOC ${stamp}`, groupBy: "folder", includeSnippets: true });
+		void this.createExportNote(`MOC ${stamp}.md`, note, "MOC created");
+	}
+
+	private appendLinksToActiveNote(): void {
+		const active = this.app.workspace.getActiveFile();
+		if (!active || active.extension !== "md") {
+			new Notice("Vault Spotlight: open a Markdown note first.");
+			return;
+		}
+		const markdown = this.resultsAsMarkdown();
+		if (!markdown) return;
+		void this.app.vault.process(active, (content) => `${content.trimEnd()}\n\n${markdown}\n`).then(() => new Notice("Vault Spotlight: links appended."));
+	}
+
+	private markdownFilesForBatch(): TFile[] {
+		return this.filesForBatch().filter((file) => file.extension === "md");
+	}
+
+	private filesForBatch(): TFile[] {
+		return this.resultItemsForBatch().map((item) => this.itemFile(item)).filter((file): file is TFile => !!file);
+	}
+
+	private async modifyMarkdownFile(file: TFile, updater: (content: string) => string): Promise<void> {
+		const content = await this.app.vault.cachedRead(file);
+		const next = updater(content);
+		if (next !== content) await this.app.vault.modify(file, next);
+	}
+
+	private async createExportNote(filename: string, note: string, message: string): Promise<void> {
+		const dir = "Vault Spotlight Exports";
+		if (!this.app.vault.getAbstractFileByPath(dir)) await this.app.vault.createFolder(dir);
+		let path = normalizePath(`${dir}/${filename}`);
+		let counter = 2;
+		while (this.app.vault.getAbstractFileByPath(path)) {
+			path = normalizePath(`${dir}/${filename.replace(/\.md$/, ` ${counter}.md`)}`);
+			counter++;
+		}
+		const file = await this.app.vault.create(path, note);
+		this.close();
+		await this.app.workspace.getLeaf(false).openFile(file);
+		new Notice(`Vault Spotlight: ${message}.`);
 	}
 
 	private openActionsMenu(item: ResultItem, evt?: MouseEvent): void {

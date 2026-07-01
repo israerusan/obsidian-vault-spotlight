@@ -24,13 +24,26 @@ Vault Spotlight is a fast command center for large vaults: type a few letters to
 - **Search history** — recently used content searches resurface so repeated research queries are one Enter away.
 - **Keyboard action palette** — press `Ctrl+K` on a result to search actions like open, copy link/path, rename, star, export, or batch tag.
 - **Search profiles** — save workspace-style modes for writing, research, clients, PDFs, or any repeated vault context.
+- **Advanced query language** — combine quoted phrases, exclusions, `in:folder`, `name:`, `path:`, `modified:7d`, `created:30d`, and `is:starred` filters.
+- **Search aliases** — define personal shortcuts such as `crm = in:Clients @type:client` for repeated vault queries.
 - **Smart collections** — saved searches become reusable vault views in the browse screen; pin the ones you use daily.
 - **Starred pins** — press `Ctrl+D` to keep high-value files at the top of browse and search results.
 - **Canvas & PDF discovery** — include Canvas files and PDFs in file search, plus text search inside Canvas nodes.
 - **Batch open** — select multiple results with `Ctrl+Space` and open the whole working set at once.
 - **Export results** — copy selected/current results as Markdown links or create a search-results note for handoff and review.
 - **Batch actions** — apply actions such as adding a tag to selected Markdown notes directly from Spotlight.
+- **Batch organizer** — move files, star/unstar results, remove tags, and set frontmatter properties across selected notes.
+- **MOC builder** — turn selected/current results into a grouped map-of-content note or append links to the active note.
 - **Custom search commands** — save a useful query with `Ctrl+S` and run it later from the command palette.
+
+### Advanced query examples
+
+```text
+"launch plan" -archive in:Projects modified:7d
+name:roadmap tag:client prop:status=active
+is:starred ext:md
+crm waiting
+```
 
 Purchase: [Buy Me a Coffee — Vault Spotlight Pro](https://buymeacoffee.com/vaultspotlight)
 

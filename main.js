@@ -2326,6 +2326,7 @@ var DEFAULT_SETTINGS = {
   pinnedCustomSearchIds: [],
   searchProfiles: [],
   activeProfileId: "",
+  searchAliases: "",
   showModifiedTime: true,
   ripgrepCommand: "rg",
   includeCanvas: true,
@@ -2460,6 +2461,15 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
         });
       }
     }
+    new import_obsidian.Setting(containerEl).setName("Search aliases (Pro)").setDesc("One alias per line, e.g. crm = in:Clients @type:client. Aliases expand before search.").addTextArea((area) => {
+      area.setPlaceholder("crm = in:Clients @type:client\nwaiting = #waiting");
+      area.setValue(this.plugin.settings.searchAliases);
+      area.inputEl.rows = 4;
+      area.onChange((value) => {
+        this.plugin.settings.searchAliases = value;
+        void this.plugin.saveSettings();
+      });
+    });
     new import_obsidian.Setting(containerEl).setName("Search profiles (Pro)").setHeading();
     const profileList = containerEl.createDiv();
     if (!this.plugin.settings.isPro) {
@@ -2522,6 +2532,93 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
 
 // src/spotlight/SpotlightModal.ts
 var import_obsidian5 = require("obsidian");
+
+// src/core/advancedQuery.mjs
+function parseAdvancedQuery(raw) {
+  const tokens = tokenizeAdvanced(raw);
+  const out = {
+    textTokens: [],
+    phrases: [],
+    exclusions: [],
+    folderIncludes: [],
+    pathTerms: [],
+    nameTerms: [],
+    tags: [],
+    properties: [],
+    extFilters: [],
+    isStarred: false,
+    isBookmarked: false,
+    modifiedDays: null,
+    createdDays: null
+  };
+  for (const token of tokens) {
+    const value = token.value.trim();
+    if (!value) continue;
+    if (token.quoted) {
+      out.phrases.push(value.toLowerCase());
+      continue;
+    }
+    const lower = value.toLowerCase();
+    if (lower.startsWith("-") && lower.length > 1) out.exclusions.push(lower.slice(1));
+    else if (lower.startsWith("in:") && lower.length > 3) out.folderIncludes.push(lower.slice(3));
+    else if (lower.startsWith("path:") && lower.length > 5) out.pathTerms.push(lower.slice(5));
+    else if (lower.startsWith("name:") && lower.length > 5) out.nameTerms.push(lower.slice(5));
+    else if (lower.startsWith("tag:") && lower.length > 4) out.tags.push(lower.slice(4).replace(/^#/, ""));
+    else if (lower.startsWith("#") && lower.length > 1) out.tags.push(lower.slice(1));
+    else if (lower.startsWith("prop:") && lower.length > 5) addProperty(out, lower.slice(5));
+    else if (lower.startsWith("@") && lower.length > 1) addProperty(out, lower.slice(1));
+    else if (lower.startsWith("ext:") && lower.length > 4) out.extFilters.push(lower.slice(4).replace(/^\./, ""));
+    else if (lower.startsWith("modified:") && lower.length > 9) out.modifiedDays = parseDays(lower.slice(9));
+    else if (lower.startsWith("created:") && lower.length > 8) out.createdDays = parseDays(lower.slice(8));
+    else if (lower === "is:starred") out.isStarred = true;
+    else if (lower === "is:bookmarked") out.isBookmarked = true;
+    else if (lower !== "#" && lower !== "@" && lower !== "ext:") out.textTokens.push(lower);
+  }
+  return out;
+}
+function addProperty(out, raw) {
+  const eq = raw.indexOf("=");
+  const colon = raw.indexOf(":");
+  const sep = eq === -1 ? colon : colon === -1 ? eq : Math.min(eq, colon);
+  if (sep === -1) out.properties.push({ key: raw, value: null });
+  else {
+    const key = raw.slice(0, sep);
+    if (key) out.properties.push({ key, value: raw.slice(sep + 1) || null });
+  }
+}
+function parseDays(raw) {
+  const n = Number(String(raw).replace(/d$/, ""));
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+function tokenizeAdvanced(raw) {
+  const tokens = [];
+  const input = String(raw || "").trim();
+  let current = "";
+  let quoted = false;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (ch === '"') {
+      if (quoted) {
+        tokens.push({ value: current, quoted: true });
+        current = "";
+        quoted = false;
+      } else {
+        if (current.trim()) tokens.push({ value: current.trim(), quoted: false });
+        current = "";
+        quoted = true;
+      }
+      continue;
+    }
+    if (!quoted && /\s/.test(ch)) {
+      if (current.trim()) tokens.push({ value: current.trim(), quoted: false });
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) tokens.push({ value: current.trim(), quoted });
+  return tokens;
+}
 
 // src/search/fuzzy.ts
 function fuzzyMatch(query, text) {
@@ -2618,35 +2715,7 @@ function tokenizeQuery(raw) {
   const trimmed = raw.trim();
   const contentMode = trimmed.startsWith(">");
   const body = contentMode ? trimmed.slice(1).trim() : trimmed;
-  const parts = body.split(/\s+/).filter(Boolean);
-  const textTokens = [];
-  const tags = [];
-  const properties = [];
-  const extFilters = [];
-  for (const part of parts) {
-    if (part.startsWith("ext:") && part.length > 4) {
-      extFilters.push(part.slice(4).toLowerCase());
-    } else if (part.startsWith("#") && part.length > 1) {
-      tags.push(part.slice(1).toLowerCase());
-    } else if (part.startsWith("@") && part.length > 1) {
-      const prop = part.slice(1);
-      const colon = prop.indexOf(":");
-      if (colon === -1) {
-        properties.push({ key: prop.toLowerCase(), value: null });
-      } else {
-        const key = prop.slice(0, colon).toLowerCase();
-        const value = prop.slice(colon + 1);
-        if (key.length > 0) {
-          properties.push({ key, value: value.length ? value.toLowerCase() : null });
-        }
-      }
-    } else if (part === "#" || part === "@" || part === "ext:") {
-      continue;
-    } else {
-      textTokens.push(part.toLowerCase());
-    }
-  }
-  return { textTokens, tags, properties, extFilters, contentMode };
+  return { ...parseAdvancedQuery(body), contentMode };
 }
 
 // src/search/metadata.ts
@@ -2751,7 +2820,7 @@ var FileSearcher = class {
     this.app = app;
   }
   async search(options) {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     const files = getSearchableFiles(this.app, {
       includeCanvas: options.includeCanvas,
       includePdf: options.includePdf,
@@ -2767,6 +2836,7 @@ var FileSearcher = class {
     const isFilterOnly = options.textTokens.length === 0 && hasActiveFilters;
     for (const file of files) {
       if (!this.matchesExtFilter(file, options.extFilters)) continue;
+      if (!this.matchesAdvancedFileFilters(file, options, starredSet.has(file.path), bookmarkedSet.has(file.path))) continue;
       if (!this.matchesFilters(file, options)) continue;
       const basename = file.basename;
       let score = 0;
@@ -2777,7 +2847,7 @@ var FileSearcher = class {
         score = 100;
       } else {
         let matched = true;
-        for (const token of options.textTokens) {
+        for (const token of [...(_c = options.nameTerms) != null ? _c : [], ...options.textTokens]) {
           const basenameMatch = fuzzyMatch(token, basename);
           if (basenameMatch) {
             score += basenameMatch.score;
@@ -2807,7 +2877,7 @@ var FileSearcher = class {
       } else {
         score += Math.max(0, 10 - Math.floor((Date.now() - file.stat.mtime) / 864e5));
       }
-      const fr = (_c = options.frecency) == null ? void 0 : _c[file.path];
+      const fr = (_d = options.frecency) == null ? void 0 : _d[file.path];
       if (fr) {
         const freqBoost = Math.min(300, fr.count * 15);
         const ageDays = (Date.now() - fr.last) / 864e5;
@@ -2847,6 +2917,36 @@ var FileSearcher = class {
       if (!fm) return false;
       const raw = getFrontmatterValue(fm, prop.key);
       if (!frontmatterValueMatches(raw, prop.value)) return false;
+    }
+    return true;
+  }
+  matchesAdvancedFileFilters(file, options, isStarred, isBookmarked) {
+    var _a, _b, _c, _d, _e;
+    const lowerPath = file.path.toLowerCase();
+    const lowerName = file.basename.toLowerCase();
+    if (options.isStarred && !isStarred) return false;
+    if (options.isBookmarked && !isBookmarked) return false;
+    for (const folder of (_a = options.folderIncludes) != null ? _a : []) {
+      const normalized = folder.toLowerCase().replace(/\/$/, "");
+      if (!lowerPath.startsWith(`${normalized}/`) && !lowerPath.includes(`/${normalized}/`)) return false;
+    }
+    for (const term of (_b = options.pathTerms) != null ? _b : []) {
+      if (!lowerPath.includes(term.toLowerCase())) return false;
+    }
+    for (const term of (_c = options.nameTerms) != null ? _c : []) {
+      if (!lowerName.includes(term.toLowerCase()) && !fuzzyMatch(term, lowerName)) return false;
+    }
+    for (const phrase of (_d = options.phrases) != null ? _d : []) {
+      if (!lowerPath.includes(phrase.toLowerCase())) return false;
+    }
+    for (const exclusion of (_e = options.exclusions) != null ? _e : []) {
+      if (lowerPath.includes(exclusion.toLowerCase())) return false;
+    }
+    if (options.modifiedDays !== null && options.modifiedDays !== void 0) {
+      if (Date.now() - file.stat.mtime > options.modifiedDays * 864e5) return false;
+    }
+    if (options.createdDays !== null && options.createdDays !== void 0) {
+      if (Date.now() - file.stat.ctime > options.createdDays * 864e5) return false;
     }
     return true;
   }
@@ -3041,7 +3141,7 @@ function applyTagToMarkdown(markdown, rawTag) {
   const tag = normalizeTag2(rawTag);
   if (!tag) return markdown;
   const content = String(markdown != null ? markdown : "");
-  if (new RegExp(`(^|\\s)#${escapeRegExp(tag)}(\\s|$)`).test(content)) return content;
+  if (frontmatterHasTag(content, tag) || new RegExp(`(^|\\s)#${escapeRegExp(tag)}(\\s|$)`).test(content)) return content;
   const fm = parseFrontmatter(content);
   if (!fm) return `---
 tags: [${tag}]
@@ -3049,14 +3149,48 @@ tags: [${tag}]
 ${content}`;
   const lines = fm.body.split("\n");
   const tagLineIndex = lines.findIndex((line) => /^tags\s*:/.test(line.trim()));
-  if (tagLineIndex === -1) {
-    lines.push(`tags: [${tag}]`);
-  } else {
-    lines[tagLineIndex] = appendTagToLine(lines[tagLineIndex], tag);
-  }
+  if (tagLineIndex === -1) lines.push(`tags: [${tag}]`);
+  else lines[tagLineIndex] = appendTagToLine(lines[tagLineIndex], tag);
   return `---
 ${lines.join("\n")}
 ---${fm.rest}`;
+}
+function removeTagFromMarkdown(markdown, rawTag) {
+  const tag = normalizeTag2(rawTag);
+  if (!tag) return markdown;
+  let content = String(markdown != null ? markdown : "");
+  const fm = parseFrontmatter(content);
+  if (fm) {
+    const lines = fm.body.split("\n").map((line) => /^tags\s*:/.test(line.trim()) ? removeTagFromLine(line, tag) : line).filter((line) => line.trim() !== "tags: []");
+    content = `---
+${lines.join("\n")}
+---${fm.rest}`;
+  }
+  return content.replace(new RegExp(`(^|\\s)#${escapeRegExp(tag)}(?=\\s|$)`, "g"), (m, lead) => lead || "").replace(/[ \t]+\n/g, "\n");
+}
+function setFrontmatterProperty(markdown, key, value) {
+  const cleanKey = String(key || "").trim();
+  if (!cleanKey) return markdown;
+  const line = `${cleanKey}: ${formatYamlScalar(value)}`;
+  const content = String(markdown != null ? markdown : "");
+  const fm = parseFrontmatter(content);
+  if (!fm) return `---
+${line}
+---
+${content}`;
+  const lines = fm.body.split("\n");
+  const idx = lines.findIndex((existing) => existing.split(":", 1)[0].trim().toLowerCase() === cleanKey.toLowerCase());
+  if (idx === -1) lines.push(line);
+  else lines[idx] = line;
+  return `---
+${lines.join("\n")}
+---${fm.rest}`;
+}
+function frontmatterHasTag(content, tag) {
+  const fm = parseFrontmatter(content);
+  if (!fm) return false;
+  const line = fm.body.split("\n").find((entry) => /^tags\s*:/.test(entry.trim()));
+  return line ? tagValuesFromLine(line).includes(tag) : false;
 }
 function parseFrontmatter(content) {
   if (!content.startsWith("---\n")) return null;
@@ -3065,19 +3199,22 @@ function parseFrontmatter(content) {
   return { body: content.slice(4, close), rest: content.slice(close + 4) };
 }
 function appendTagToLine(line, tag) {
-  if (line.includes(`[`) && line.includes(`]`)) {
-    return line.replace(/\[(.*)\]/, (_m, inner) => {
-      const tags2 = inner.split(",").map((s) => s.trim()).filter(Boolean);
-      if (!tags2.includes(tag)) tags2.push(tag);
-      return `[${tags2.join(", ")}]`;
-    });
-  }
-  const parts = line.split(":");
-  const existing = parts.slice(1).join(":").trim();
-  if (!existing) return `${parts[0]}: [${tag}]`;
-  const tags = existing.split(/\s+/).map((s) => s.replace(/^-\s*/, "").trim()).filter(Boolean);
+  const tags = tagValuesFromLine(line);
   if (!tags.includes(tag)) tags.push(tag);
-  return `${parts[0]}: [${tags.join(", ")}]`;
+  return `${line.split(":", 1)[0]}: [${tags.join(", ")}]`;
+}
+function removeTagFromLine(line, tag) {
+  const tags = tagValuesFromLine(line).filter((entry) => entry !== tag);
+  return `${line.split(":", 1)[0]}: [${tags.join(", ")}]`;
+}
+function tagValuesFromLine(line) {
+  const raw = line.split(":").slice(1).join(":").trim();
+  const inner = raw.startsWith("[") && raw.endsWith("]") ? raw.slice(1, -1) : raw;
+  return inner.split(/[ ,]+/).map((s) => s.replace(/^#/, "").trim()).filter(Boolean);
+}
+function formatYamlScalar(value) {
+  const text = String(value != null ? value : "").trim();
+  return /^[A-Za-z0-9_./@-]+$/.test(text) ? text : JSON.stringify(text);
 }
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -3089,6 +3226,34 @@ function buildResultMarkdown(rows) {
     var _a, _b;
     return `${(_a = row.prefix) != null ? _a : "- "}${row.link}${(_b = row.suffix) != null ? _b : ""}`;
   }).filter((line) => line.trim().length > 0).join("\n");
+}
+function buildMocMarkdown(rows, options = {}) {
+  const title = options.title || "Vault Spotlight MOC";
+  const groupBy = options.groupBy || "none";
+  const includeSnippets = options.includeSnippets === true;
+  const groups = /* @__PURE__ */ new Map();
+  for (const row of rows) {
+    const key = groupKey(row, groupBy);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  const lines = [`# ${title}`, ""];
+  for (const [group, items] of groups) {
+    if (groupBy !== "none") lines.push(`## ${group}`, "");
+    for (const row of items) {
+      const suffix = includeSnippets && row.snippet ? ` \u2014 ${row.snippet}` : row.suffix || "";
+      lines.push(`- ${row.link}${suffix}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n").trimEnd() + "\n";
+}
+function groupKey(row, groupBy) {
+  var _a;
+  if (groupBy === "folder") return row.folder || "/";
+  if (groupBy === "tag") return ((_a = row.tags) == null ? void 0 : _a[0]) || "Untagged";
+  if (groupBy === "property") return row.property || "Uncategorized";
+  return "Results";
 }
 
 // src/spotlight/SpotlightModal.ts
@@ -3240,6 +3405,18 @@ var SpotlightModal = class extends import_obsidian5.Modal {
     const parsed = tokenizeQuery((_b = (_a = this.inputEl) == null ? void 0 : _a.value) != null ? _b : "");
     return parsed.tags.length > 0 || parsed.properties.length > 0;
   }
+  expandAliases(raw) {
+    if (!this.plugin.settings.isPro || !this.plugin.settings.searchAliases.trim()) return raw;
+    const parts = raw.trim().split(/\s+/);
+    if (parts.length === 0) return raw;
+    const first = parts[0].toLowerCase();
+    for (const line of this.plugin.settings.searchAliases.split("\n")) {
+      const match = line.match(/^\s*([^=]+?)\s*=\s*(.+)$/);
+      if (!match) continue;
+      if (match[1].trim().toLowerCase() === first) return [match[2].trim(), ...parts.slice(1)].join(" ");
+    }
+    return raw;
+  }
   scheduleSearch() {
     if (this.searchTimer !== null) window.clearTimeout(this.searchTimer);
     this.searchTimer = window.setTimeout(() => void this.runSearch(), 60);
@@ -3252,7 +3429,7 @@ var SpotlightModal = class extends import_obsidian5.Modal {
   async runSearch() {
     var _a, _b, _c, _d;
     const generation = ++this.searchGeneration;
-    const raw = this.inputEl.value;
+    const raw = this.expandAliases(this.inputEl.value);
     const trimmed = raw.trim();
     const mode = this.effectiveMode(trimmed);
     const isEmptyQuery = trimmed.length === 0;
@@ -3354,9 +3531,18 @@ var SpotlightModal = class extends import_obsidian5.Modal {
         const parsed = tokenizeQuery(raw);
         const fileResults = await this.fileSearcher.search({
           textTokens: parsed.textTokens,
+          phrases: isPro ? parsed.phrases : [],
+          exclusions: isPro ? parsed.exclusions : [],
+          folderIncludes: isPro ? parsed.folderIncludes : [],
+          pathTerms: isPro ? parsed.pathTerms : [],
+          nameTerms: isPro ? parsed.nameTerms : [],
           tags: parsed.tags,
           properties: parsed.properties,
           extFilters: isPro ? parsed.extFilters : [],
+          isStarred: isPro ? parsed.isStarred : false,
+          isBookmarked: isPro ? parsed.isBookmarked : false,
+          modifiedDays: isPro ? parsed.modifiedDays : null,
+          createdDays: isPro ? parsed.createdDays : null,
           recentPaths: this.plugin.settings.recentPaths,
           starredPaths: isPro ? this.plugin.settings.starredPaths : [],
           bookmarkedPaths: this.plugin.getBookmarkedPaths(),
@@ -3400,7 +3586,7 @@ var SpotlightModal = class extends import_obsidian5.Modal {
           }));
           this.items = [...collections, ...this.items];
         }
-        const noFilters = parsed.tags.length === 0 && parsed.properties.length === 0 && parsed.extFilters.length === 0;
+        const noFilters = parsed.tags.length === 0 && parsed.properties.length === 0 && parsed.extFilters.length === 0 && parsed.phrases.length === 0 && parsed.exclusions.length === 0 && parsed.folderIncludes.length === 0 && parsed.pathTerms.length === 0 && parsed.nameTerms.length === 0 && !parsed.isStarred && !parsed.isBookmarked && parsed.modifiedDays === null && parsed.createdDays === null;
         if (this.items.length === 0 && !isEmptyQuery && noFilters) {
           this.items = [{ kind: "create", name: trimmed }];
         }
@@ -3945,6 +4131,55 @@ var SpotlightModal = class extends import_obsidian5.Modal {
         description: "Append a tag to selected Markdown files.",
         requiresPro: true,
         run: () => this.batchAddTag()
+      },
+      {
+        id: "batch-remove-tag",
+        name: "Batch remove tag",
+        description: "Remove a tag from selected Markdown files.",
+        requiresPro: true,
+        run: () => this.batchRemoveTag()
+      },
+      {
+        id: "batch-set-property",
+        name: "Batch set property",
+        description: "Set a frontmatter property on selected Markdown files.",
+        requiresPro: true,
+        run: () => this.batchSetProperty()
+      },
+      {
+        id: "batch-move",
+        name: "Batch move files",
+        description: "Move selected files into a target folder.",
+        requiresPro: true,
+        run: () => this.batchMoveFiles()
+      },
+      {
+        id: "batch-star",
+        name: "Batch star results",
+        description: "Add selected/current result files to Starred pins.",
+        requiresPro: true,
+        run: () => this.batchSetStarred(true)
+      },
+      {
+        id: "batch-unstar",
+        name: "Batch unstar results",
+        description: "Remove selected/current result files from Starred pins.",
+        requiresPro: true,
+        run: () => this.batchSetStarred(false)
+      },
+      {
+        id: "create-moc",
+        name: "Create MOC from results",
+        description: "Create a grouped index note from selected/current results.",
+        requiresPro: true,
+        run: () => this.createMocFromResults()
+      },
+      {
+        id: "append-links",
+        name: "Append links to active note",
+        description: "Append selected/current result links to the active Markdown note.",
+        requiresPro: true,
+        run: () => this.appendLinksToActiveNote()
       }
     );
     return actions;
@@ -4005,7 +4240,7 @@ ${markdown}
     new import_obsidian5.Notice("Vault Spotlight: results exported.");
   }
   batchAddTag() {
-    const files = this.resultItemsForBatch().map((item) => this.itemFile(item)).filter((file) => !!file && file.extension === "md");
+    const files = this.markdownFilesForBatch();
     if (files.length === 0) {
       new import_obsidian5.Notice("Vault Spotlight: select Markdown notes first.");
       return;
@@ -4017,16 +4252,131 @@ ${markdown}
       onSubmit: (raw) => {
         const cleaned = raw.replace(/^#/, "").trim().replace(/\s+/g, "-");
         if (!cleaned) return;
-        void Promise.all(
-          files.map(async (file) => {
-            const content = await this.app.vault.cachedRead(file);
-            const next = applyTagToMarkdown(content, cleaned);
-            if (next === content) return;
-            await this.app.vault.modify(file, next);
-          })
-        ).then(() => new import_obsidian5.Notice(`Vault Spotlight: tag added to ${files.length} note${files.length === 1 ? "" : "s"}.`));
+        void Promise.all(files.map((file) => this.modifyMarkdownFile(file, (content) => applyTagToMarkdown(content, cleaned)))).then(() => new import_obsidian5.Notice(`Vault Spotlight: tag added to ${files.length} note${files.length === 1 ? "" : "s"}.`));
       }
     }).open();
+  }
+  batchRemoveTag() {
+    const files = this.markdownFilesForBatch();
+    if (files.length === 0) {
+      new import_obsidian5.Notice("Vault Spotlight: select Markdown notes first.");
+      return;
+    }
+    new PromptModal(this.app, {
+      title: "Remove tag from selected notes",
+      initial: "spotlight",
+      cta: "Remove tag",
+      onSubmit: (raw) => {
+        const cleaned = raw.replace(/^#/, "").trim().replace(/\s+/g, "-");
+        if (!cleaned) return;
+        void Promise.all(files.map((file) => this.modifyMarkdownFile(file, (content) => removeTagFromMarkdown(content, cleaned)))).then(() => new import_obsidian5.Notice(`Vault Spotlight: tag removed from ${files.length} note${files.length === 1 ? "" : "s"}.`));
+      }
+    }).open();
+  }
+  batchSetProperty() {
+    const files = this.markdownFilesForBatch();
+    if (files.length === 0) {
+      new import_obsidian5.Notice("Vault Spotlight: select Markdown notes first.");
+      return;
+    }
+    new PromptModal(this.app, {
+      title: "Set property on selected notes",
+      initial: "status=active",
+      cta: "Set property",
+      onSubmit: (raw) => {
+        const sep = raw.indexOf("=");
+        if (sep <= 0) {
+          new import_obsidian5.Notice("Vault Spotlight: use key=value.");
+          return;
+        }
+        const key = raw.slice(0, sep).trim();
+        const value = raw.slice(sep + 1).trim();
+        void Promise.all(files.map((file) => this.modifyMarkdownFile(file, (content) => setFrontmatterProperty(content, key, value)))).then(() => new import_obsidian5.Notice(`Vault Spotlight: property set on ${files.length} note${files.length === 1 ? "" : "s"}.`));
+      }
+    }).open();
+  }
+  batchMoveFiles() {
+    const files = this.filesForBatch();
+    if (files.length === 0) return;
+    new PromptModal(this.app, {
+      title: "Move selected files to folder",
+      initial: "Archive",
+      cta: "Move files",
+      onSubmit: (raw) => {
+        const folder = (0, import_obsidian5.normalizePath)(raw.trim());
+        if (!folder) return;
+        void (async () => {
+          if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+          for (const file of files) {
+            await this.app.fileManager.renameFile(file, (0, import_obsidian5.normalizePath)(`${folder}/${file.name}`));
+          }
+          new import_obsidian5.Notice(`Vault Spotlight: moved ${files.length} file${files.length === 1 ? "" : "s"}.`);
+        })();
+      }
+    }).open();
+  }
+  batchSetStarred(starred) {
+    const files = this.filesForBatch();
+    for (const file of files) {
+      const isStarred = this.plugin.isStarred(file.path);
+      if (starred !== isStarred) this.plugin.toggleStar(file.path);
+    }
+    new import_obsidian5.Notice(`Vault Spotlight: ${starred ? "starred" : "unstarred"} ${files.length} file${files.length === 1 ? "" : "s"}.`);
+    void this.runSearch();
+  }
+  createMocFromResults() {
+    const rows = this.resultItemsForBatch().map((item) => {
+      var _a;
+      const file = this.itemFile(item);
+      if (!file) return null;
+      return {
+        link: this.app.fileManager.generateMarkdownLink(file, ""),
+        folder: ((_a = file.parent) == null ? void 0 : _a.path) || "/",
+        snippet: item.kind === "content" ? item.snippet : item.kind === "heading" ? item.heading : ""
+      };
+    }).filter(Boolean);
+    if (rows.length === 0) return;
+    const stamp = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const note = buildMocMarkdown(rows, { title: `Vault Spotlight MOC ${stamp}`, groupBy: "folder", includeSnippets: true });
+    void this.createExportNote(`MOC ${stamp}.md`, note, "MOC created");
+  }
+  appendLinksToActiveNote() {
+    const active = this.app.workspace.getActiveFile();
+    if (!active || active.extension !== "md") {
+      new import_obsidian5.Notice("Vault Spotlight: open a Markdown note first.");
+      return;
+    }
+    const markdown = this.resultsAsMarkdown();
+    if (!markdown) return;
+    void this.app.vault.process(active, (content) => `${content.trimEnd()}
+
+${markdown}
+`).then(() => new import_obsidian5.Notice("Vault Spotlight: links appended."));
+  }
+  markdownFilesForBatch() {
+    return this.filesForBatch().filter((file) => file.extension === "md");
+  }
+  filesForBatch() {
+    return this.resultItemsForBatch().map((item) => this.itemFile(item)).filter((file) => !!file);
+  }
+  async modifyMarkdownFile(file, updater) {
+    const content = await this.app.vault.cachedRead(file);
+    const next = updater(content);
+    if (next !== content) await this.app.vault.modify(file, next);
+  }
+  async createExportNote(filename, note, message) {
+    const dir = "Vault Spotlight Exports";
+    if (!this.app.vault.getAbstractFileByPath(dir)) await this.app.vault.createFolder(dir);
+    let path = (0, import_obsidian5.normalizePath)(`${dir}/${filename}`);
+    let counter = 2;
+    while (this.app.vault.getAbstractFileByPath(path)) {
+      path = (0, import_obsidian5.normalizePath)(`${dir}/${filename.replace(/\.md$/, ` ${counter}.md`)}`);
+      counter++;
+    }
+    const file = await this.app.vault.create(path, note);
+    this.close();
+    await this.app.workspace.getLeaf(false).openFile(file);
+    new import_obsidian5.Notice(`Vault Spotlight: ${message}.`);
   }
   openActionsMenu(item, evt) {
     var _a;
@@ -4883,6 +5233,7 @@ var VaultSpotlightPlugin = class extends import_obsidian6.Plugin {
     if (!Array.isArray(this.settings.starredPaths)) this.settings.starredPaths = [];
     if (!Array.isArray(this.settings.pinnedCustomSearchIds)) this.settings.pinnedCustomSearchIds = [];
     this.settings.searchProfiles = normalizeProfiles(this.settings.searchProfiles);
+    if (typeof this.settings.searchAliases !== "string") this.settings.searchAliases = "";
     if (!this.settings.searchProfiles.some((profile) => profile.id === this.settings.activeProfileId)) {
       this.settings.activeProfileId = "";
     }

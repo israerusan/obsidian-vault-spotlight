@@ -297,6 +297,7 @@ export default class VaultSpotlightPlugin extends Plugin {
 		if (!Array.isArray(this.settings.starredPaths)) this.settings.starredPaths = [];
 		if (!Array.isArray(this.settings.pinnedCustomSearchIds)) this.settings.pinnedCustomSearchIds = [];
 		this.settings.searchProfiles = normalizeProfiles(this.settings.searchProfiles);
+		if (typeof this.settings.searchAliases !== "string") this.settings.searchAliases = "";
 		if (!this.settings.searchProfiles.some((profile) => profile.id === this.settings.activeProfileId)) {
 			this.settings.activeProfileId = "";
 		}
