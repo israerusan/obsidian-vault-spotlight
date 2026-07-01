@@ -2286,6 +2286,7 @@ var DEFAULT_SETTINGS = {
   maxRecent: 30,
   maxStarred: 50,
   customSearches: [],
+  pinnedCustomSearchIds: [],
   showModifiedTime: true,
   ripgrepCommand: "rg",
   includeCanvas: true,
@@ -2429,7 +2430,13 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
     } else {
       for (const search of this.plugin.settings.customSearches) {
         const row = customList.createDiv({ cls: "vault-spotlight-starred-row" });
-        row.createSpan({ text: `${search.name}: ${search.query}` });
+        const pinned = this.plugin.settings.pinnedCustomSearchIds.includes(search.id);
+        row.createSpan({ text: `${pinned ? "\u2605 " : ""}${search.name}: ${search.query}` });
+        const pinBtn = row.createEl("button", { text: pinned ? "Unpin" : "Pin" });
+        pinBtn.addEventListener("click", () => {
+          this.plugin.togglePinnedCollection(search.id);
+          this.display();
+        });
         const btn = row.createEl("button", { text: "Remove" });
         btn.addEventListener("click", () => {
           this.plugin.deleteCustomSearch(search.id);
@@ -2969,6 +2976,10 @@ var SpotlightModal = class extends import_obsidian5.Modal {
     this.searchGeneration = 0;
     this.isLoading = false;
     this.metadataRef = null;
+    this.actionContext = null;
+    this.actionReturnQuery = "";
+    this.actionReturnMode = "files";
+    this.resultSnapshot = [];
     this.shouldRestoreSelection = false;
     this.fileSearcher = new FileSearcher(app);
     this.headingSearcher = new HeadingSearcher(app);
@@ -3112,6 +3123,17 @@ var SpotlightModal = class extends import_obsidian5.Modal {
     const excludeFolders = this.plugin.settings.excludeFolders;
     this.isLoading = true;
     this.renderLoading();
+    if (this.actionContext) {
+      const actions = this.availableActions(this.actionContext);
+      const query = trimmed.toLowerCase();
+      this.setBadge("Actions", "is-content");
+      this.items = actions.filter((action) => !query || `${action.name} ${action.description}`.toLowerCase().includes(query)).map((action) => ({ kind: "action", action }));
+      this.isLoading = false;
+      this.selectedIndex = 0;
+      this.renderResults();
+      this.updateStatus(this.items.length);
+      return;
+    }
     try {
       if ((mode === "content" || mode === "headings") && !isPro) {
         this.setBadge("Pro", "is-pro");
@@ -3216,6 +3238,17 @@ var SpotlightModal = class extends import_obsidian5.Modal {
           isStarred: r.isStarred,
           isBookmarked: r.isBookmarked
         }));
+        if (isEmptyQuery && isPro && this.plugin.settings.customSearches.length > 0) {
+          const pinned = new Set(this.plugin.settings.pinnedCustomSearchIds);
+          const collections = this.plugin.settings.customSearches.slice().sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)) || a.name.localeCompare(b.name)).map((search) => ({
+            kind: "collection",
+            id: search.id,
+            name: search.name,
+            query: search.query,
+            isPinned: pinned.has(search.id)
+          }));
+          this.items = [...collections, ...this.items];
+        }
         const noFilters = parsed.tags.length === 0 && parsed.properties.length === 0 && parsed.extFilters.length === 0;
         if (this.items.length === 0 && !isEmptyQuery && noFilters) {
           this.items = [{ kind: "create", name: trimmed }];
@@ -3243,6 +3276,7 @@ var SpotlightModal = class extends import_obsidian5.Modal {
     if (cls) this.modeBadgeEl.addClass(cls);
   }
   getBrowseSection(item) {
+    if (item.kind === "collection" && this.inputEl.value.trim().length === 0) return "Smart collections";
     if (item.kind !== "file" || this.inputEl.value.trim().length > 0) return null;
     if (item.isStarred) return "Starred";
     if (item.isBookmarked) return "Bookmarks";
@@ -3356,6 +3390,16 @@ var SpotlightModal = class extends import_obsidian5.Modal {
         title.setText(item.query);
         titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Recent search" });
         body.createDiv({ cls: "vault-spotlight-item-meta", text: "Press \u21B5 to search again" });
+      } else if (item.kind === "collection") {
+        (0, import_obsidian5.setIcon)(iconWrap, item.isPinned ? "star" : "search");
+        title.setText(item.name);
+        titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isPinned ? "Pinned collection" : "Smart collection" });
+        body.createDiv({ cls: "vault-spotlight-item-meta", text: item.query });
+      } else if (item.kind === "action") {
+        (0, import_obsidian5.setIcon)(iconWrap, item.action.requiresPro ? "sparkles" : "bolt");
+        title.setText(item.action.name);
+        titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.action.requiresPro ? "Pro action" : "Action" });
+        body.createDiv({ cls: "vault-spotlight-item-meta", text: item.action.description });
       } else {
         (0, import_obsidian5.setIcon)(iconWrap, "file-plus");
         title.setText(`Create \u201C${item.name}\u201D`);
@@ -3421,7 +3465,8 @@ var SpotlightModal = class extends import_obsidian5.Modal {
     this.addShortcut(shortcuts, ["\u2191", "\u2193"], "navigate");
     this.addShortcut(shortcuts, ["\u21B5"], "open");
     this.addShortcut(shortcuts, ["Tab"], "mode");
-    this.addShortcut(shortcuts, ["Ctrl", "\u21B5"], "actions");
+    this.addShortcut(shortcuts, ["Ctrl", "K"], "actions");
+    this.addShortcut(shortcuts, ["Ctrl", "\u21B5"], "menu");
     if (this.plugin.settings.isPro) {
       this.addShortcut(shortcuts, ["Ctrl", "D"], "star");
       this.addShortcut(shortcuts, ["Ctrl", "Space"], "select");
@@ -3486,6 +3531,22 @@ var SpotlightModal = class extends import_obsidian5.Modal {
       void this.runSearch();
       return;
     }
+    if (selected.kind === "collection") {
+      this.inputEl.value = selected.query;
+      this.actionContext = null;
+      this.mode = "files";
+      this.focusInput();
+      void this.runSearch();
+      return;
+    }
+    if (selected.kind === "action") {
+      if (selected.action.requiresPro && !this.plugin.settings.isPro) {
+        new import_obsidian5.Notice("Vault Spotlight: Pro required for this action.");
+        return;
+      }
+      await selected.action.run();
+      return;
+    }
     if (selected.kind === "command") {
       this.close();
       this.commandSearcher.execute(selected.id);
@@ -3545,6 +3606,207 @@ var SpotlightModal = class extends import_obsidian5.Modal {
       console.error("[VaultSpotlight] create note failed", err);
       new import_obsidian5.Notice("Vault Spotlight: could not create note.");
     }
+  }
+  openActionPalette(context = ((_a) => (_a = this.items[this.selectedIndex]) != null ? _a : null)()) {
+    if (!context || context.kind === "action" || context.kind === "history" || context.kind === "create") return;
+    this.actionContext = context;
+    this.actionReturnQuery = this.inputEl.value;
+    this.actionReturnMode = this.mode;
+    this.resultSnapshot = this.items;
+    this.inputEl.value = "";
+    this.focusInput();
+    void this.runSearch();
+  }
+  closeActionPalette() {
+    if (!this.actionContext) return;
+    this.actionContext = null;
+    this.inputEl.value = this.actionReturnQuery;
+    this.mode = this.actionReturnMode;
+    this.focusInput();
+    void this.runSearch();
+  }
+  availableActions(context) {
+    if (context.kind === "collection") {
+      return [
+        {
+          id: "run-collection",
+          name: "Run smart collection",
+          description: context.query,
+          run: () => {
+            this.actionContext = null;
+            this.inputEl.value = context.query;
+            void this.runSearch();
+          }
+        },
+        {
+          id: "pin-collection",
+          name: context.isPinned ? "Unpin smart collection" : "Pin smart collection",
+          description: "Keep this saved search at the top of the browse view.",
+          requiresPro: true,
+          run: () => {
+            this.plugin.togglePinnedCollection(context.id);
+            this.closeActionPalette();
+          }
+        },
+        {
+          id: "copy-collection-query",
+          name: "Copy collection query",
+          description: "Copy the saved search query to the clipboard.",
+          run: () => this.copyToClipboard(context.query, "Query copied")
+        }
+      ];
+    }
+    const file = this.itemFile(context);
+    const actions = [];
+    if (file) {
+      actions.push(
+        {
+          id: "open",
+          name: "Open",
+          description: "Open the selected result.",
+          run: async () => {
+            this.close();
+            await this.openItem(context, false);
+            this.plugin.trackRecent(file.path);
+          }
+        },
+        {
+          id: "copy-link",
+          name: "Copy link",
+          description: "Copy a Markdown link for this result.",
+          run: () => this.copyToClipboard(this.app.fileManager.generateMarkdownLink(file, ""), "Link copied")
+        },
+        {
+          id: "copy-path",
+          name: "Copy path",
+          description: "Copy this file path.",
+          run: () => this.copyToClipboard(file.path, "Path copied")
+        },
+        {
+          id: "rename",
+          name: "Rename",
+          description: "Rename the selected note or file.",
+          requiresPro: true,
+          run: () => this.renameFile(file)
+        },
+        {
+          id: "toggle-star",
+          name: this.plugin.isStarred(file.path) ? "Unstar" : "Star",
+          description: "Toggle the selected file in Starred pins.",
+          requiresPro: true,
+          run: () => {
+            this.plugin.toggleStar(file.path);
+            this.closeActionPalette();
+          }
+        }
+      );
+    }
+    actions.push(
+      {
+        id: "copy-results",
+        name: "Copy results as Markdown",
+        description: "Copy selected results, or the current result list, as Markdown links.",
+        requiresPro: true,
+        run: () => this.copyResultsAsMarkdown()
+      },
+      {
+        id: "export-results",
+        name: "Export results to note",
+        description: "Create a Markdown note containing selected/search results.",
+        requiresPro: true,
+        run: () => this.exportResultsToNote()
+      },
+      {
+        id: "batch-add-tag",
+        name: "Batch add tag",
+        description: "Append a tag to selected Markdown files.",
+        requiresPro: true,
+        run: () => this.batchAddTag()
+      }
+    );
+    return actions;
+  }
+  resultItemsForBatch() {
+    const allItems = this.actionContext ? this.resultSnapshot : this.items;
+    const checked = allItems.filter((item) => {
+      const file = this.itemFile(item);
+      return file ? this.checkedPaths.has(file.path) : false;
+    });
+    const source = checked.length > 0 ? checked : allItems;
+    return source.filter((item) => !!this.itemFile(item));
+  }
+  resultsAsMarkdown() {
+    const rows = this.resultItemsForBatch();
+    return rows.map((item) => {
+      const file = this.itemFile(item);
+      if (!file) return "";
+      let suffix = "";
+      if (item.kind === "content") suffix = ` \u2014 L${item.line}: ${item.snippet}`;
+      else if (item.kind === "heading") suffix = ` \u2014 ${"#".repeat(item.level)} ${item.heading}`;
+      return `- ${this.app.fileManager.generateMarkdownLink(file, "")}${suffix}`;
+    }).filter(Boolean).join("\n");
+  }
+  copyResultsAsMarkdown() {
+    const markdown = this.resultsAsMarkdown();
+    if (!markdown) {
+      new import_obsidian5.Notice("Vault Spotlight: no results to copy.");
+      return;
+    }
+    this.copyToClipboard(markdown, "Results copied");
+  }
+  async exportResultsToNote() {
+    const markdown = this.resultsAsMarkdown();
+    if (!markdown) {
+      new import_obsidian5.Notice("Vault Spotlight: no results to export.");
+      return;
+    }
+    const stamp = (/* @__PURE__ */ new Date()).toISOString().slice(0, 16).replace("T", " ").replace(":", "-");
+    const dir = "Vault Spotlight Exports";
+    if (!this.app.vault.getAbstractFileByPath(dir)) await this.app.vault.createFolder(dir);
+    const basePath = (0, import_obsidian5.normalizePath)(`${dir}/Search results ${stamp}.md`);
+    let path = basePath;
+    let counter = 2;
+    while (this.app.vault.getAbstractFileByPath(path)) {
+      path = (0, import_obsidian5.normalizePath)(`${dir}/Search results ${stamp} ${counter}.md`);
+      counter++;
+    }
+    const note = `# Vault Spotlight search results
+
+Query: ${this.actionReturnQuery || this.inputEl.value || "Browse"}
+
+${markdown}
+`;
+    const file = await this.app.vault.create(path, note);
+    this.close();
+    await this.app.workspace.getLeaf(false).openFile(file);
+    new import_obsidian5.Notice("Vault Spotlight: results exported.");
+  }
+  batchAddTag() {
+    const files = this.resultItemsForBatch().map((item) => this.itemFile(item)).filter((file) => !!file && file.extension === "md");
+    if (files.length === 0) {
+      new import_obsidian5.Notice("Vault Spotlight: select Markdown notes first.");
+      return;
+    }
+    new PromptModal(this.app, {
+      title: "Add tag to selected notes",
+      initial: "spotlight",
+      cta: "Add tag",
+      onSubmit: (raw) => {
+        const cleaned = raw.replace(/^#/, "").trim().replace(/\s+/g, "-");
+        if (!cleaned) return;
+        void Promise.all(
+          files.map(async (file) => {
+            const content = await this.app.vault.cachedRead(file);
+            const tag = `#${cleaned}`;
+            if (content.includes(tag)) return;
+            await this.app.vault.modify(file, `${content.trimEnd()}
+
+${tag}
+`);
+          })
+        ).then(() => new import_obsidian5.Notice(`Vault Spotlight: tag added to ${files.length} note${files.length === 1 ? "" : "s"}.`));
+      }
+    }).open();
   }
   openActionsMenu(item, evt) {
     var _a;
@@ -3722,9 +3984,15 @@ var SpotlightModal = class extends import_obsidian5.Modal {
       if (item) this.openActionsMenu(item);
       return false;
     });
+    this.scope.register(["Mod"], "k", (evt) => {
+      evt.preventDefault();
+      this.openActionPalette();
+      return false;
+    });
     this.scope.register([], "Escape", (evt) => {
       evt.preventDefault();
-      this.close();
+      if (this.actionContext) this.closeActionPalette();
+      else this.close();
       return false;
     });
     this.scope.register([], "Tab", (evt) => {
@@ -4251,9 +4519,21 @@ var VaultSpotlightPlugin = class extends import_obsidian6.Plugin {
   deleteCustomSearch(id) {
     var _a;
     this.settings.customSearches = this.settings.customSearches.filter((s) => s.id !== id);
+    this.settings.pinnedCustomSearchIds = this.settings.pinnedCustomSearchIds.filter((pinnedId) => pinnedId !== id);
     const commands = this.app.commands;
     (_a = commands == null ? void 0 : commands.removeCommand) == null ? void 0 : _a.call(commands, `${this.manifest.id}:custom-search-${id}`);
     void this.saveSettings();
+  }
+  togglePinnedCollection(id) {
+    if (!this.settings.isPro) return false;
+    if (this.settings.pinnedCustomSearchIds.includes(id)) {
+      this.settings.pinnedCustomSearchIds = this.settings.pinnedCustomSearchIds.filter((pinnedId) => pinnedId !== id);
+      void this.saveSettings();
+      return false;
+    }
+    this.settings.pinnedCustomSearchIds = [id, ...this.settings.pinnedCustomSearchIds.filter((pinnedId) => pinnedId !== id)];
+    void this.saveSettings();
+    return true;
   }
   trackRecent(path) {
     if (this.settings.recentPaths[0] !== path) {
@@ -4381,6 +4661,7 @@ var VaultSpotlightPlugin = class extends import_obsidian6.Plugin {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
     if (!Array.isArray(this.settings.recentPaths)) this.settings.recentPaths = [];
     if (!Array.isArray(this.settings.starredPaths)) this.settings.starredPaths = [];
+    if (!Array.isArray(this.settings.pinnedCustomSearchIds)) this.settings.pinnedCustomSearchIds = [];
     if (!Array.isArray(this.settings.excludeFolders)) this.settings.excludeFolders = [];
     if (!Array.isArray(this.settings.recentSearches)) {
       this.settings.recentSearches = [];
@@ -4399,6 +4680,8 @@ var VaultSpotlightPlugin = class extends import_obsidian6.Plugin {
         (s) => !!s && typeof s.id === "string" && s.id.length > 0 && typeof s.name === "string" && typeof s.query === "string"
       ).slice(0, MAX_CUSTOM_SEARCHES);
     }
+    const customSearchIds = new Set(this.settings.customSearches.map((search) => search.id));
+    this.settings.pinnedCustomSearchIds = this.settings.pinnedCustomSearchIds.filter((id) => typeof id === "string" && customSearchIds.has(id));
     this.settings.recentPaths = this.settings.recentPaths.slice(0, this.settings.maxRecent);
     this.settings.starredPaths = this.settings.starredPaths.slice(0, this.settings.maxStarred);
   }

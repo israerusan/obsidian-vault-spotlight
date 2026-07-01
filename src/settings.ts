@@ -22,6 +22,7 @@ export interface VaultSpotlightSettings {
 	maxRecent: number;
 	maxStarred: number;
 	customSearches: CustomSearch[];
+	pinnedCustomSearchIds: string[];
 	showModifiedTime: boolean;
 	ripgrepCommand: string;
 	includeCanvas: boolean;
@@ -46,6 +47,7 @@ export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	maxRecent: 30,
 	maxStarred: 50,
 	customSearches: [],
+	pinnedCustomSearchIds: [],
 	showModifiedTime: true,
 	ripgrepCommand: "rg",
 	includeCanvas: true,
@@ -235,7 +237,13 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 		} else {
 			for (const search of this.plugin.settings.customSearches) {
 				const row = customList.createDiv({ cls: "vault-spotlight-starred-row" });
-				row.createSpan({ text: `${search.name}: ${search.query}` });
+				const pinned = this.plugin.settings.pinnedCustomSearchIds.includes(search.id);
+				row.createSpan({ text: `${pinned ? "★ " : ""}${search.name}: ${search.query}` });
+				const pinBtn = row.createEl("button", { text: pinned ? "Unpin" : "Pin" });
+				pinBtn.addEventListener("click", () => {
+					this.plugin.togglePinnedCollection(search.id);
+					this.display();
+				});
 				const btn = row.createEl("button", { text: "Remove" });
 				btn.addEventListener("click", () => {
 					this.plugin.deleteCustomSearch(search.id);

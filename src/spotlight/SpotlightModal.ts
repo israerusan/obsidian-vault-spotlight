@@ -62,9 +62,28 @@ type ResultItem =
 			query: string;
 	  }
 	| {
+			kind: "collection";
+			id: string;
+			name: string;
+			query: string;
+			isPinned: boolean;
+	  }
+	| {
+			kind: "action";
+			action: SpotlightAction;
+	  }
+	| {
 			kind: "create";
 			name: string;
 	  };
+
+type SpotlightAction = {
+	id: string;
+	name: string;
+	description: string;
+	requiresPro?: boolean;
+	run: () => void | Promise<void>;
+};
 
 const MODE_ORDER: SpotlightMode[] = ["files", "content", "headings", "commands"];
 
@@ -90,6 +109,10 @@ export class SpotlightModal extends Modal {
 	private initialQuery: string;
 	private mode: SpotlightMode;
 	private metadataRef: EventRef | null = null;
+	private actionContext: ResultItem | null = null;
+	private actionReturnQuery = "";
+	private actionReturnMode: SpotlightMode = "files";
+	private resultSnapshot: ResultItem[] = [];
 
 	constructor(
 		app: App,
@@ -265,6 +288,20 @@ export class SpotlightModal extends Modal {
 		this.isLoading = true;
 		this.renderLoading();
 
+		if (this.actionContext) {
+			const actions = this.availableActions(this.actionContext);
+			const query = trimmed.toLowerCase();
+			this.setBadge("Actions", "is-content");
+			this.items = actions
+				.filter((action) => !query || `${action.name} ${action.description}`.toLowerCase().includes(query))
+				.map((action) => ({ kind: "action" as const, action }));
+			this.isLoading = false;
+			this.selectedIndex = 0;
+			this.renderResults();
+			this.updateStatus(this.items.length);
+			return;
+		}
+
 		try {
 			if ((mode === "content" || mode === "headings") && !isPro) {
 				this.setBadge("Pro", "is-pro");
@@ -375,6 +412,21 @@ export class SpotlightModal extends Modal {
 					isBookmarked: r.isBookmarked,
 				}));
 
+				if (isEmptyQuery && isPro && this.plugin.settings.customSearches.length > 0) {
+					const pinned = new Set(this.plugin.settings.pinnedCustomSearchIds);
+					const collections = this.plugin.settings.customSearches
+						.slice()
+						.sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)) || a.name.localeCompare(b.name))
+						.map((search) => ({
+							kind: "collection" as const,
+							id: search.id,
+							name: search.name,
+							query: search.query,
+							isPinned: pinned.has(search.id),
+						}));
+					this.items = [...collections, ...this.items];
+				}
+
 				// Offer to create a note when a plain name search finds nothing.
 				const noFilters =
 					parsed.tags.length === 0 && parsed.properties.length === 0 && parsed.extFilters.length === 0;
@@ -407,6 +459,7 @@ export class SpotlightModal extends Modal {
 	}
 
 	private getBrowseSection(item: ResultItem): string | null {
+		if (item.kind === "collection" && this.inputEl.value.trim().length === 0) return "Smart collections";
 		if (item.kind !== "file" || this.inputEl.value.trim().length > 0) return null;
 		if (item.isStarred) return "Starred";
 		if (item.isBookmarked) return "Bookmarks";
@@ -536,6 +589,16 @@ export class SpotlightModal extends Modal {
 				title.setText(item.query);
 				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Recent search" });
 				body.createDiv({ cls: "vault-spotlight-item-meta", text: "Press ↵ to search again" });
+			} else if (item.kind === "collection") {
+				setIcon(iconWrap, item.isPinned ? "star" : "search");
+				title.setText(item.name);
+				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isPinned ? "Pinned collection" : "Smart collection" });
+				body.createDiv({ cls: "vault-spotlight-item-meta", text: item.query });
+			} else if (item.kind === "action") {
+				setIcon(iconWrap, item.action.requiresPro ? "sparkles" : "bolt");
+				title.setText(item.action.name);
+				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.action.requiresPro ? "Pro action" : "Action" });
+				body.createDiv({ cls: "vault-spotlight-item-meta", text: item.action.description });
 			} else {
 				setIcon(iconWrap, "file-plus");
 				title.setText(`Create “${item.name}”`);
@@ -608,7 +671,8 @@ export class SpotlightModal extends Modal {
 		this.addShortcut(shortcuts, ["↑", "↓"], "navigate");
 		this.addShortcut(shortcuts, ["↵"], "open");
 		this.addShortcut(shortcuts, ["Tab"], "mode");
-		this.addShortcut(shortcuts, ["Ctrl", "↵"], "actions");
+		this.addShortcut(shortcuts, ["Ctrl", "K"], "actions");
+		this.addShortcut(shortcuts, ["Ctrl", "↵"], "menu");
 
 		if (this.plugin.settings.isPro) {
 			this.addShortcut(shortcuts, ["Ctrl", "D"], "star");
@@ -686,6 +750,24 @@ export class SpotlightModal extends Modal {
 			return;
 		}
 
+		if (selected.kind === "collection") {
+			this.inputEl.value = selected.query;
+			this.actionContext = null;
+			this.mode = "files";
+			this.focusInput();
+			void this.runSearch();
+			return;
+		}
+
+		if (selected.kind === "action") {
+			if (selected.action.requiresPro && !this.plugin.settings.isPro) {
+				new Notice("Vault Spotlight: Pro required for this action.");
+				return;
+			}
+			await selected.action.run();
+			return;
+		}
+
 		if (selected.kind === "command") {
 			this.close();
 			this.commandSearcher.execute(selected.id);
@@ -756,6 +838,214 @@ export class SpotlightModal extends Modal {
 			console.error("[VaultSpotlight] create note failed", err);
 			new Notice("Vault Spotlight: could not create note.");
 		}
+	}
+
+	private openActionPalette(context: ResultItem | null = this.items[this.selectedIndex] ?? null): void {
+		if (!context || context.kind === "action" || context.kind === "history" || context.kind === "create") return;
+		this.actionContext = context;
+		this.actionReturnQuery = this.inputEl.value;
+		this.actionReturnMode = this.mode;
+		this.resultSnapshot = this.items;
+		this.inputEl.value = "";
+		this.focusInput();
+		void this.runSearch();
+	}
+
+	private closeActionPalette(): void {
+		if (!this.actionContext) return;
+		this.actionContext = null;
+		this.inputEl.value = this.actionReturnQuery;
+		this.mode = this.actionReturnMode;
+		this.focusInput();
+		void this.runSearch();
+	}
+
+	private availableActions(context: ResultItem): SpotlightAction[] {
+		if (context.kind === "collection") {
+			return [
+				{
+					id: "run-collection",
+					name: "Run smart collection",
+					description: context.query,
+					run: () => {
+						this.actionContext = null;
+						this.inputEl.value = context.query;
+						void this.runSearch();
+					},
+				},
+				{
+					id: "pin-collection",
+					name: context.isPinned ? "Unpin smart collection" : "Pin smart collection",
+					description: "Keep this saved search at the top of the browse view.",
+					requiresPro: true,
+					run: () => {
+						this.plugin.togglePinnedCollection(context.id);
+						this.closeActionPalette();
+					},
+				},
+				{
+					id: "copy-collection-query",
+					name: "Copy collection query",
+					description: "Copy the saved search query to the clipboard.",
+					run: () => this.copyToClipboard(context.query, "Query copied"),
+				},
+			];
+		}
+
+		const file = this.itemFile(context);
+		const actions: SpotlightAction[] = [];
+		if (file) {
+			actions.push(
+				{
+					id: "open",
+					name: "Open",
+					description: "Open the selected result.",
+					run: async () => {
+						this.close();
+						await this.openItem(context, false);
+						this.plugin.trackRecent(file.path);
+					},
+				},
+				{
+					id: "copy-link",
+					name: "Copy link",
+					description: "Copy a Markdown link for this result.",
+					run: () => this.copyToClipboard(this.app.fileManager.generateMarkdownLink(file, ""), "Link copied"),
+				},
+				{
+					id: "copy-path",
+					name: "Copy path",
+					description: "Copy this file path.",
+					run: () => this.copyToClipboard(file.path, "Path copied"),
+				},
+				{
+					id: "rename",
+					name: "Rename",
+					description: "Rename the selected note or file.",
+					requiresPro: true,
+					run: () => this.renameFile(file),
+				},
+				{
+					id: "toggle-star",
+					name: this.plugin.isStarred(file.path) ? "Unstar" : "Star",
+					description: "Toggle the selected file in Starred pins.",
+					requiresPro: true,
+					run: () => {
+						this.plugin.toggleStar(file.path);
+						this.closeActionPalette();
+					},
+				}
+			);
+		}
+
+		actions.push(
+			{
+				id: "copy-results",
+				name: "Copy results as Markdown",
+				description: "Copy selected results, or the current result list, as Markdown links.",
+				requiresPro: true,
+				run: () => this.copyResultsAsMarkdown(),
+			},
+			{
+				id: "export-results",
+				name: "Export results to note",
+				description: "Create a Markdown note containing selected/search results.",
+				requiresPro: true,
+				run: () => this.exportResultsToNote(),
+			},
+			{
+				id: "batch-add-tag",
+				name: "Batch add tag",
+				description: "Append a tag to selected Markdown files.",
+				requiresPro: true,
+				run: () => this.batchAddTag(),
+			}
+		);
+		return actions;
+	}
+
+	private resultItemsForBatch(): ResultItem[] {
+		const allItems = this.actionContext ? this.resultSnapshot : this.items;
+		const checked = allItems.filter((item) => {
+			const file = this.itemFile(item);
+			return file ? this.checkedPaths.has(file.path) : false;
+		});
+		const source = checked.length > 0 ? checked : allItems;
+		return source.filter((item) => !!this.itemFile(item));
+	}
+
+	private resultsAsMarkdown(): string {
+		const rows = this.resultItemsForBatch();
+		return rows
+			.map((item) => {
+				const file = this.itemFile(item);
+				if (!file) return "";
+				let suffix = "";
+				if (item.kind === "content") suffix = ` — L${item.line}: ${item.snippet}`;
+				else if (item.kind === "heading") suffix = ` — ${"#".repeat(item.level)} ${item.heading}`;
+				return `- ${this.app.fileManager.generateMarkdownLink(file, "")}${suffix}`;
+			})
+			.filter(Boolean)
+			.join("\n");
+	}
+
+	private copyResultsAsMarkdown(): void {
+		const markdown = this.resultsAsMarkdown();
+		if (!markdown) {
+			new Notice("Vault Spotlight: no results to copy.");
+			return;
+		}
+		this.copyToClipboard(markdown, "Results copied");
+	}
+
+	private async exportResultsToNote(): Promise<void> {
+		const markdown = this.resultsAsMarkdown();
+		if (!markdown) {
+			new Notice("Vault Spotlight: no results to export.");
+			return;
+		}
+		const stamp = new Date().toISOString().slice(0, 16).replace("T", " ").replace(":", "-");
+		const dir = "Vault Spotlight Exports";
+		if (!this.app.vault.getAbstractFileByPath(dir)) await this.app.vault.createFolder(dir);
+		const basePath = normalizePath(`${dir}/Search results ${stamp}.md`);
+		let path = basePath;
+		let counter = 2;
+		while (this.app.vault.getAbstractFileByPath(path)) {
+			path = normalizePath(`${dir}/Search results ${stamp} ${counter}.md`);
+			counter++;
+		}
+		const note = `# Vault Spotlight search results\n\nQuery: ${this.actionReturnQuery || this.inputEl.value || "Browse"}\n\n${markdown}\n`;
+		const file = await this.app.vault.create(path, note);
+		this.close();
+		await this.app.workspace.getLeaf(false).openFile(file);
+		new Notice("Vault Spotlight: results exported.");
+	}
+
+	private batchAddTag(): void {
+		const files = this.resultItemsForBatch()
+			.map((item) => this.itemFile(item))
+			.filter((file): file is TFile => !!file && file.extension === "md");
+		if (files.length === 0) {
+			new Notice("Vault Spotlight: select Markdown notes first.");
+			return;
+		}
+		new PromptModal(this.app, {
+			title: "Add tag to selected notes",
+			initial: "spotlight",
+			cta: "Add tag",
+			onSubmit: (raw) => {
+				const cleaned = raw.replace(/^#/, "").trim().replace(/\s+/g, "-");
+				if (!cleaned) return;
+				void Promise.all(
+					files.map(async (file) => {
+						const content = await this.app.vault.cachedRead(file);
+						const tag = `#${cleaned}`;
+						if (content.includes(tag)) return;
+						await this.app.vault.modify(file, `${content.trimEnd()}\n\n${tag}\n`);
+					})
+				).then(() => new Notice(`Vault Spotlight: tag added to ${files.length} note${files.length === 1 ? "" : "s"}.`));
+			},
+		}).open();
 	}
 
 	private openActionsMenu(item: ResultItem, evt?: MouseEvent): void {
@@ -968,9 +1258,15 @@ export class SpotlightModal extends Modal {
 			if (item) this.openActionsMenu(item);
 			return false;
 		});
+		this.scope.register(["Mod"], "k", (evt) => {
+			evt.preventDefault();
+			this.openActionPalette();
+			return false;
+		});
 		this.scope.register([], "Escape", (evt) => {
 			evt.preventDefault();
-			this.close();
+			if (this.actionContext) this.closeActionPalette();
+			else this.close();
 			return false;
 		});
 		this.scope.register([], "Tab", (evt) => {

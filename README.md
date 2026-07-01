@@ -18,9 +18,13 @@ Spotlight-style vault launcher for [Obsidian](https://obsidian.md). Fuzzy file s
 - **Heading jump** — jump straight to any heading across the vault
 - **Preview pane** — live preview beside results, auto-scrolled to the matched passage
 - **Search history** — recent searches resurface on the empty content view
+- **Keyboard action palette** — press `Ctrl+K` on a result to search actions such as open, copy, rename, star, export, and batch tag
+- **Smart collections** — saved searches appear in the browse view and can be pinned as reusable vault views
 - **Starred pins** — pin files with `Ctrl+D`
 - **Canvas & PDF** — search canvas files and show PDFs in results
 - **Batch open** — multi-select with `Ctrl+Space`, open all at once
+- **Export results** — copy selected/current results as Markdown links or export them to a new note
+- **Batch actions** — add tags to selected Markdown notes from Spotlight
 - **Custom search commands** — save queries as palette commands (`Ctrl+S` in spotlight)
 
 Purchase: [Buy Me a Coffee — Vault Spotlight Pro](https://buymeacoffee.com/vaultspotlight)

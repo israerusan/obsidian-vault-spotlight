@@ -132,11 +132,24 @@ export default class VaultSpotlightPlugin extends Plugin {
 
 	deleteCustomSearch(id: string): void {
 		this.settings.customSearches = this.settings.customSearches.filter((s) => s.id !== id);
+		this.settings.pinnedCustomSearchIds = this.settings.pinnedCustomSearchIds.filter((pinnedId) => pinnedId !== id);
 		const commands = (
 			this.app as unknown as { commands?: { removeCommand?: (id: string) => void } }
 		).commands;
 		commands?.removeCommand?.(`${this.manifest.id}:custom-search-${id}`);
 		void this.saveSettings();
+	}
+
+	togglePinnedCollection(id: string): boolean {
+		if (!this.settings.isPro) return false;
+		if (this.settings.pinnedCustomSearchIds.includes(id)) {
+			this.settings.pinnedCustomSearchIds = this.settings.pinnedCustomSearchIds.filter((pinnedId) => pinnedId !== id);
+			void this.saveSettings();
+			return false;
+		}
+		this.settings.pinnedCustomSearchIds = [id, ...this.settings.pinnedCustomSearchIds.filter((pinnedId) => pinnedId !== id)];
+		void this.saveSettings();
+		return true;
 	}
 
 	trackRecent(path: string): void {
@@ -281,6 +294,7 @@ export default class VaultSpotlightPlugin extends Plugin {
 
 		if (!Array.isArray(this.settings.recentPaths)) this.settings.recentPaths = [];
 		if (!Array.isArray(this.settings.starredPaths)) this.settings.starredPaths = [];
+		if (!Array.isArray(this.settings.pinnedCustomSearchIds)) this.settings.pinnedCustomSearchIds = [];
 		if (!Array.isArray(this.settings.excludeFolders)) this.settings.excludeFolders = [];
 		if (!Array.isArray(this.settings.recentSearches)) {
 			this.settings.recentSearches = [];
@@ -313,6 +327,9 @@ export default class VaultSpotlightPlugin extends Plugin {
 				)
 				.slice(0, MAX_CUSTOM_SEARCHES);
 		}
+		const customSearchIds = new Set(this.settings.customSearches.map((search) => search.id));
+		this.settings.pinnedCustomSearchIds = this.settings.pinnedCustomSearchIds
+			.filter((id): id is string => typeof id === "string" && customSearchIds.has(id));
 
 		// Enforce caps against what was loaded from disk.
 		this.settings.recentPaths = this.settings.recentPaths.slice(0, this.settings.maxRecent);
