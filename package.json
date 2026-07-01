@@ -1,13 +1,13 @@
 {
 	"name": "obsidian-vault-spotlight",
-	"version": "1.3.1",
+	"version": "1.3.2",
 	"description": "Spotlight-style vault launcher for Obsidian",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "node esbuild.config.mjs production",
-		"test": "node tests/search.test.mjs && node tests/license.test.mjs && node tests/vault-integration.test.mjs",
-		"test:ci": "node tests/search.test.mjs && node tests/license.test.mjs && VAULT_ROOT= node tests/vault-integration.test.mjs",
+		"test": "node tests/search.test.mjs && node tests/metadata.test.mjs && node tests/license.test.mjs && node tests/vault-integration.test.mjs",
+		"test:ci": "node tests/search.test.mjs && node tests/metadata.test.mjs && node tests/license.test.mjs && VAULT_ROOT= node tests/vault-integration.test.mjs",
 		"license:generate": "node scripts/generate-license.mjs"
 	},
 	"keywords": ["obsidian", "plugin", "search"],

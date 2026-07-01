@@ -100,6 +100,12 @@ export class SpotlightModal extends Modal {
 		this.inputEl.addEventListener("input", () => this.scheduleSearch());
 		this.inputEl.addEventListener("keydown", (evt) => this.onKeydown(evt));
 
+		this.registerEvent(
+			this.app.metadataCache.on("resolved", () => {
+				if (this.hasMetadataFilters()) this.scheduleSearch();
+			})
+		);
+
 		this.scope.register([], "ArrowDown", (evt) => {
 			evt.preventDefault();
 			this.moveSelection(1);
@@ -142,9 +148,9 @@ export class SpotlightModal extends Modal {
 		const isPro = this.plugin.settings.isPro;
 		this.hintEl.empty();
 		this.hintEl.createEl("span", { text: "Try " });
-		this.hintEl.createEl("code", { text: "#tag" });
+		this.hintEl.createEl("code", { text: "#journal" });
 		this.hintEl.appendText(" ");
-		this.hintEl.createEl("code", { text: "@status:done" });
+		this.hintEl.createEl("code", { text: "@tags:journal" });
 		if (isPro) {
 			this.hintEl.appendText(" · ");
 			this.hintEl.createEl("code", { text: "> phrase" });
@@ -154,6 +160,11 @@ export class SpotlightModal extends Modal {
 			this.hintEl.createEl("code", { text: "Ctrl+D" });
 			this.hintEl.appendText(" star");
 		}
+	}
+
+	private hasMetadataFilters(): boolean {
+		const parsed = tokenizeQuery(this.inputEl?.value ?? "");
+		return parsed.tags.length > 0 || parsed.properties.length > 0;
 	}
 
 	private scheduleSearch(): void {

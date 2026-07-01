@@ -2403,9 +2403,6 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
 // src/spotlight/SpotlightModal.ts
 var import_obsidian4 = require("obsidian");
 
-// src/search/FileSearcher.ts
-var import_obsidian2 = require("obsidian");
-
 // src/search/fuzzy.ts
 function fuzzyMatch(query, text) {
   var _a;
@@ -2492,6 +2489,61 @@ function tokenizeQuery(raw) {
   return { textTokens, tags, properties, extFilters, contentMode };
 }
 
+// src/search/metadata.ts
+var import_obsidian2 = require("obsidian");
+function normalizeTag(tag) {
+  return tag.replace(/^#/, "").toLowerCase();
+}
+function collectFileTags(cache) {
+  var _a, _b, _c, _d;
+  const tags = /* @__PURE__ */ new Set();
+  for (const tag of (_a = (0, import_obsidian2.getAllTags)(cache)) != null ? _a : []) {
+    tags.add(normalizeTag(tag));
+  }
+  for (const entry of (_b = cache.tags) != null ? _b : []) {
+    tags.add(normalizeTag(entry.tag));
+  }
+  for (const tag of (_d = (0, import_obsidian2.parseFrontMatterTags)((_c = cache.frontmatter) != null ? _c : null)) != null ? _d : []) {
+    tags.add(normalizeTag(tag));
+  }
+  return tags;
+}
+function fileMatchesTags(fileTags, queryTags) {
+  for (const queryTag of queryTags) {
+    if (fileTags.has(queryTag)) continue;
+    const hasMatch = [...fileTags].some((tag) => {
+      if (tag === queryTag) return true;
+      if (tag.startsWith(`${queryTag}/`)) return true;
+      return tag.split("/").some((part) => part === queryTag || part.startsWith(queryTag));
+    });
+    if (!hasMatch) return false;
+  }
+  return true;
+}
+function getFrontmatterValue(frontmatter, key) {
+  if (Object.prototype.hasOwnProperty.call(frontmatter, key)) {
+    return frontmatter[key];
+  }
+  const lower = key.toLowerCase();
+  for (const entryKey of Object.keys(frontmatter)) {
+    if (entryKey.toLowerCase() === lower) {
+      return frontmatter[entryKey];
+    }
+  }
+  return void 0;
+}
+function frontmatterValueMatches(raw, queryValue) {
+  if (raw === void 0 || raw === null) return false;
+  if (queryValue === null) return true;
+  if (Array.isArray(raw)) {
+    return raw.some((item) => String(item).toLowerCase().includes(queryValue));
+  }
+  if (typeof raw === "object") {
+    return JSON.stringify(raw).toLowerCase().includes(queryValue);
+  }
+  return String(raw).toLowerCase().includes(queryValue);
+}
+
 // src/search/vaultFiles.ts
 function getVaultFileKind(file) {
   if (file.extension === "canvas") return "canvas";
@@ -2537,15 +2589,19 @@ var FileSearcher = class {
     const results = [];
     const recentSet = new Map(options.recentPaths.map((p, i) => [p, i]));
     const starredSet = new Map(options.starredPaths.map((p, i) => [p, i]));
-    const isBrowseMode = options.textTokens.length === 0;
+    const hasActiveFilters = options.tags.length > 0 || options.properties.length > 0 || options.extFilters.length > 0;
+    const isBrowseMode = options.textTokens.length === 0 && !hasActiveFilters;
+    const isFilterOnly = options.textTokens.length === 0 && hasActiveFilters;
     for (const file of files) {
       if (!this.matchesExtFilter(file, options.extFilters)) continue;
-      if (!await this.matchesFilters(file, options)) continue;
+      if (!this.matchesFilters(file, options)) continue;
       const basename = file.basename;
       let score = 0;
       let indices = [];
       if (isBrowseMode) {
         score = 1;
+      } else if (isFilterOnly) {
+        score = 100;
       } else {
         for (const token of options.textTokens) {
           const match = (_b = fuzzyMatch(token, basename)) != null ? _b : fuzzyMatch(token, file.path);
@@ -2586,26 +2642,21 @@ var FileSearcher = class {
     if (extFilters.length === 0) return true;
     return extFilters.includes(file.extension.toLowerCase());
   }
-  async matchesFilters(file, options) {
+  matchesFilters(file, options) {
     if (file.extension !== "md") {
       return options.tags.length === 0 && options.properties.length === 0;
     }
     const cache = this.app.metadataCache.getFileCache(file);
     if (!cache) return options.tags.length === 0 && options.properties.length === 0;
     if (options.tags.length > 0) {
-      const tags = new Set((0, import_obsidian2.getAllTags)(cache).map((t) => t.toLowerCase()));
-      for (const tag of options.tags) {
-        if (!tags.has(tag)) return false;
-      }
+      const tags = collectFileTags(cache);
+      if (!fileMatchesTags(tags, options.tags)) return false;
     }
     for (const prop of options.properties) {
       const fm = cache.frontmatter;
       if (!fm) return false;
-      const raw = fm[prop.key];
-      if (raw === void 0 || raw === null) return false;
-      const value = String(raw).toLowerCase();
-      if (prop.value === null) continue;
-      if (!value.includes(prop.value)) return false;
+      const raw = getFrontmatterValue(fm, prop.key);
+      if (!frontmatterValueMatches(raw, prop.value)) return false;
     }
     return true;
   }
@@ -2715,6 +2766,11 @@ var SpotlightModal = class extends import_obsidian4.Modal {
     }
     this.inputEl.addEventListener("input", () => this.scheduleSearch());
     this.inputEl.addEventListener("keydown", (evt) => this.onKeydown(evt));
+    this.registerEvent(
+      this.app.metadataCache.on("resolved", () => {
+        if (this.hasMetadataFilters()) this.scheduleSearch();
+      })
+    );
     this.scope.register([], "ArrowDown", (evt) => {
       evt.preventDefault();
       this.moveSelection(1);
@@ -2753,9 +2809,9 @@ var SpotlightModal = class extends import_obsidian4.Modal {
     const isPro = this.plugin.settings.isPro;
     this.hintEl.empty();
     this.hintEl.createEl("span", { text: "Try " });
-    this.hintEl.createEl("code", { text: "#tag" });
+    this.hintEl.createEl("code", { text: "#journal" });
     this.hintEl.appendText(" ");
-    this.hintEl.createEl("code", { text: "@status:done" });
+    this.hintEl.createEl("code", { text: "@tags:journal" });
     if (isPro) {
       this.hintEl.appendText(" \xB7 ");
       this.hintEl.createEl("code", { text: "> phrase" });
@@ -2765,6 +2821,11 @@ var SpotlightModal = class extends import_obsidian4.Modal {
       this.hintEl.createEl("code", { text: "Ctrl+D" });
       this.hintEl.appendText(" star");
     }
+  }
+  hasMetadataFilters() {
+    var _a, _b;
+    const parsed = tokenizeQuery((_b = (_a = this.inputEl) == null ? void 0 : _a.value) != null ? _b : "");
+    return parsed.tags.length > 0 || parsed.properties.length > 0;
   }
   scheduleSearch() {
     if (this.searchTimer !== null) window.clearTimeout(this.searchTimer);

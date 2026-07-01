@@ -1,5 +1,11 @@
-import { App, TFile, getAllTags } from "obsidian";
+import { App, TFile } from "obsidian";
 import { fuzzyMatch } from "./fuzzy";
+import {
+	collectFileTags,
+	fileMatchesTags,
+	frontmatterValueMatches,
+	getFrontmatterValue,
+} from "./metadata";
 import { getSearchableFiles, getVaultFileKind, type VaultFileKind } from "./vaultFiles";
 
 export interface FileSearchResult {
@@ -36,11 +42,14 @@ export class FileSearcher {
 		const results: FileSearchResult[] = [];
 		const recentSet = new Map(options.recentPaths.map((p, i) => [p, i]));
 		const starredSet = new Map(options.starredPaths.map((p, i) => [p, i]));
-		const isBrowseMode = options.textTokens.length === 0;
+		const hasActiveFilters =
+			options.tags.length > 0 || options.properties.length > 0 || options.extFilters.length > 0;
+		const isBrowseMode = options.textTokens.length === 0 && !hasActiveFilters;
+		const isFilterOnly = options.textTokens.length === 0 && hasActiveFilters;
 
 		for (const file of files) {
 			if (!this.matchesExtFilter(file, options.extFilters)) continue;
-			if (!(await this.matchesFilters(file, options))) continue;
+			if (!this.matchesFilters(file, options)) continue;
 
 			const basename = file.basename;
 			let score = 0;
@@ -48,6 +57,8 @@ export class FileSearcher {
 
 			if (isBrowseMode) {
 				score = 1;
+			} else if (isFilterOnly) {
+				score = 100;
 			} else {
 				for (const token of options.textTokens) {
 					const match = fuzzyMatch(token, basename) ?? fuzzyMatch(token, file.path);
@@ -95,7 +106,7 @@ export class FileSearcher {
 		return extFilters.includes(file.extension.toLowerCase());
 	}
 
-	private async matchesFilters(file: TFile, options: FileSearchOptions): Promise<boolean> {
+	private matchesFilters(file: TFile, options: FileSearchOptions): boolean {
 		if (file.extension !== "md") {
 			return options.tags.length === 0 && options.properties.length === 0;
 		}
@@ -104,20 +115,15 @@ export class FileSearcher {
 		if (!cache) return options.tags.length === 0 && options.properties.length === 0;
 
 		if (options.tags.length > 0) {
-			const tags = new Set(getAllTags(cache).map((t) => t.toLowerCase()));
-			for (const tag of options.tags) {
-				if (!tags.has(tag)) return false;
-			}
+			const tags = collectFileTags(cache);
+			if (!fileMatchesTags(tags, options.tags)) return false;
 		}
 
 		for (const prop of options.properties) {
 			const fm = cache.frontmatter as Record<string, unknown> | null | undefined;
 			if (!fm) return false;
-			const raw: unknown = fm[prop.key];
-			if (raw === undefined || raw === null) return false;
-			const value = String(raw).toLowerCase();
-			if (prop.value === null) continue;
-			if (!value.includes(prop.value)) return false;
+			const raw = getFrontmatterValue(fm, prop.key);
+			if (!frontmatterValueMatches(raw, prop.value)) return false;
 		}
 
 		return true;
