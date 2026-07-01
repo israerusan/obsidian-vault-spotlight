@@ -50,7 +50,7 @@ export class RipgrepSearcher {
 
 	async search(
 		query: string,
-		options: { includeCanvas: boolean; limit: number }
+		options: { includeCanvas: boolean; limit: number; excludeFolders?: string[] }
 	): Promise<ContentSearchResult[]> {
 		if (!query.trim()) return [];
 		const execFileAsync = getExecFileAsync();
@@ -61,12 +61,20 @@ export class RipgrepSearcher {
 
 		const args = [
 			"-i",
+			// Treat the query literally, matching the vault/canvas fallback's
+			// String.includes semantics. Without this, regex metacharacters give
+			// different (or invalid → empty) results depending on rg availability.
+			"--fixed-strings",
 			"--line-number",
 			"--no-heading",
 			"--color",
 			"never",
+			"--no-follow",
 			"--max-count",
 			"4",
+			// Cap line length so a minified/one-line file can't blow maxBuffer.
+			"--max-columns",
+			"500",
 			"-g",
 			"*.md",
 		];
@@ -75,12 +83,20 @@ export class RipgrepSearcher {
 			args.push("-g", "*.canvas");
 		}
 
-		args.push("--", query, vaultPath);
+		for (const folder of options.excludeFolders ?? []) {
+			const f = folder.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+			if (f) args.push("-g", `!${f}/**`);
+		}
+
+		// Search "." with cwd=vaultPath so rg emits vault-relative paths that
+		// map straight onto TFile.path (no absolute-prefix / drive-colon parsing).
+		args.push("--", query, ".");
 
 		try {
 			const { stdout } = await execFileAsync(this.command, args, {
+				cwd: vaultPath,
 				timeout: 8000,
-				maxBuffer: 4 * 1024 * 1024,
+				maxBuffer: 16 * 1024 * 1024,
 				windowsHide: true,
 			});
 			return this.parseOutput(String(stdout), options.limit);
@@ -108,7 +124,7 @@ export class RipgrepSearcher {
 			if (!match) continue;
 
 			const [, rawPath, lineNum, snippet] = match;
-			const normalized = rawPath.replace(/\\/g, "/");
+			const normalized = rawPath.replace(/\\/g, "/").replace(/^\.\//, "");
 			const file =
 				fileMap.get(normalized) ??
 				fileMap.get(normalized.split("/").slice(-3).join("/")) ??

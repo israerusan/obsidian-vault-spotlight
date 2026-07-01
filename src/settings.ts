@@ -7,6 +7,11 @@ export interface CustomSearch {
 	query: string;
 }
 
+export interface FrecencyEntry {
+	count: number;
+	last: number;
+}
+
 export interface VaultSpotlightSettings {
 	licenseKey: string;
 	isPro: boolean;
@@ -21,7 +26,13 @@ export interface VaultSpotlightSettings {
 	ripgrepCommand: string;
 	includeCanvas: boolean;
 	includePdf: boolean;
+	excludeFolders: string[];
+	fileFrecency: Record<string, FrecencyEntry>;
+	useFrecency: boolean;
+	showPreview: boolean;
 }
+
+export const MAX_CUSTOM_SEARCHES = 50;
 
 export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	licenseKey: "",
@@ -37,6 +48,10 @@ export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	ripgrepCommand: "rg",
 	includeCanvas: true,
 	includePdf: true,
+	excludeFolders: [],
+	fileFrecency: {},
+	useFrecency: true,
+	showPreview: false,
 };
 
 export class VaultSpotlightSettingTab extends PluginSettingTab {
@@ -60,7 +75,12 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.licenseKey)
 					.onChange((value) => {
 						this.plugin.settings.licenseKey = value;
-						void this.plugin.refreshLicense().then(() => this.display());
+						// Re-verify on each keystroke (cheap, offline) but only rebuild
+						// the whole tab when Pro status actually flips — otherwise
+						// display()'s containerEl.empty() destroys the input mid-type.
+						void this.plugin.refreshLicense().then((changed) => {
+							if (changed) this.display();
+						});
 					})
 			);
 
@@ -100,6 +120,32 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 					void this.plugin.saveSettings();
 				})
 			);
+
+		new Setting(containerEl)
+			.setName("Smart ranking (frecency)")
+			.setDesc("Rank browse/recent results by how often and how recently you open each note.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.useFrecency).onChange((value) => {
+					this.plugin.settings.useFrecency = value;
+					void this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Excluded folders")
+			.setDesc("One folder path per line (e.g. templates, archive/old). Files inside are hidden from all search modes.")
+			.addTextArea((area) => {
+				area.setPlaceholder("templates\narchive/old");
+				area.setValue(this.plugin.settings.excludeFolders.join("\n"));
+				area.inputEl.rows = 4;
+				area.onChange((value) => {
+					this.plugin.settings.excludeFolders = value
+						.split("\n")
+						.map((line) => line.trim())
+						.filter((line) => line.length > 0);
+					void this.plugin.saveSettings();
+				});
+			});
 
 		new Setting(containerEl).setName("Pro search").setHeading();
 
@@ -147,6 +193,18 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			)
 		);
 
+		proSearch(
+			"Preview pane",
+			"Show a live preview of the highlighted note beside the results.",
+			(setting) =>
+				setting.addToggle((toggle) =>
+					toggle.setValue(this.plugin.settings.showPreview).onChange((value) => {
+						this.plugin.settings.showPreview = value;
+						void this.plugin.saveSettings();
+					})
+				)
+		);
+
 		new Setting(containerEl).setName("Starred files (Pro)").setHeading();
 		const starredList = containerEl.createDiv();
 		if (!this.plugin.settings.isPro) {
@@ -173,7 +231,13 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			customList.createEl("p", { text: "No custom searches yet. Create one from the spotlight with Ctrl+S." });
 		} else {
 			for (const search of this.plugin.settings.customSearches) {
-				customList.createEl("p", { text: `${search.name}: ${search.query}` });
+				const row = customList.createDiv({ cls: "vault-spotlight-starred-row" });
+				row.createSpan({ text: `${search.name}: ${search.query}` });
+				const btn = row.createEl("button", { text: "Remove" });
+				btn.addEventListener("click", () => {
+					this.plugin.deleteCustomSearch(search.id);
+					this.display();
+				});
 			}
 		}
 	}

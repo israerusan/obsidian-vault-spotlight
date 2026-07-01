@@ -1,22 +1,24 @@
 import { App } from "obsidian";
 import type { ContentSearchResult } from "./ContentSearcher";
+import { isPathExcluded } from "./vaultFiles";
 
 interface CanvasNode {
 	type?: string;
-	text?: string;
-	label?: string;
+	text?: unknown;
+	label?: unknown;
 }
 
 export class CanvasSearcher {
 	constructor(private app: App) {}
 
-	async search(query: string, limit = 20): Promise<ContentSearchResult[]> {
+	async search(query: string, limit = 20, excluded: string[] = []): Promise<ContentSearchResult[]> {
 		if (!query.trim()) return [];
 		const q = query.toLowerCase();
 		const results: ContentSearchResult[] = [];
 
 		for (const file of this.app.vault.getFiles()) {
 			if (file.extension !== "canvas") continue;
+			if (isPathExcluded(file.path, excluded)) continue;
 
 			let raw: string;
 			try {
@@ -44,10 +46,10 @@ export class CanvasSearcher {
 	private extractSearchableLines(raw: string): Array<{ line: number; text: string }> {
 		const lines: Array<{ line: number; text: string }> = [];
 		try {
-			const data = JSON.parse(raw) as { nodes?: CanvasNode[] };
-			const nodes = data.nodes ?? [];
+			const data = JSON.parse(raw) as { nodes?: unknown };
+			const nodes = Array.isArray(data.nodes) ? (data.nodes as CanvasNode[]) : [];
 			nodes.forEach((node, index) => {
-				const text = (node.text ?? node.label ?? "").trim();
+				const text = String(node?.text ?? node?.label ?? "").trim();
 				if (text) {
 					lines.push({ line: index + 1, text });
 				}

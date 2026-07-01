@@ -1,13 +1,22 @@
-import { Plugin } from "obsidian";
-import { DEFAULT_SETTINGS, VaultSpotlightSettingTab, type CustomSearch, type VaultSpotlightSettings } from "./settings";
-import { SpotlightModal } from "./spotlight/SpotlightModal";
+import { Plugin, TFile } from "obsidian";
+import {
+	DEFAULT_SETTINGS,
+	MAX_CUSTOM_SEARCHES,
+	VaultSpotlightSettingTab,
+	type CustomSearch,
+	type VaultSpotlightSettings,
+} from "./settings";
+import { SpotlightModal, type SpotlightMode } from "./spotlight/SpotlightModal";
 import { LicenseManager } from "./license/LicenseManager";
 import { ContentSearcher } from "./search/ContentSearcher";
+
+const MAX_FRECENCY_ENTRIES = 500;
 
 export default class VaultSpotlightPlugin extends Plugin {
 	settings: VaultSpotlightSettings = DEFAULT_SETTINGS;
 	contentSearcher!: ContentSearcher;
 	private activeSpotlight: SpotlightModal | null = null;
+	private saveTimer: number | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -22,6 +31,16 @@ export default class VaultSpotlightPlugin extends Plugin {
 			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "o" }],
 			callback: () => this.openSpotlight(),
 		});
+		this.addCommand({
+			id: "search-contents",
+			name: "Search file contents",
+			callback: () => this.openSpotlight("", "content"),
+		});
+		this.addCommand({
+			id: "go-to-heading",
+			name: "Go to heading",
+			callback: () => this.openSpotlight("", "headings"),
+		});
 
 		this.addCommand({
 			id: "toggle-star-current-file",
@@ -35,16 +54,37 @@ export default class VaultSpotlightPlugin extends Plugin {
 			},
 		});
 
-		for (const search of this.settings.customSearches) {
-			this.registerCustomSearchCommand(search);
+		// Custom searches are a Pro feature; don't leave their commands live if
+		// the license has lapsed.
+		if (this.settings.isPro) {
+			for (const search of this.settings.customSearches) {
+				this.registerCustomSearchCommand(search);
+			}
 		}
 
-		this.registerEvent(this.app.vault.on("modify", () => this.contentSearcher.invalidate()));
-		this.registerEvent(this.app.vault.on("create", () => this.contentSearcher.invalidate()));
+		// Maintain the content index incrementally instead of wiping it on every
+		// edit (which forced a full-vault re-read on the next search).
+		this.registerEvent(
+			this.app.vault.on("modify", (file) => {
+				if (file instanceof TFile) void this.contentSearcher.updateFile(file);
+			})
+		);
+		this.registerEvent(
+			this.app.vault.on("create", (file) => {
+				if (file instanceof TFile) void this.contentSearcher.updateFile(file);
+			})
+		);
 		this.registerEvent(
 			this.app.vault.on("delete", (file) => {
-				this.contentSearcher.invalidate();
-				if ("path" in file) this.untrackPath(file.path);
+				this.contentSearcher.removeFile(file.path);
+				this.untrackPath(file.path);
+			})
+		);
+		this.registerEvent(
+			this.app.vault.on("rename", (file, oldPath) => {
+				this.contentSearcher.removeFile(oldPath);
+				if (file instanceof TFile) void this.contentSearcher.updateFile(file);
+				this.renamePath(oldPath, file.path);
 			})
 		);
 		this.registerEvent(
@@ -56,17 +96,18 @@ export default class VaultSpotlightPlugin extends Plugin {
 		this.addSettingTab(new VaultSpotlightSettingTab(this.app, this));
 	}
 
-	onunload(): void {}
+	onunload(): void {
+		// Close any open modal so its self-managed metadataCache listener and
+		// pending focus timers are released with the plugin.
+		this.activeSpotlight?.close();
+		this.activeSpotlight = null;
+		this.flushSave();
+	}
 
-	openSpotlight(initialQuery = ""): void {
-		if (this.activeSpotlight) {
-			this.activeSpotlight.close();
-			this.activeSpotlight = null;
-		}
-		window.requestAnimationFrame(() => {
-			this.activeSpotlight = new SpotlightModal(this.app, this, initialQuery);
-			this.activeSpotlight.open();
-		});
+	openSpotlight(initialQuery = "", initialMode: SpotlightMode = "files"): void {
+		this.activeSpotlight?.close();
+		this.activeSpotlight = new SpotlightModal(this.app, this, initialQuery, initialMode);
+		this.activeSpotlight.open();
 	}
 
 	onSpotlightClosed(modal: SpotlightModal): void {
@@ -83,11 +124,45 @@ export default class VaultSpotlightPlugin extends Plugin {
 		});
 	}
 
-	trackRecent(path: string): void {
-		const recent = this.settings.recentPaths.filter((p) => p !== path);
-		recent.unshift(path);
-		this.settings.recentPaths = recent.slice(0, this.settings.maxRecent);
+	deleteCustomSearch(id: string): void {
+		this.settings.customSearches = this.settings.customSearches.filter((s) => s.id !== id);
+		const commands = (
+			this.app as unknown as { commands?: { removeCommand?: (id: string) => void } }
+		).commands;
+		commands?.removeCommand?.(`${this.manifest.id}:custom-search-${id}`);
 		void this.saveSettings();
+	}
+
+	trackRecent(path: string): void {
+		if (this.settings.recentPaths[0] !== path) {
+			const recent = this.settings.recentPaths.filter((p) => p !== path);
+			recent.unshift(path);
+			this.settings.recentPaths = recent.slice(0, this.settings.maxRecent);
+		}
+		this.bumpFrecency(path);
+		this.scheduleSave();
+	}
+
+	private bumpFrecency(path: string): void {
+		const fr = this.settings.fileFrecency;
+		const entry = fr[path] ?? { count: 0, last: 0 };
+		entry.count += 1;
+		entry.last = Date.now();
+		fr[path] = entry;
+		this.pruneFrecency();
+	}
+
+	private pruneFrecency(): void {
+		const keys = Object.keys(this.settings.fileFrecency);
+		if (keys.length <= MAX_FRECENCY_ENTRIES) return;
+		const sorted = keys.sort(
+			(a, b) => this.settings.fileFrecency[b].last - this.settings.fileFrecency[a].last
+		);
+		const next: Record<string, { count: number; last: number }> = {};
+		for (const key of sorted.slice(0, MAX_FRECENCY_ENTRIES)) {
+			next[key] = this.settings.fileFrecency[key];
+		}
+		this.settings.fileFrecency = next;
 	}
 
 	toggleStar(path: string): boolean {
@@ -111,24 +186,39 @@ export default class VaultSpotlightPlugin extends Plugin {
 	private untrackPath(path: string): void {
 		this.settings.recentPaths = this.settings.recentPaths.filter((p) => p !== path);
 		this.settings.starredPaths = this.settings.starredPaths.filter((p) => p !== path);
+		delete this.settings.fileFrecency[path];
 		void this.saveSettings();
 	}
 
-	async refreshLicense(): Promise<void> {
+	private renamePath(oldPath: string, newPath: string): void {
+		const swap = (arr: string[]) => arr.map((p) => (p === oldPath ? newPath : p));
+		this.settings.recentPaths = swap(this.settings.recentPaths);
+		this.settings.starredPaths = swap(this.settings.starredPaths);
+		const fr = this.settings.fileFrecency;
+		if (fr[oldPath]) {
+			fr[newPath] = fr[oldPath];
+			delete fr[oldPath];
+		}
+		this.scheduleSave();
+	}
+
+	async refreshLicense(): Promise<boolean> {
+		const before = this.settings.isPro;
 		if (!this.settings.licenseKey) {
-			if (!this.settings.isPro && !this.settings.licenseEmail) return;
+			if (!this.settings.isPro && !this.settings.licenseEmail) return false;
 			this.settings.isPro = false;
 			this.settings.licenseEmail = "";
 			await this.saveSettings();
-			return;
+			return before !== this.settings.isPro;
 		}
 		const result = LicenseManager.verify(this.settings.licenseKey);
 		const isPro = result.valid;
 		const licenseEmail = result.email ?? "";
-		if (this.settings.isPro === isPro && this.settings.licenseEmail === licenseEmail) return;
+		if (this.settings.isPro === isPro && this.settings.licenseEmail === licenseEmail) return false;
 		this.settings.isPro = isPro;
 		this.settings.licenseEmail = licenseEmail;
 		await this.saveSettings();
+		return before !== isPro;
 	}
 
 	async loadSettings(): Promise<void> {
@@ -136,12 +226,65 @@ export default class VaultSpotlightPlugin extends Plugin {
 		const loaded =
 			data !== null && typeof data === "object" ? (data as Partial<VaultSpotlightSettings>) : {};
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
+
 		if (!Array.isArray(this.settings.recentPaths)) this.settings.recentPaths = [];
 		if (!Array.isArray(this.settings.starredPaths)) this.settings.starredPaths = [];
-		if (!Array.isArray(this.settings.customSearches)) this.settings.customSearches = [];
+		if (!Array.isArray(this.settings.excludeFolders)) this.settings.excludeFolders = [];
+		if (this.settings.fileFrecency === null || typeof this.settings.fileFrecency !== "object") {
+			this.settings.fileFrecency = {};
+		}
+
+		// Coerce the caps so a corrupt data.json (NaN/0/negative) can't make
+		// slice(0, cap) silently wipe recents/stars.
+		this.settings.maxRecent = coercePositiveInt(this.settings.maxRecent, DEFAULT_SETTINGS.maxRecent);
+		this.settings.maxStarred = coercePositiveInt(this.settings.maxStarred, DEFAULT_SETTINGS.maxStarred);
+
+		// Drop malformed custom-search entries and enforce the cap.
+		if (!Array.isArray(this.settings.customSearches)) {
+			this.settings.customSearches = [];
+		} else {
+			this.settings.customSearches = this.settings.customSearches
+				.filter(
+					(s): s is CustomSearch =>
+						!!s &&
+						typeof s.id === "string" &&
+						s.id.length > 0 &&
+						typeof s.name === "string" &&
+						typeof s.query === "string"
+				)
+				.slice(0, MAX_CUSTOM_SEARCHES);
+		}
+
+		// Enforce caps against what was loaded from disk.
+		this.settings.recentPaths = this.settings.recentPaths.slice(0, this.settings.maxRecent);
+		this.settings.starredPaths = this.settings.starredPaths.slice(0, this.settings.maxStarred);
+	}
+
+	private scheduleSave(): void {
+		if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
+		this.saveTimer = window.setTimeout(() => {
+			this.saveTimer = null;
+			void this.saveSettings();
+		}, 1500);
+	}
+
+	private flushSave(): void {
+		if (this.saveTimer !== null) {
+			window.clearTimeout(this.saveTimer);
+			this.saveTimer = null;
+			void this.saveSettings();
+		}
 	}
 
 	async saveSettings(): Promise<void> {
-		await this.saveData(this.settings);
+		try {
+			await this.saveData(this.settings);
+		} catch (err) {
+			console.error("[VaultSpotlight] failed to save settings", err);
+		}
 	}
+}
+
+function coercePositiveInt(value: unknown, fallback: number): number {
+	return Number.isFinite(value) && (value as number) > 0 ? Math.floor(value as number) : fallback;
 }

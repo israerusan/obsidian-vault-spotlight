@@ -18,6 +18,11 @@ export interface FileSearchResult {
 	isStarred: boolean;
 }
 
+export interface FrecencyEntry {
+	count: number;
+	last: number;
+}
+
 export interface FileSearchOptions {
 	textTokens: string[];
 	tags: string[];
@@ -27,6 +32,8 @@ export interface FileSearchOptions {
 	starredPaths: string[];
 	includeCanvas: boolean;
 	includePdf: boolean;
+	excludeFolders?: string[];
+	frecency?: Record<string, FrecencyEntry>;
 	limit?: number;
 }
 
@@ -37,6 +44,7 @@ export class FileSearcher {
 		const files = getSearchableFiles(this.app, {
 			includeCanvas: options.includeCanvas,
 			includePdf: options.includePdf,
+			excludeFolders: options.excludeFolders,
 		});
 		const limit = options.limit ?? 50;
 		const results: FileSearchResult[] = [];
@@ -60,15 +68,26 @@ export class FileSearcher {
 			} else if (isFilterOnly) {
 				score = 100;
 			} else {
+				let matched = true;
 				for (const token of options.textTokens) {
-					const match = fuzzyMatch(token, basename) ?? fuzzyMatch(token, file.path);
-					if (!match) {
-						score = 0;
+					const basenameMatch = fuzzyMatch(token, basename);
+					if (basenameMatch) {
+						score += basenameMatch.score;
+						// Accumulate across tokens (was overwriting), and only keep
+						// basename-relative indices so highlights land correctly.
+						indices.push(...basenameMatch.indices);
+						continue;
+					}
+					const pathMatch = fuzzyMatch(token, file.path);
+					if (!pathMatch) {
+						matched = false;
 						break;
 					}
-					score += match.score;
-					indices = match.indices;
+					// Matched on the folder path, not the name; count it at a
+					// discount and add no indices (they don't map onto basename).
+					score += Math.floor(pathMatch.score / 2);
 				}
+				if (!matched) score = 0;
 			}
 
 			if (score <= 0) continue;
@@ -85,6 +104,17 @@ export class FileSearcher {
 				score += Math.max(0, 100 - Math.floor((Date.now() - file.stat.mtime) / 3600000));
 			} else {
 				score += Math.max(0, 10 - Math.floor((Date.now() - file.stat.mtime) / 86400000));
+			}
+
+			// Frecency: reward files opened often and recently. Strongest in
+			// browse/filter modes where there is no query relevance to rank by.
+			const fr = options.frecency?.[file.path];
+			if (fr) {
+				const freqBoost = Math.min(300, fr.count * 15);
+				const ageDays = (Date.now() - fr.last) / 86400000;
+				const recencyBoost = Math.max(0, 60 - Math.floor(ageDays) * 2);
+				const weight = isBrowseMode || isFilterOnly ? 1 : 0.25;
+				score += Math.floor((freqBoost + recencyBoost) * weight);
 			}
 
 			results.push({

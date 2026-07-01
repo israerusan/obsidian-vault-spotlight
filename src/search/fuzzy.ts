@@ -85,7 +85,7 @@ export function tokenizeQuery(raw: string): {
 			extFilters.push(part.slice(4).toLowerCase());
 		} else if (part.startsWith("#") && part.length > 1) {
 			tags.push(part.slice(1).toLowerCase());
-		} else if (part.startsWith("@")) {
+		} else if (part.startsWith("@") && part.length > 1) {
 			const prop = part.slice(1);
 			const colon = prop.indexOf(":");
 			if (colon === -1) {
@@ -93,8 +93,15 @@ export function tokenizeQuery(raw: string): {
 			} else {
 				const key = prop.slice(0, colon).toLowerCase();
 				const value = prop.slice(colon + 1);
-				properties.push({ key, value: value.length ? value.toLowerCase() : null });
+				// A bare "@key:" with no key is meaningless; skip it rather than
+				// emitting an empty-key filter that excludes every file.
+				if (key.length > 0) {
+					properties.push({ key, value: value.length ? value.toLowerCase() : null });
+				}
 			}
+		} else if (part === "#" || part === "@" || part === "ext:") {
+			// Lone operator characters are no-ops, not literal search text.
+			continue;
 		} else {
 			textTokens.push(part.toLowerCase());
 		}

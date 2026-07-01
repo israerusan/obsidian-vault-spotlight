@@ -1,6 +1,7 @@
 import { App, TFile } from "obsidian";
 import { RipgrepSearcher } from "./RipgrepSearcher";
 import { CanvasSearcher } from "./CanvasSearcher";
+import { isPathExcluded, normalizeExcludeFolders } from "./vaultFiles";
 
 export interface ContentSearchResult {
 	file: TFile;
@@ -14,12 +15,13 @@ export interface ContentSearchOptions {
 	useRipgrep: boolean;
 	ripgrepCommand: string;
 	includeCanvas: boolean;
+	excludeFolders?: string[];
 	limit?: number;
 }
 
 export class ContentSearcher {
 	private index = new Map<string, string[]>();
-	private building = false;
+	private buildPromise: Promise<void> | null = null;
 	private ripgrep: RipgrepSearcher;
 	private canvas: CanvasSearcher;
 
@@ -35,28 +37,35 @@ export class ContentSearcher {
 	async search(query: string, options: ContentSearchOptions): Promise<ContentSearchResult[]> {
 		if (!query.trim()) return [];
 		const limit = options.limit ?? 40;
+		const excluded = normalizeExcludeFolders(options.excludeFolders);
 
 		if (options.useRipgrep) {
 			const rgResults = await this.ripgrep.search(query, {
 				includeCanvas: options.includeCanvas,
+				excludeFolders: options.excludeFolders,
 				limit,
 			});
 			if (rgResults.length > 0) return rgResults;
 		}
 
-		const vaultResults = await this.searchVaultIndex(query, limit);
+		const vaultResults = await this.searchVaultIndex(query, limit, excluded);
 		if (!options.includeCanvas) return vaultResults;
 
-		const canvasResults = await this.canvas.search(query, Math.max(10, Math.floor(limit / 2)));
+		const canvasResults = await this.canvas.search(query, Math.max(10, Math.floor(limit / 2)), excluded);
 		return this.mergeResults(vaultResults, canvasResults, limit);
 	}
 
-	private async searchVaultIndex(query: string, limit: number): Promise<ContentSearchResult[]> {
+	private async searchVaultIndex(
+		query: string,
+		limit: number,
+		excluded: string[]
+	): Promise<ContentSearchResult[]> {
 		await this.ensureIndex();
 		const q = query.toLowerCase();
 		const results: ContentSearchResult[] = [];
 
 		for (const file of this.app.vault.getMarkdownFiles()) {
+			if (isPathExcluded(file.path, excluded)) continue;
 			const lines = this.index.get(file.path);
 			if (!lines) continue;
 
@@ -95,20 +104,53 @@ export class ContentSearcher {
 		return merged;
 	}
 
+	/** Full reset — use when the ripgrep command or global config changes. */
 	invalidate(): void {
 		this.index.clear();
+		this.buildPromise = null;
 	}
 
-	private async ensureIndex(): Promise<void> {
-		if (this.index.size > 0 || this.building) return;
-		this.building = true;
+	/** Incremental: re-read a single changed/created file into the index. */
+	async updateFile(file: TFile): Promise<void> {
+		if (file.extension !== "md") return;
+		// Only maintain incrementally once the index is populated; otherwise the
+		// next full build will read it anyway.
+		if (this.index.size === 0) return;
 		try {
+			const content = await this.app.vault.cachedRead(file);
+			this.index.set(file.path, content.split("\n"));
+		} catch {
+			this.index.delete(file.path);
+		}
+	}
+
+	/** Incremental: drop a deleted file from the index. */
+	removeFile(path: string): void {
+		this.index.delete(path);
+	}
+
+	private ensureIndex(): Promise<void> {
+		if (this.index.size > 0) return Promise.resolve();
+		// Coalesce concurrent callers onto a single in-flight build so a second
+		// keystroke never races against a half-built (empty) index.
+		if (this.buildPromise) return this.buildPromise;
+		this.buildPromise = (async () => {
 			for (const file of this.app.vault.getMarkdownFiles()) {
-				const content = await this.app.vault.cachedRead(file);
-				this.index.set(file.path, content.split("\n"));
+				try {
+					const content = await this.app.vault.cachedRead(file);
+					this.index.set(file.path, content.split("\n"));
+				} catch {
+					// Skip a file that vanished or is unreadable mid-build rather
+					// than aborting the whole index.
+				}
 			}
+		})();
+		try {
+			return this.buildPromise;
 		} finally {
-			this.building = false;
+			void this.buildPromise.finally(() => {
+				this.buildPromise = null;
+			});
 		}
 	}
 }
