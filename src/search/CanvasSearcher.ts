@@ -11,9 +11,9 @@ interface CanvasNode {
 export class CanvasSearcher {
 	constructor(private app: App) {}
 
-	async search(query: string, limit = 20, excluded: string[] = []): Promise<ContentSearchResult[]> {
-		if (!query.trim()) return [];
-		const q = query.toLowerCase();
+	async search(tokens: string[], limit = 20, excluded: string[] = []): Promise<ContentSearchResult[]> {
+		const needAll = tokens.map((t) => t.toLowerCase()).filter(Boolean);
+		if (needAll.length === 0) return [];
 		const results: ContentSearchResult[] = [];
 
 		for (const file of this.app.vault.getFiles()) {
@@ -29,7 +29,8 @@ export class CanvasSearcher {
 
 			const snippets = this.extractSearchableLines(raw);
 			for (const { line, text } of snippets) {
-				if (!text.toLowerCase().includes(q)) continue;
+				const low = text.toLowerCase();
+				if (!needAll.every((tk) => low.includes(tk))) continue;
 				results.push({
 					file,
 					line,

@@ -14,12 +14,13 @@ import {
 import type VaultSpotlightPlugin from "../main";
 import { FileSearcher } from "../search/FileSearcher";
 import { HeadingSearcher } from "../search/HeadingSearcher";
+import { CommandSearcher } from "../search/CommandSearcher";
 import { renderHighlightedText, tokenizeQuery } from "../search/fuzzy";
 import { SaveSearchPromptModal } from "./SaveSearchPromptModal";
 import { PromptModal } from "./PromptModal";
 import { iconForFileKind, type VaultFileKind } from "../search/vaultFiles";
 
-export type SpotlightMode = "files" | "content" | "headings";
+export type SpotlightMode = "files" | "content" | "headings" | "commands";
 
 type ResultItem =
 	| {
@@ -31,6 +32,7 @@ type ResultItem =
 			fileKind: VaultFileKind;
 			isRecent: boolean;
 			isStarred: boolean;
+			isBookmarked: boolean;
 	  }
 	| {
 			kind: "content";
@@ -50,11 +52,21 @@ type ResultItem =
 			matchIndices: number[];
 	  }
 	| {
+			kind: "command";
+			id: string;
+			name: string;
+			matchIndices: number[];
+	  }
+	| {
+			kind: "history";
+			query: string;
+	  }
+	| {
 			kind: "create";
 			name: string;
 	  };
 
-const MODE_ORDER: SpotlightMode[] = ["files", "content", "headings"];
+const MODE_ORDER: SpotlightMode[] = ["files", "content", "headings", "commands"];
 
 export class SpotlightModal extends Modal {
 	private inputEl!: HTMLInputElement;
@@ -74,6 +86,7 @@ export class SpotlightModal extends Modal {
 	private isLoading = false;
 	private fileSearcher: FileSearcher;
 	private headingSearcher: HeadingSearcher;
+	private commandSearcher: CommandSearcher;
 	private initialQuery: string;
 	private mode: SpotlightMode;
 	private metadataRef: EventRef | null = null;
@@ -88,6 +101,7 @@ export class SpotlightModal extends Modal {
 		this.shouldRestoreSelection = false;
 		this.fileSearcher = new FileSearcher(app);
 		this.headingSearcher = new HeadingSearcher(app);
+		this.commandSearcher = new CommandSearcher(app);
 		this.initialQuery = initialQuery;
 		this.mode = initialMode;
 	}
@@ -111,7 +125,16 @@ export class SpotlightModal extends Modal {
 		this.inputEl = inputWrap.createEl("input", {
 			type: "text",
 			placeholder: "Search notes, tags, or properties…",
-			attr: { spellcheck: "false", autocomplete: "off", autofocus: "true" },
+			attr: {
+				spellcheck: "false",
+				autocomplete: "off",
+				autofocus: "true",
+				role: "combobox",
+				"aria-expanded": "true",
+				"aria-autocomplete": "list",
+				"aria-controls": "vault-spotlight-listbox",
+				"aria-label": "Vault Spotlight search",
+			},
 		});
 		this.inputEl.value = this.initialQuery;
 
@@ -119,7 +142,10 @@ export class SpotlightModal extends Modal {
 		this.updateHint();
 
 		const body = contentEl.createDiv({ cls: "vault-spotlight-body" });
-		this.resultsEl = body.createDiv({ cls: "vault-spotlight-results" });
+		this.resultsEl = body.createDiv({
+			cls: "vault-spotlight-results",
+			attr: { role: "listbox", id: "vault-spotlight-listbox", "aria-label": "Search results" },
+		});
 		this.renderLoading();
 
 		if (this.previewEnabled()) {
@@ -198,7 +224,8 @@ export class SpotlightModal extends Modal {
 		this.hintEl.createEl("code", { text: "@tags:journal" });
 		this.hintEl.appendText(" · ");
 		this.hintEl.createEl("code", { text: "Tab" });
-		this.hintEl.appendText(" mode");
+		this.hintEl.appendText(" mode · ");
+		this.hintEl.createEl("code", { text: ": command" });
 		if (isPro) {
 			this.hintEl.appendText(" · ");
 			this.hintEl.createEl("code", { text: "> phrase" });
@@ -219,9 +246,10 @@ export class SpotlightModal extends Modal {
 	}
 
 	private effectiveMode(trimmed: string): SpotlightMode {
-		// A leading ">" always means content search, regardless of the mode
-		// toggled with Tab — it stays as a discoverable shortcut.
+		// Leading prefixes always win over the Tab-toggled mode, so they stay
+		// discoverable: ">" → content search, ":" → command palette.
 		if (trimmed.startsWith(">")) return "content";
+		if (trimmed.startsWith(":")) return "commands";
 		return this.mode;
 	}
 
@@ -253,9 +281,42 @@ export class SpotlightModal extends Modal {
 				return;
 			}
 
-			if (mode === "content") {
+			if (mode === "commands") {
+				const cmdQuery = trimmed.startsWith(":") ? trimmed.replace(/^:\s?/, "").trim() : trimmed;
+				this.setBadge("Commands", "is-content");
+				const commandResults = this.commandSearcher.search(cmdQuery, 60);
+				if (generation !== this.searchGeneration) return;
+				this.items = commandResults.map((r) => ({
+					kind: "command" as const,
+					id: r.id,
+					name: r.name,
+					matchIndices: r.matchIndices,
+				}));
+			} else if (mode === "content") {
 				const text = trimmed.startsWith(">") ? trimmed.replace(/^>\s?/, "").trim() : trimmed;
 				this.setBadge("Content", "is-content");
+				// On an empty content query, surface recent searches to re-run
+				// instead of an empty pane (mirrors the Recent files browse view).
+				if (text.length === 0) {
+					const history = this.plugin.settings.recentSearches ?? [];
+					this.items = history.map((q) => ({ kind: "history" as const, query: q }));
+					if (generation !== this.searchGeneration) return;
+					this.isLoading = false;
+					this.selectedIndex = 0;
+					if (this.items.length === 0) {
+						this.renderEmptyState(
+							"text",
+							"Search file contents",
+							"Type to search inside your notes. Recent searches will appear here."
+						);
+						this.updateStatus(0);
+					} else {
+						this.renderResults();
+						this.updateStatus(this.items.length);
+						this.updatePreview();
+					}
+					return;
+				}
 				const contentResults = await this.plugin.contentSearcher.search(text, {
 					useRipgrep: isPro,
 					ripgrepCommand: this.plugin.settings.ripgrepCommand,
@@ -294,6 +355,7 @@ export class SpotlightModal extends Modal {
 					extFilters: isPro ? parsed.extFilters : [],
 					recentPaths: this.plugin.settings.recentPaths,
 					starredPaths: isPro ? this.plugin.settings.starredPaths : [],
+					bookmarkedPaths: this.plugin.getBookmarkedPaths(),
 					includeCanvas: isPro && this.plugin.settings.includeCanvas,
 					includePdf: isPro && this.plugin.settings.includePdf,
 					excludeFolders,
@@ -310,6 +372,7 @@ export class SpotlightModal extends Modal {
 					fileKind: r.fileKind,
 					isRecent: r.isRecent,
 					isStarred: r.isStarred,
+					isBookmarked: r.isBookmarked,
 				}));
 
 				// Offer to create a note when a plain name search finds nothing.
@@ -346,12 +409,17 @@ export class SpotlightModal extends Modal {
 	private getBrowseSection(item: ResultItem): string | null {
 		if (item.kind !== "file" || this.inputEl.value.trim().length > 0) return null;
 		if (item.isStarred) return "Starred";
+		if (item.isBookmarked) return "Bookmarks";
 		if (item.isRecent) return "Recent";
 		return "All notes";
 	}
 
 	private itemFile(item: ResultItem): TFile | null {
-		return item.kind === "create" ? null : item.file;
+		return item.kind === "file" ||
+			item.kind === "content" ||
+			item.kind === "heading"
+			? item.file
+			: null;
 	}
 
 	private renderLoading(): void {
@@ -403,7 +471,10 @@ export class SpotlightModal extends Modal {
 				lastSection = section;
 			}
 
-			const row = this.resultsEl.createDiv({ cls: "vault-spotlight-item" });
+			const row = this.resultsEl.createDiv({
+				cls: "vault-spotlight-item",
+				attr: { role: "option", id: `vault-spotlight-opt-${index}` },
+			});
 			row.dataset.index = String(index);
 			this.applyRowState(row, index);
 
@@ -427,6 +498,8 @@ export class SpotlightModal extends Modal {
 				renderHighlightedText(title, item.file.basename, item.matchIndices);
 				if (item.isStarred && !isEmptyQuery) {
 					titleRow.createSpan({ cls: "vault-spotlight-item-badge is-star", text: "Starred" });
+				} else if (item.isBookmarked && !isEmptyQuery) {
+					titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Bookmark" });
 				} else if (item.isRecent && !isEmptyQuery) {
 					titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Recent" });
 				}
@@ -453,6 +526,16 @@ export class SpotlightModal extends Modal {
 				renderHighlightedText(title, item.heading, item.matchIndices);
 				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: `H${item.level}` });
 				body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.file.basename} · L${item.line}` });
+			} else if (item.kind === "command") {
+				setIcon(iconWrap, "terminal-square");
+				renderHighlightedText(title, item.name, item.matchIndices);
+				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Command" });
+				body.createDiv({ cls: "vault-spotlight-item-meta", text: "Run command" });
+			} else if (item.kind === "history") {
+				setIcon(iconWrap, "history");
+				title.setText(item.query);
+				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Recent search" });
+				body.createDiv({ cls: "vault-spotlight-item-meta", text: "Press ↵ to search again" });
 			} else {
 				setIcon(iconWrap, "file-plus");
 				title.setText(`Create “${item.name}”`);
@@ -494,7 +577,9 @@ export class SpotlightModal extends Modal {
 	}
 
 	private applyRowState(row: HTMLElement, index: number): void {
-		row.toggleClass("is-selected", index === this.selectedIndex);
+		const selected = index === this.selectedIndex;
+		row.toggleClass("is-selected", selected);
+		row.setAttribute("aria-selected", String(selected));
 		const item = this.items[index];
 		const file = item ? this.itemFile(item) : null;
 		if (file) {
@@ -508,8 +593,11 @@ export class SpotlightModal extends Modal {
 			const index = Number(row.dataset.index);
 			this.applyRowState(row, index);
 		});
-		const selected = this.resultsEl.querySelector(".is-selected");
+		const selected = this.resultsEl.querySelector<HTMLElement>(".is-selected");
 		selected?.scrollIntoView({ block: "nearest" });
+		// Point the combobox at the active option for screen readers.
+		if (selected?.id) this.inputEl.setAttribute("aria-activedescendant", selected.id);
+		else this.inputEl.removeAttribute("aria-activedescendant");
 		this.updatePreview();
 	}
 
@@ -580,8 +668,8 @@ export class SpotlightModal extends Modal {
 	private cycleMode(): void {
 		const idx = MODE_ORDER.indexOf(this.mode);
 		this.mode = MODE_ORDER[(idx + 1) % MODE_ORDER.length];
-		// Drop a leading ">" so the toggled mode isn't overridden by the prefix.
-		this.inputEl.value = this.inputEl.value.replace(/^\s*>\s?/, "");
+		// Drop a leading mode prefix so the toggled mode isn't overridden by it.
+		this.inputEl.value = this.inputEl.value.replace(/^\s*[>:]\s?/, "");
 		this.focusInput();
 		void this.runSearch();
 	}
@@ -590,11 +678,29 @@ export class SpotlightModal extends Modal {
 		const selected = this.items[this.selectedIndex];
 		if (!selected) return;
 
+		if (selected.kind === "history") {
+			// Re-run a past search without leaving the modal.
+			this.inputEl.value = selected.query;
+			this.focusInput();
+			void this.runSearch();
+			return;
+		}
+
+		if (selected.kind === "command") {
+			this.close();
+			this.commandSearcher.execute(selected.id);
+			return;
+		}
+
 		if (selected.kind === "create") {
+			this.recordSearch();
 			this.close();
 			await this.createAndOpen(selected.name);
 			return;
 		}
+
+		// Opening a real result means the current query was useful — remember it.
+		this.recordSearch();
 
 		const targets =
 			this.checkedPaths.size > 0
@@ -772,6 +878,14 @@ export class SpotlightModal extends Modal {
 		}).open();
 	}
 
+	private recordSearch(): void {
+		const raw = this.inputEl.value.trim();
+		if (!raw) return;
+		// Strip mode prefixes so history stores the plain query text.
+		const q = raw.replace(/^[>:]\s?/, "").trim();
+		if (q.length > 0) this.plugin.trackSearch(q);
+	}
+
 	private updatePreview(): void {
 		if (!this.previewEl || !this.previewComponent) return;
 		if (this.previewTimer !== null) window.clearTimeout(this.previewTimer);
@@ -796,17 +910,36 @@ export class SpotlightModal extends Modal {
 			}
 			previewEl.createDiv({ cls: "vault-spotlight-preview-title", text: file.basename });
 			const bodyEl = previewEl.createDiv({ cls: "vault-spotlight-preview-body markdown-rendered" });
+			const terms = this.previewHighlightTerms(item);
 			void this.app.vault
 				.cachedRead(file)
 				.then((content) => {
 					if (this.previewComponent !== component || !previewEl.isConnected) return;
 					return MarkdownRenderer.render(this.app, content.slice(0, 10000), bodyEl, file.path, component);
 				})
+				.then(() => {
+					if (this.previewComponent !== component || !bodyEl.isConnected) return;
+					// Scroll the matched term into view and mark it, so a content or
+					// heading hit lands on the relevant passage instead of the top.
+					const hit = highlightFirstMatch(bodyEl, terms);
+					hit?.scrollIntoView({ block: "center" });
+				})
 				.catch(() => {
 					previewEl.empty();
 					previewEl.createDiv({ cls: "vault-spotlight-preview-empty", text: "Preview unavailable" });
 				});
 		}, 120);
+	}
+
+	/** Terms to highlight in the preview for the current selection. */
+	private previewHighlightTerms(item: ResultItem | undefined): string[] {
+		if (!item) return [];
+		if (item.kind === "heading") return [item.heading];
+		if (item.kind === "content") {
+			const q = this.inputEl.value.trim().replace(/^>\s?/, "").trim();
+			return q.split(/\s+/).filter(Boolean);
+		}
+		return [];
 	}
 
 	private registerScopeShortcuts(): void {
@@ -879,4 +1012,45 @@ export class SpotlightModal extends Modal {
 		window.setTimeout(applyFocus, 0);
 		window.setTimeout(applyFocus, 50);
 	}
+}
+
+/**
+ * Wraps the first occurrence of any term (case-insensitive) inside `root` in a
+ * <mark> and returns it, or null if no term is found. Walks text nodes so it
+ * marks rendered text without disturbing the surrounding markdown structure.
+ */
+function highlightFirstMatch(root: HTMLElement, terms: string[]): HTMLElement | null {
+	const needles = terms.map((t) => t.toLowerCase()).filter((t) => t.length > 0);
+	if (needles.length === 0) return null;
+
+	const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+	let node: Node | null;
+	while ((node = walker.nextNode())) {
+		const text = node.nodeValue ?? "";
+		if (!text.trim()) continue;
+		const low = text.toLowerCase();
+		let idx = -1;
+		let len = 0;
+		for (const needle of needles) {
+			const at = low.indexOf(needle);
+			if (at !== -1 && (idx === -1 || at < idx)) {
+				idx = at;
+				len = needle.length;
+			}
+		}
+		if (idx === -1) continue;
+
+		const range = document.createRange();
+		range.setStart(node, idx);
+		range.setEnd(node, idx + len);
+		const mark = document.createElement("mark");
+		mark.className = "vault-spotlight-preview-hit";
+		try {
+			range.surroundContents(mark);
+			return mark;
+		} catch {
+			return null;
+		}
+	}
+	return null;
 }

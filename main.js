@@ -2275,6 +2275,7 @@ var import_obsidian6 = require("obsidian");
 // src/settings.ts
 var import_obsidian = require("obsidian");
 var MAX_CUSTOM_SEARCHES = 50;
+var MAX_RECENT_SEARCHES = 15;
 var DEFAULT_SETTINGS = {
   licenseKey: "",
   isPro: false,
@@ -2292,7 +2293,8 @@ var DEFAULT_SETTINGS = {
   excludeFolders: [],
   fileFrecency: {},
   useFrecency: true,
-  showPreview: false
+  showPreview: false,
+  recentSearches: []
 };
 var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
@@ -2468,10 +2470,46 @@ function fuzzyMatch(query, text) {
       qi++;
     }
   }
-  if (qi < q.length) return null;
+  if (qi < q.length) {
+    return typoFallback(q, text);
+  }
   if (t.includes(q)) score += 20;
   if (t.startsWith(q)) score += 30;
   return { score, indices };
+}
+function typoFallback(q, text) {
+  if (q.length < 4) return null;
+  const tolerance = q.length <= 5 ? 1 : q.length <= 9 ? 2 : 3;
+  let best = Infinity;
+  for (const word of text.toLowerCase().split(/[\s\-_/]+/)) {
+    if (!word) continue;
+    if (Math.abs(word.length - q.length) > tolerance) continue;
+    const d = boundedLevenshtein(q, word, tolerance);
+    if (d < best) best = d;
+    if (best === 0) break;
+  }
+  if (best > tolerance) return null;
+  return { score: Math.max(1, 8 - best * 2), indices: [] };
+}
+function boundedLevenshtein(a, b, max) {
+  const al = a.length;
+  const bl = b.length;
+  if (Math.abs(al - bl) > max) return max + 1;
+  let prev = new Array(bl + 1);
+  let curr = new Array(bl + 1);
+  for (let j = 0; j <= bl; j++) prev[j] = j;
+  for (let i = 1; i <= al; i++) {
+    curr[0] = i;
+    let rowMin = curr[0];
+    for (let j = 1; j <= bl; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+      if (curr[j] < rowMin) rowMin = curr[j];
+    }
+    if (rowMin > max) return max + 1;
+    [prev, curr] = [curr, prev];
+  }
+  return prev[bl];
 }
 function renderHighlightedText(parent, text, indices) {
   parent.empty();
@@ -2633,7 +2671,7 @@ var FileSearcher = class {
     this.app = app;
   }
   async search(options) {
-    var _a, _b;
+    var _a, _b, _c;
     const files = getSearchableFiles(this.app, {
       includeCanvas: options.includeCanvas,
       includePdf: options.includePdf,
@@ -2643,6 +2681,7 @@ var FileSearcher = class {
     const results = [];
     const recentSet = new Map(options.recentPaths.map((p, i) => [p, i]));
     const starredSet = new Map(options.starredPaths.map((p, i) => [p, i]));
+    const bookmarkedSet = new Set((_b = options.bookmarkedPaths) != null ? _b : []);
     const hasActiveFilters = options.tags.length > 0 || options.properties.length > 0 || options.extFilters.length > 0;
     const isBrowseMode = options.textTokens.length === 0 && !hasActiveFilters;
     const isFilterOnly = options.textTokens.length === 0 && hasActiveFilters;
@@ -2676,18 +2715,19 @@ var FileSearcher = class {
       }
       if (score <= 0) continue;
       const starredRank = starredSet.get(file.path);
-      if (starredRank !== void 0) {
-        score += 2e3 - starredRank * 10;
-      }
       const recentRank = recentSet.get(file.path);
-      if (recentRank !== void 0) {
+      if (starredRank !== void 0) {
+        score += 3e3 - starredRank * 10;
+      } else if (bookmarkedSet.has(file.path)) {
+        score += 2e3;
+      } else if (recentRank !== void 0) {
         score += 1e3 - recentRank * 10;
       } else if (isBrowseMode) {
         score += Math.max(0, 100 - Math.floor((Date.now() - file.stat.mtime) / 36e5));
       } else {
         score += Math.max(0, 10 - Math.floor((Date.now() - file.stat.mtime) / 864e5));
       }
-      const fr = (_b = options.frecency) == null ? void 0 : _b[file.path];
+      const fr = (_c = options.frecency) == null ? void 0 : _c[file.path];
       if (fr) {
         const freqBoost = Math.min(300, fr.count * 15);
         const ageDays = (Date.now() - fr.last) / 864e5;
@@ -2702,7 +2742,8 @@ var FileSearcher = class {
         modifiedLabel: formatRelativeTime(file.stat.mtime),
         fileKind: getVaultFileKind(file),
         isRecent: recentSet.has(file.path),
-        isStarred: starredSet.has(file.path)
+        isStarred: starredSet.has(file.path),
+        isBookmarked: bookmarkedSet.has(file.path)
       });
     }
     return results.sort((a, b) => b.score - a.score).slice(0, limit);
@@ -2778,6 +2819,57 @@ var HeadingSearcher = class {
       }
     }
     return results.sort((a, b) => b.score - a.score).slice(0, limit);
+  }
+};
+
+// src/search/CommandSearcher.ts
+var CommandSearcher = class {
+  constructor(app) {
+    this.app = app;
+  }
+  api() {
+    const api = this.app.commands;
+    return api != null ? api : null;
+  }
+  list() {
+    const api = this.api();
+    if (!api) return [];
+    if (typeof api.listCommands === "function") {
+      try {
+        return api.listCommands().filter((c) => c && c.id && c.name);
+      } catch (e) {
+        return [];
+      }
+    }
+    if (api.commands) {
+      return Object.values(api.commands).filter((c) => c && c.id && c.name);
+    }
+    return [];
+  }
+  search(query, limit = 50) {
+    const commands = this.list();
+    const q = query.trim();
+    const results = [];
+    for (const cmd of commands) {
+      if (q.length === 0) {
+        results.push({ id: cmd.id, name: cmd.name, score: 1, matchIndices: [] });
+        continue;
+      }
+      const match = fuzzyMatch(q, cmd.name);
+      if (!match) continue;
+      results.push({ id: cmd.id, name: cmd.name, score: match.score, matchIndices: match.indices });
+    }
+    results.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+    return results.slice(0, limit);
+  }
+  execute(id) {
+    const api = this.api();
+    if (!api || typeof api.executeCommandById !== "function") return false;
+    try {
+      return api.executeCommandById(id);
+    } catch (e) {
+      return false;
+    }
   }
 };
 
@@ -2862,7 +2954,7 @@ var PromptModal = class extends import_obsidian4.Modal {
 };
 
 // src/spotlight/SpotlightModal.ts
-var MODE_ORDER = ["files", "content", "headings"];
+var MODE_ORDER = ["files", "content", "headings", "commands"];
 var SpotlightModal = class extends import_obsidian5.Modal {
   constructor(app, plugin, initialQuery = "", initialMode = "files") {
     super(app);
@@ -2880,6 +2972,7 @@ var SpotlightModal = class extends import_obsidian5.Modal {
     this.shouldRestoreSelection = false;
     this.fileSearcher = new FileSearcher(app);
     this.headingSearcher = new HeadingSearcher(app);
+    this.commandSearcher = new CommandSearcher(app);
     this.initialQuery = initialQuery;
     this.mode = initialMode;
   }
@@ -2899,13 +2992,25 @@ var SpotlightModal = class extends import_obsidian5.Modal {
     this.inputEl = inputWrap.createEl("input", {
       type: "text",
       placeholder: "Search notes, tags, or properties\u2026",
-      attr: { spellcheck: "false", autocomplete: "off", autofocus: "true" }
+      attr: {
+        spellcheck: "false",
+        autocomplete: "off",
+        autofocus: "true",
+        role: "combobox",
+        "aria-expanded": "true",
+        "aria-autocomplete": "list",
+        "aria-controls": "vault-spotlight-listbox",
+        "aria-label": "Vault Spotlight search"
+      }
     });
     this.inputEl.value = this.initialQuery;
     this.hintEl = header.createDiv({ cls: "vault-spotlight-hint" });
     this.updateHint();
     const body = contentEl.createDiv({ cls: "vault-spotlight-body" });
-    this.resultsEl = body.createDiv({ cls: "vault-spotlight-results" });
+    this.resultsEl = body.createDiv({
+      cls: "vault-spotlight-results",
+      attr: { role: "listbox", id: "vault-spotlight-listbox", "aria-label": "Search results" }
+    });
     this.renderLoading();
     if (this.previewEnabled()) {
       this.previewEl = body.createDiv({ cls: "vault-spotlight-preview" });
@@ -2972,7 +3077,8 @@ var SpotlightModal = class extends import_obsidian5.Modal {
     this.hintEl.createEl("code", { text: "@tags:journal" });
     this.hintEl.appendText(" \xB7 ");
     this.hintEl.createEl("code", { text: "Tab" });
-    this.hintEl.appendText(" mode");
+    this.hintEl.appendText(" mode \xB7 ");
+    this.hintEl.createEl("code", { text: ": command" });
     if (isPro) {
       this.hintEl.appendText(" \xB7 ");
       this.hintEl.createEl("code", { text: "> phrase" });
@@ -2992,9 +3098,11 @@ var SpotlightModal = class extends import_obsidian5.Modal {
   }
   effectiveMode(trimmed) {
     if (trimmed.startsWith(">")) return "content";
+    if (trimmed.startsWith(":")) return "commands";
     return this.mode;
   }
   async runSearch() {
+    var _a;
     const generation = ++this.searchGeneration;
     const raw = this.inputEl.value;
     const trimmed = raw.trim();
@@ -3017,9 +3125,40 @@ var SpotlightModal = class extends import_obsidian5.Modal {
         this.updateStatus(0);
         return;
       }
-      if (mode === "content") {
+      if (mode === "commands") {
+        const cmdQuery = trimmed.startsWith(":") ? trimmed.replace(/^:\s?/, "").trim() : trimmed;
+        this.setBadge("Commands", "is-content");
+        const commandResults = this.commandSearcher.search(cmdQuery, 60);
+        if (generation !== this.searchGeneration) return;
+        this.items = commandResults.map((r) => ({
+          kind: "command",
+          id: r.id,
+          name: r.name,
+          matchIndices: r.matchIndices
+        }));
+      } else if (mode === "content") {
         const text = trimmed.startsWith(">") ? trimmed.replace(/^>\s?/, "").trim() : trimmed;
         this.setBadge("Content", "is-content");
+        if (text.length === 0) {
+          const history = (_a = this.plugin.settings.recentSearches) != null ? _a : [];
+          this.items = history.map((q) => ({ kind: "history", query: q }));
+          if (generation !== this.searchGeneration) return;
+          this.isLoading = false;
+          this.selectedIndex = 0;
+          if (this.items.length === 0) {
+            this.renderEmptyState(
+              "text",
+              "Search file contents",
+              "Type to search inside your notes. Recent searches will appear here."
+            );
+            this.updateStatus(0);
+          } else {
+            this.renderResults();
+            this.updateStatus(this.items.length);
+            this.updatePreview();
+          }
+          return;
+        }
         const contentResults = await this.plugin.contentSearcher.search(text, {
           useRipgrep: isPro,
           ripgrepCommand: this.plugin.settings.ripgrepCommand,
@@ -3058,6 +3197,7 @@ var SpotlightModal = class extends import_obsidian5.Modal {
           extFilters: isPro ? parsed.extFilters : [],
           recentPaths: this.plugin.settings.recentPaths,
           starredPaths: isPro ? this.plugin.settings.starredPaths : [],
+          bookmarkedPaths: this.plugin.getBookmarkedPaths(),
           includeCanvas: isPro && this.plugin.settings.includeCanvas,
           includePdf: isPro && this.plugin.settings.includePdf,
           excludeFolders,
@@ -3073,7 +3213,8 @@ var SpotlightModal = class extends import_obsidian5.Modal {
           modifiedLabel: r.modifiedLabel,
           fileKind: r.fileKind,
           isRecent: r.isRecent,
-          isStarred: r.isStarred
+          isStarred: r.isStarred,
+          isBookmarked: r.isBookmarked
         }));
         const noFilters = parsed.tags.length === 0 && parsed.properties.length === 0 && parsed.extFilters.length === 0;
         if (this.items.length === 0 && !isEmptyQuery && noFilters) {
@@ -3104,11 +3245,12 @@ var SpotlightModal = class extends import_obsidian5.Modal {
   getBrowseSection(item) {
     if (item.kind !== "file" || this.inputEl.value.trim().length > 0) return null;
     if (item.isStarred) return "Starred";
+    if (item.isBookmarked) return "Bookmarks";
     if (item.isRecent) return "Recent";
     return "All notes";
   }
   itemFile(item) {
-    return item.kind === "create" ? null : item.file;
+    return item.kind === "file" || item.kind === "content" || item.kind === "heading" ? item.file : null;
   }
   renderLoading() {
     this.resultsEl.empty();
@@ -3154,7 +3296,10 @@ var SpotlightModal = class extends import_obsidian5.Modal {
         this.resultsEl.createDiv({ cls: "vault-spotlight-section-label", text: section });
         lastSection = section;
       }
-      const row = this.resultsEl.createDiv({ cls: "vault-spotlight-item" });
+      const row = this.resultsEl.createDiv({
+        cls: "vault-spotlight-item",
+        attr: { role: "option", id: `vault-spotlight-opt-${index}` }
+      });
       row.dataset.index = String(index);
       this.applyRowState(row, index);
       const file = this.itemFile(item);
@@ -3174,6 +3319,8 @@ var SpotlightModal = class extends import_obsidian5.Modal {
         renderHighlightedText(title, item.file.basename, item.matchIndices);
         if (item.isStarred && !isEmptyQuery) {
           titleRow.createSpan({ cls: "vault-spotlight-item-badge is-star", text: "Starred" });
+        } else if (item.isBookmarked && !isEmptyQuery) {
+          titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Bookmark" });
         } else if (item.isRecent && !isEmptyQuery) {
           titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Recent" });
         }
@@ -3199,6 +3346,16 @@ var SpotlightModal = class extends import_obsidian5.Modal {
         renderHighlightedText(title, item.heading, item.matchIndices);
         titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: `H${item.level}` });
         body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.file.basename} \xB7 L${item.line}` });
+      } else if (item.kind === "command") {
+        (0, import_obsidian5.setIcon)(iconWrap, "terminal-square");
+        renderHighlightedText(title, item.name, item.matchIndices);
+        titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Command" });
+        body.createDiv({ cls: "vault-spotlight-item-meta", text: "Run command" });
+      } else if (item.kind === "history") {
+        (0, import_obsidian5.setIcon)(iconWrap, "history");
+        title.setText(item.query);
+        titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Recent search" });
+        body.createDiv({ cls: "vault-spotlight-item-meta", text: "Press \u21B5 to search again" });
       } else {
         (0, import_obsidian5.setIcon)(iconWrap, "file-plus");
         title.setText(`Create \u201C${item.name}\u201D`);
@@ -3237,7 +3394,9 @@ var SpotlightModal = class extends import_obsidian5.Modal {
     });
   }
   applyRowState(row, index) {
-    row.toggleClass("is-selected", index === this.selectedIndex);
+    const selected = index === this.selectedIndex;
+    row.toggleClass("is-selected", selected);
+    row.setAttribute("aria-selected", String(selected));
     const item = this.items[index];
     const file = item ? this.itemFile(item) : null;
     if (file) {
@@ -3252,6 +3411,8 @@ var SpotlightModal = class extends import_obsidian5.Modal {
     });
     const selected = this.resultsEl.querySelector(".is-selected");
     selected == null ? void 0 : selected.scrollIntoView({ block: "nearest" });
+    if (selected == null ? void 0 : selected.id) this.inputEl.setAttribute("aria-activedescendant", selected.id);
+    else this.inputEl.removeAttribute("aria-activedescendant");
     this.updatePreview();
   }
   renderFooter() {
@@ -3312,18 +3473,31 @@ var SpotlightModal = class extends import_obsidian5.Modal {
   cycleMode() {
     const idx = MODE_ORDER.indexOf(this.mode);
     this.mode = MODE_ORDER[(idx + 1) % MODE_ORDER.length];
-    this.inputEl.value = this.inputEl.value.replace(/^\s*>\s?/, "");
+    this.inputEl.value = this.inputEl.value.replace(/^\s*[>:]\s?/, "");
     this.focusInput();
     void this.runSearch();
   }
   async activateSelection() {
     const selected = this.items[this.selectedIndex];
     if (!selected) return;
+    if (selected.kind === "history") {
+      this.inputEl.value = selected.query;
+      this.focusInput();
+      void this.runSearch();
+      return;
+    }
+    if (selected.kind === "command") {
+      this.close();
+      this.commandSearcher.execute(selected.id);
+      return;
+    }
     if (selected.kind === "create") {
+      this.recordSearch();
       this.close();
       await this.createAndOpen(selected.name);
       return;
     }
+    this.recordSearch();
     const targets = this.checkedPaths.size > 0 ? this.items.filter((i) => {
       const f = this.itemFile(i);
       return f ? this.checkedPaths.has(f.path) : false;
@@ -3473,6 +3647,12 @@ var SpotlightModal = class extends import_obsidian5.Modal {
       this.plugin.registerCustomSearchCommand(entry);
     }).open();
   }
+  recordSearch() {
+    const raw = this.inputEl.value.trim();
+    if (!raw) return;
+    const q = raw.replace(/^[>:]\s?/, "").trim();
+    if (q.length > 0) this.plugin.trackSearch(q);
+  }
   updatePreview() {
     if (!this.previewEl || !this.previewComponent) return;
     if (this.previewTimer !== null) window.clearTimeout(this.previewTimer);
@@ -3496,14 +3676,29 @@ var SpotlightModal = class extends import_obsidian5.Modal {
       }
       previewEl.createDiv({ cls: "vault-spotlight-preview-title", text: file.basename });
       const bodyEl = previewEl.createDiv({ cls: "vault-spotlight-preview-body markdown-rendered" });
+      const terms = this.previewHighlightTerms(item);
       void this.app.vault.cachedRead(file).then((content) => {
         if (this.previewComponent !== component || !previewEl.isConnected) return;
         return import_obsidian5.MarkdownRenderer.render(this.app, content.slice(0, 1e4), bodyEl, file.path, component);
+      }).then(() => {
+        if (this.previewComponent !== component || !bodyEl.isConnected) return;
+        const hit = highlightFirstMatch(bodyEl, terms);
+        hit == null ? void 0 : hit.scrollIntoView({ block: "center" });
       }).catch(() => {
         previewEl.empty();
         previewEl.createDiv({ cls: "vault-spotlight-preview-empty", text: "Preview unavailable" });
       });
     }, 120);
+  }
+  /** Terms to highlight in the preview for the current selection. */
+  previewHighlightTerms(item) {
+    if (!item) return [];
+    if (item.kind === "heading") return [item.heading];
+    if (item.kind === "content") {
+      const q = this.inputEl.value.trim().replace(/^>\s?/, "").trim();
+      return q.split(/\s+/).filter(Boolean);
+    }
+    return [];
   }
   registerScopeShortcuts() {
     this.scope.register([], "ArrowDown", (evt) => {
@@ -3569,6 +3764,40 @@ var SpotlightModal = class extends import_obsidian5.Modal {
     window.setTimeout(applyFocus, 50);
   }
 };
+function highlightFirstMatch(root, terms) {
+  var _a;
+  const needles = terms.map((t) => t.toLowerCase()).filter((t) => t.length > 0);
+  if (needles.length === 0) return null;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node;
+  while (node = walker.nextNode()) {
+    const text = (_a = node.nodeValue) != null ? _a : "";
+    if (!text.trim()) continue;
+    const low = text.toLowerCase();
+    let idx = -1;
+    let len = 0;
+    for (const needle of needles) {
+      const at = low.indexOf(needle);
+      if (at !== -1 && (idx === -1 || at < idx)) {
+        idx = at;
+        len = needle.length;
+      }
+    }
+    if (idx === -1) continue;
+    const range = document.createRange();
+    range.setStart(node, idx);
+    range.setEnd(node, idx + len);
+    const mark = document.createElement("mark");
+    mark.className = "vault-spotlight-preview-hit";
+    try {
+      range.surroundContents(mark);
+      return mark;
+    } catch (e) {
+      return null;
+    }
+  }
+  return null;
+}
 
 // src/license/LicenseManager.ts
 var import_tweetnacl = __toESM(require_nacl_fast(), 1);
@@ -3650,13 +3879,23 @@ var RipgrepSearcher = class {
     }
     return this.available;
   }
+  /**
+   * Returns matches, or `null` when ripgrep could not run at all (missing
+   * binary, no vault path, or a non-"no-match" error). A `null` return is the
+   * caller's signal to fall back to the in-memory index; an empty array means
+   * ripgrep ran fine and genuinely found nothing — the caller should trust it
+   * and NOT build a full-vault index just to also find nothing.
+   */
   async search(query, options) {
-    var _a;
-    if (!query.trim()) return [];
+    var _a, _b;
+    const tokens = query.trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return [];
     const execFileAsync = getExecFileAsync();
-    if (!execFileAsync || !await this.isAvailable()) return [];
+    if (!execFileAsync || !await this.isAvailable()) return null;
     const vaultPath = this.app.vault.adapter.basePath;
-    if (!vaultPath) return [];
+    if (!vaultPath) return null;
+    const anchor = tokens.reduce((a, b) => b.length >= a.length ? b : a);
+    const multi = tokens.length > 1;
     const args = [
       "-i",
       // Treat the query literally, matching the vault/canvas fallback's
@@ -3669,7 +3908,9 @@ var RipgrepSearcher = class {
       "never",
       "--no-follow",
       "--max-count",
-      "4",
+      // A multi-word query needs more anchor hits per file to survive the
+      // all-tokens filter below; a single word keeps the tight cap.
+      multi ? "40" : "4",
       // Cap line length so a minified/one-line file can't blow maxBuffer.
       "--max-columns",
       "500",
@@ -3683,7 +3924,8 @@ var RipgrepSearcher = class {
       const f = folder.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
       if (f) args.push("-g", `!${f}/**`);
     }
-    args.push("--", query, ".");
+    args.push("--", anchor, ".");
+    const needAll = multi ? tokens.map((t) => t.toLowerCase()) : null;
     try {
       const { stdout } = await execFileAsync(this.command, args, {
         cwd: vaultPath,
@@ -3691,16 +3933,16 @@ var RipgrepSearcher = class {
         maxBuffer: 16 * 1024 * 1024,
         windowsHide: true
       });
-      return this.parseOutput(String(stdout), options.limit);
+      return this.parseOutput(String(stdout), options.limit, needAll);
     } catch (error) {
       const err = error;
-      if (err.code === 1 && err.stdout) {
-        return this.parseOutput(String(err.stdout), options.limit);
+      if (err.code === 1) {
+        return this.parseOutput(String((_b = err.stdout) != null ? _b : ""), options.limit, needAll);
       }
-      return [];
+      return null;
     }
   }
-  parseOutput(output, limit) {
+  parseOutput(output, limit, needAll) {
     var _a, _b;
     const fileMap = this.app.vault.getFiles().reduce((map, file) => {
       map.set(file.path, file);
@@ -3713,6 +3955,10 @@ var RipgrepSearcher = class {
       const match = line.match(/^(.+?):(\d+):(.*)$/);
       if (!match) continue;
       const [, rawPath, lineNum, snippet] = match;
+      if (needAll) {
+        const low = snippet.toLowerCase();
+        if (!needAll.every((tk) => low.includes(tk))) continue;
+      }
       const normalized = rawPath.replace(/\\/g, "/").replace(/^\.\//, "");
       const file = (_b = (_a = fileMap.get(normalized)) != null ? _a : fileMap.get(normalized.split("/").slice(-3).join("/"))) != null ? _b : this.findFileBySuffix(fileMap, normalized);
       if (!file) continue;
@@ -3740,9 +3986,9 @@ var CanvasSearcher = class {
   constructor(app) {
     this.app = app;
   }
-  async search(query, limit = 20, excluded = []) {
-    if (!query.trim()) return [];
-    const q = query.toLowerCase();
+  async search(tokens, limit = 20, excluded = []) {
+    const needAll = tokens.map((t) => t.toLowerCase()).filter(Boolean);
+    if (needAll.length === 0) return [];
     const results = [];
     for (const file of this.app.vault.getFiles()) {
       if (file.extension !== "canvas") continue;
@@ -3755,7 +4001,8 @@ var CanvasSearcher = class {
       }
       const snippets = this.extractSearchableLines(raw);
       for (const { line, text } of snippets) {
-        if (!text.toLowerCase().includes(q)) continue;
+        const low = text.toLowerCase();
+        if (!needAll.every((tk) => low.includes(tk))) continue;
         results.push({
           file,
           line,
@@ -3806,22 +4053,22 @@ var ContentSearcher = class {
     if (!query.trim()) return [];
     const limit = (_a = options.limit) != null ? _a : 40;
     const excluded = normalizeExcludeFolders(options.excludeFolders);
+    const tokens = query.trim().split(/\s+/).filter(Boolean).map((t) => t.toLowerCase());
     if (options.useRipgrep) {
       const rgResults = await this.ripgrep.search(query, {
         includeCanvas: options.includeCanvas,
         excludeFolders: options.excludeFolders,
         limit
       });
-      if (rgResults.length > 0) return rgResults;
+      if (rgResults !== null) return rgResults;
     }
-    const vaultResults = await this.searchVaultIndex(query, limit, excluded);
+    const vaultResults = await this.searchVaultIndex(tokens, limit, excluded);
     if (!options.includeCanvas) return vaultResults;
-    const canvasResults = await this.canvas.search(query, Math.max(10, Math.floor(limit / 2)), excluded);
+    const canvasResults = await this.canvas.search(tokens, Math.max(10, Math.floor(limit / 2)), excluded);
     return this.mergeResults(vaultResults, canvasResults, limit);
   }
-  async searchVaultIndex(query, limit, excluded) {
+  async searchVaultIndex(tokens, limit, excluded) {
     await this.ensureIndex();
-    const q = query.toLowerCase();
     const results = [];
     for (const file of this.app.vault.getMarkdownFiles()) {
       if (isPathExcluded(file.path, excluded)) continue;
@@ -3829,7 +4076,8 @@ var ContentSearcher = class {
       if (!lines) continue;
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        if (!line.toLowerCase().includes(q)) continue;
+        const low = line.toLowerCase();
+        if (!tokens.every((tk) => low.includes(tk))) continue;
         results.push({
           file,
           line: i + 1,
@@ -3926,6 +4174,11 @@ var VaultSpotlightPlugin = class extends import_obsidian6.Plugin {
       callback: () => this.openSpotlight("", "headings")
     });
     this.addCommand({
+      id: "run-command",
+      name: "Run command",
+      callback: () => this.openSpotlight("", "commands")
+    });
+    this.addCommand({
       id: "toggle-star-current-file",
       name: "Toggle star on current file",
       checkCallback: (checking) => {
@@ -4011,6 +4264,44 @@ var VaultSpotlightPlugin = class extends import_obsidian6.Plugin {
     this.bumpFrecency(path);
     this.scheduleSave();
   }
+  /** Record a query in the recent-searches list (most-recent first, de-duped). */
+  trackSearch(query) {
+    const q = query.trim();
+    if (!q) return;
+    const next = this.settings.recentSearches.filter((s) => s.toLowerCase() !== q.toLowerCase());
+    next.unshift(q);
+    this.settings.recentSearches = next.slice(0, MAX_RECENT_SEARCHES);
+    this.scheduleSave();
+  }
+  /**
+   * File paths from Obsidian's core Bookmarks plugin (flattened across groups).
+   * The bookmarks API isn't in the public typings, so it's read defensively and
+   * returns [] whenever the plugin is disabled or the shape is unexpected.
+   */
+  getBookmarkedPaths() {
+    var _a, _b, _c;
+    try {
+      const internal = this.app.internalPlugins;
+      const instance = (_b = (_a = internal == null ? void 0 : internal.getPluginById) == null ? void 0 : _a.call(internal, "bookmarks")) == null ? void 0 : _b.instance;
+      const bookmarks = (_c = instance == null ? void 0 : instance.getBookmarks) == null ? void 0 : _c.call(instance);
+      if (!Array.isArray(bookmarks)) return [];
+      const paths = [];
+      const walk = (items) => {
+        for (const raw of items) {
+          const item = raw;
+          if ((item == null ? void 0 : item.type) === "file" && typeof item.path === "string") {
+            paths.push(item.path);
+          } else if (Array.isArray(item == null ? void 0 : item.items)) {
+            walk(item.items);
+          }
+        }
+      };
+      walk(bookmarks);
+      return paths;
+    } catch (e) {
+      return [];
+    }
+  }
   bumpFrecency(path) {
     var _a;
     const fr = this.settings.fileFrecency;
@@ -4091,6 +4382,11 @@ var VaultSpotlightPlugin = class extends import_obsidian6.Plugin {
     if (!Array.isArray(this.settings.recentPaths)) this.settings.recentPaths = [];
     if (!Array.isArray(this.settings.starredPaths)) this.settings.starredPaths = [];
     if (!Array.isArray(this.settings.excludeFolders)) this.settings.excludeFolders = [];
+    if (!Array.isArray(this.settings.recentSearches)) {
+      this.settings.recentSearches = [];
+    } else {
+      this.settings.recentSearches = this.settings.recentSearches.filter((s) => typeof s === "string" && s.trim().length > 0).slice(0, MAX_RECENT_SEARCHES);
+    }
     if (this.settings.fileFrecency === null || typeof this.settings.fileFrecency !== "object") {
       this.settings.fileFrecency = {};
     }

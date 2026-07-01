@@ -4,15 +4,20 @@ Spotlight-style vault launcher for [Obsidian](https://obsidian.md). Fuzzy file s
 
 ## Free features
 
-- Fuzzy file name search with recent-file boosting
+- Fuzzy file name search with recent-file boosting and light typo tolerance
 - Filter by tag (`#work`) and frontmatter (`@status:done`)
-- Relative modified time in results
-- Keyboard-first modal (`Ctrl+Shift+O`)
+- **Command palette mode** — prefix query with `:` (or `Tab` to it) to search and run any Obsidian command
+- Core **Bookmarks** surfaced in the browse view
+- `Tab` cycles search modes; relative modified time in results
+- Keyboard-first modal (`Ctrl+Shift+O`) with screen-reader (ARIA) support
 
 ## Pro features ($8 one-time)
 
-- **Content search** — prefix query with `>` to search inside note bodies
+- **Content search** — prefix query with `>` to search inside note bodies (multi-word = match all words on a line)
 - **Ripgrep search** — faster content search when `rg` is installed
+- **Heading jump** — jump straight to any heading across the vault
+- **Preview pane** — live preview beside results, auto-scrolled to the matched passage
+- **Search history** — recent searches resurface on the empty content view
 - **Starred pins** — pin files with `Ctrl+D`
 - **Canvas & PDF** — search canvas files and show PDFs in results
 - **Batch open** — multi-select with `Ctrl+Space`, open all at once
@@ -21,6 +26,10 @@ Spotlight-style vault launcher for [Obsidian](https://obsidian.md). Fuzzy file s
 Purchase: [Buy Me a Coffee — Vault Spotlight Pro](https://buymeacoffee.com/vaultspotlight)
 
 License keys are verified **offline** (Ed25519). No account, server, or subscription.
+
+## Privacy & data
+
+Vault Spotlight never phones home. All state lives in the plugin's local `data.json`, which stores your settings plus usage data used for ranking: recent file paths, starred paths, per-file open counts (frecency), and recent search queries. These contain note paths and query text, so if you commit or share your `.obsidian` folder, that folder history is included. To keep it out, add `.obsidian/plugins/vault-spotlight/data.json` to your `.gitignore`.
 
 ## Install (manual)
 

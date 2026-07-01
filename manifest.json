@@ -1,9 +1,9 @@
 {
 	"id": "vault-spotlight",
 	"name": "Vault Spotlight",
-	"version": "1.4.0",
+	"version": "1.5.0",
 	"minAppVersion": "1.5.0",
-	"description": "Spotlight-style vault launcher with fuzzy search, recent files, and property filters. Pro unlocks ripgrep search, starred pins, canvas/PDF, batch open, and custom commands.",
+	"description": "Spotlight-style vault launcher: fuzzy file search, command palette, tag/property filters, and core bookmarks. Pro unlocks content & heading search, ripgrep, live preview, starred pins, canvas/PDF, and batch open.",
 	"author": "iavil",
 	"authorUrl": "https://github.com/israerusan",
 	"fundingUrl": "https://buymeacoffee.com/vaultspotlight",

@@ -538,6 +538,14 @@
 	max-width: 100%;
 }
 
+.vault-spotlight-preview-hit {
+	background: var(--text-highlight-bg);
+	color: var(--text-normal);
+	border-radius: 3px;
+	padding: 0 1px;
+	scroll-margin: 24px;
+}
+
 .vault-spotlight-preview-empty {
 	color: var(--text-faint);
 	text-align: center;

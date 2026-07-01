@@ -30,9 +30,11 @@ export interface VaultSpotlightSettings {
 	fileFrecency: Record<string, FrecencyEntry>;
 	useFrecency: boolean;
 	showPreview: boolean;
+	recentSearches: string[];
 }
 
 export const MAX_CUSTOM_SEARCHES = 50;
+export const MAX_RECENT_SEARCHES = 15;
 
 export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	licenseKey: "",
@@ -52,6 +54,7 @@ export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	fileFrecency: {},
 	useFrecency: true,
 	showPreview: false,
+	recentSearches: [],
 };
 
 export class VaultSpotlightSettingTab extends PluginSettingTab {

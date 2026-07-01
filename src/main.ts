@@ -2,6 +2,7 @@ import { Plugin, TFile } from "obsidian";
 import {
 	DEFAULT_SETTINGS,
 	MAX_CUSTOM_SEARCHES,
+	MAX_RECENT_SEARCHES,
 	VaultSpotlightSettingTab,
 	type CustomSearch,
 	type VaultSpotlightSettings,
@@ -40,6 +41,11 @@ export default class VaultSpotlightPlugin extends Plugin {
 			id: "go-to-heading",
 			name: "Go to heading",
 			callback: () => this.openSpotlight("", "headings"),
+		});
+		this.addCommand({
+			id: "run-command",
+			name: "Run command",
+			callback: () => this.openSpotlight("", "commands"),
 		});
 
 		this.addCommand({
@@ -143,6 +149,52 @@ export default class VaultSpotlightPlugin extends Plugin {
 		this.scheduleSave();
 	}
 
+	/** Record a query in the recent-searches list (most-recent first, de-duped). */
+	trackSearch(query: string): void {
+		const q = query.trim();
+		if (!q) return;
+		const next = this.settings.recentSearches.filter((s) => s.toLowerCase() !== q.toLowerCase());
+		next.unshift(q);
+		this.settings.recentSearches = next.slice(0, MAX_RECENT_SEARCHES);
+		this.scheduleSave();
+	}
+
+	/**
+	 * File paths from Obsidian's core Bookmarks plugin (flattened across groups).
+	 * The bookmarks API isn't in the public typings, so it's read defensively and
+	 * returns [] whenever the plugin is disabled or the shape is unexpected.
+	 */
+	getBookmarkedPaths(): string[] {
+		try {
+			const internal = (
+				this.app as unknown as {
+					internalPlugins?: {
+						getPluginById?: (id: string) => { instance?: { getBookmarks?: () => unknown[] } } | null;
+					};
+				}
+			).internalPlugins;
+			const instance = internal?.getPluginById?.("bookmarks")?.instance;
+			const bookmarks = instance?.getBookmarks?.();
+			if (!Array.isArray(bookmarks)) return [];
+
+			const paths: string[] = [];
+			const walk = (items: unknown[]): void => {
+				for (const raw of items) {
+					const item = raw as { type?: string; path?: string; items?: unknown[] };
+					if (item?.type === "file" && typeof item.path === "string") {
+						paths.push(item.path);
+					} else if (Array.isArray(item?.items)) {
+						walk(item.items);
+					}
+				}
+			};
+			walk(bookmarks);
+			return paths;
+		} catch {
+			return [];
+		}
+	}
+
 	private bumpFrecency(path: string): void {
 		const fr = this.settings.fileFrecency;
 		const entry = fr[path] ?? { count: 0, last: 0 };
@@ -230,6 +282,13 @@ export default class VaultSpotlightPlugin extends Plugin {
 		if (!Array.isArray(this.settings.recentPaths)) this.settings.recentPaths = [];
 		if (!Array.isArray(this.settings.starredPaths)) this.settings.starredPaths = [];
 		if (!Array.isArray(this.settings.excludeFolders)) this.settings.excludeFolders = [];
+		if (!Array.isArray(this.settings.recentSearches)) {
+			this.settings.recentSearches = [];
+		} else {
+			this.settings.recentSearches = this.settings.recentSearches
+				.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+				.slice(0, MAX_RECENT_SEARCHES);
+		}
 		if (this.settings.fileFrecency === null || typeof this.settings.fileFrecency !== "object") {
 			this.settings.fileFrecency = {};
 		}

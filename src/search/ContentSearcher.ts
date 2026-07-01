@@ -38,6 +38,7 @@ export class ContentSearcher {
 		if (!query.trim()) return [];
 		const limit = options.limit ?? 40;
 		const excluded = normalizeExcludeFolders(options.excludeFolders);
+		const tokens = query.trim().split(/\s+/).filter(Boolean).map((t) => t.toLowerCase());
 
 		if (options.useRipgrep) {
 			const rgResults = await this.ripgrep.search(query, {
@@ -45,23 +46,24 @@ export class ContentSearcher {
 				excludeFolders: options.excludeFolders,
 				limit,
 			});
-			if (rgResults.length > 0) return rgResults;
+			// A non-null result means ripgrep ran — trust it even when empty, so a
+			// legitimate no-match query doesn't trigger a full-vault index build.
+			if (rgResults !== null) return rgResults;
 		}
 
-		const vaultResults = await this.searchVaultIndex(query, limit, excluded);
+		const vaultResults = await this.searchVaultIndex(tokens, limit, excluded);
 		if (!options.includeCanvas) return vaultResults;
 
-		const canvasResults = await this.canvas.search(query, Math.max(10, Math.floor(limit / 2)), excluded);
+		const canvasResults = await this.canvas.search(tokens, Math.max(10, Math.floor(limit / 2)), excluded);
 		return this.mergeResults(vaultResults, canvasResults, limit);
 	}
 
 	private async searchVaultIndex(
-		query: string,
+		tokens: string[],
 		limit: number,
 		excluded: string[]
 	): Promise<ContentSearchResult[]> {
 		await this.ensureIndex();
-		const q = query.toLowerCase();
 		const results: ContentSearchResult[] = [];
 
 		for (const file of this.app.vault.getMarkdownFiles()) {
@@ -71,7 +73,9 @@ export class ContentSearcher {
 
 			for (let i = 0; i < lines.length; i++) {
 				const line = lines[i];
-				if (!line.toLowerCase().includes(q)) continue;
+				const low = line.toLowerCase();
+				// AND semantics: the line must contain every token.
+				if (!tokens.every((tk) => low.includes(tk))) continue;
 				results.push({
 					file,
 					line: i + 1,

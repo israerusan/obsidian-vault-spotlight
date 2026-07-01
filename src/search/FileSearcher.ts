@@ -16,6 +16,7 @@ export interface FileSearchResult {
 	fileKind: VaultFileKind;
 	isRecent: boolean;
 	isStarred: boolean;
+	isBookmarked: boolean;
 }
 
 export interface FrecencyEntry {
@@ -30,6 +31,7 @@ export interface FileSearchOptions {
 	extFilters: string[];
 	recentPaths: string[];
 	starredPaths: string[];
+	bookmarkedPaths?: string[];
 	includeCanvas: boolean;
 	includePdf: boolean;
 	excludeFolders?: string[];
@@ -50,6 +52,7 @@ export class FileSearcher {
 		const results: FileSearchResult[] = [];
 		const recentSet = new Map(options.recentPaths.map((p, i) => [p, i]));
 		const starredSet = new Map(options.starredPaths.map((p, i) => [p, i]));
+		const bookmarkedSet = new Set(options.bookmarkedPaths ?? []);
 		const hasActiveFilters =
 			options.tags.length > 0 || options.properties.length > 0 || options.extFilters.length > 0;
 		const isBrowseMode = options.textTokens.length === 0 && !hasActiveFilters;
@@ -92,13 +95,15 @@ export class FileSearcher {
 
 			if (score <= 0) continue;
 
+			// Pinned-tier boost — mutually exclusive so browse sections stay
+			// contiguous and correctly ordered: Starred > Bookmarks > Recent.
 			const starredRank = starredSet.get(file.path);
-			if (starredRank !== undefined) {
-				score += 2000 - starredRank * 10;
-			}
-
 			const recentRank = recentSet.get(file.path);
-			if (recentRank !== undefined) {
+			if (starredRank !== undefined) {
+				score += 3000 - starredRank * 10;
+			} else if (bookmarkedSet.has(file.path)) {
+				score += 2000;
+			} else if (recentRank !== undefined) {
 				score += 1000 - recentRank * 10;
 			} else if (isBrowseMode) {
 				score += Math.max(0, 100 - Math.floor((Date.now() - file.stat.mtime) / 3600000));
@@ -125,6 +130,7 @@ export class FileSearcher {
 				fileKind: getVaultFileKind(file),
 				isRecent: recentSet.has(file.path),
 				isStarred: starredSet.has(file.path),
+				isBookmarked: bookmarkedSet.has(file.path),
 			});
 		}
 
