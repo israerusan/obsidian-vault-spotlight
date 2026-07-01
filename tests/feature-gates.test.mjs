@@ -15,6 +15,9 @@ assert.ok(spotlight.includes("Ctrl") && spotlight.includes("K"), "spotlight foot
 assert.ok(spotlight.includes("requiresPro") && spotlight.includes("settings.isPro"), "actions should carry and enforce Pro gating");
 
 assert.ok(settings.includes("pinnedCustomSearchIds"), "settings should persist pinned smart collections");
+assert.ok(settings.includes("searchProfiles"), "settings should persist Pro search profiles");
+assert.ok(spotlight.includes('kind: "profile"'), "empty browse should show search profiles as selectable results");
+assert.ok(spotlight.includes("activateProfile"), "spotlight should activate a selected search profile");
 assert.ok(spotlight.includes('kind: "collection"'), "empty browse should show smart collections as selectable results");
 assert.ok(spotlight.includes("togglePinnedCollection"), "spotlight should let users pin/unpin smart collections");
 

@@ -2274,6 +2274,43 @@ var import_obsidian6 = require("obsidian");
 
 // src/settings.ts
 var import_obsidian = require("obsidian");
+
+// src/core/searchProfiles.mjs
+var PROFILE_MODES = /* @__PURE__ */ new Set(["files", "content", "headings", "commands"]);
+function normalizeProfiles(rawProfiles) {
+  if (!Array.isArray(rawProfiles)) return [];
+  return rawProfiles.filter((profile) => profile && typeof profile === "object").map((profile) => ({
+    id: cleanId(profile.id) || `profile-${Date.now()}`,
+    name: String(profile.name || "Untitled profile").trim() || "Untitled profile",
+    defaultMode: PROFILE_MODES.has(profile.defaultMode) ? profile.defaultMode : "files",
+    defaultQuery: String(profile.defaultQuery || ""),
+    includeCanvas: profile.includeCanvas !== false,
+    includePdf: profile.includePdf !== false,
+    excludeFolders: Array.isArray(profile.excludeFolders) ? profile.excludeFolders.map((f) => String(f).trim()).filter(Boolean) : [],
+    showPreview: profile.showPreview === true
+  })).slice(0, 20);
+}
+function activeProfile(profiles, activeProfileId) {
+  var _a;
+  return (_a = profiles.find((profile) => profile.id === activeProfileId)) != null ? _a : null;
+}
+function createProfileFromSettings(name, settings, mode = "files", query = "") {
+  return {
+    id: cleanId(name) || `profile-${Date.now()}`,
+    name: String(name || "New profile").trim() || "New profile",
+    defaultMode: PROFILE_MODES.has(mode) ? mode : "files",
+    defaultQuery: String(query || ""),
+    includeCanvas: (settings == null ? void 0 : settings.includeCanvas) !== false,
+    includePdf: (settings == null ? void 0 : settings.includePdf) !== false,
+    excludeFolders: Array.isArray(settings == null ? void 0 : settings.excludeFolders) ? [...settings.excludeFolders] : [],
+    showPreview: (settings == null ? void 0 : settings.showPreview) === true
+  };
+}
+function cleanId(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+// src/settings.ts
 var MAX_CUSTOM_SEARCHES = 50;
 var MAX_RECENT_SEARCHES = 15;
 var DEFAULT_SETTINGS = {
@@ -2287,6 +2324,8 @@ var DEFAULT_SETTINGS = {
   maxStarred: 50,
   customSearches: [],
   pinnedCustomSearchIds: [],
+  searchProfiles: [],
+  activeProfileId: "",
   showModifiedTime: true,
   ripgrepCommand: "rg",
   includeCanvas: true,
@@ -2419,6 +2458,40 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
           this.plugin.settings.starredPaths = this.plugin.settings.starredPaths.filter((p) => p !== path);
           void this.plugin.saveSettings().then(() => this.display());
         });
+      }
+    }
+    new import_obsidian.Setting(containerEl).setName("Search profiles (Pro)").setHeading();
+    const profileList = containerEl.createDiv();
+    if (!this.plugin.settings.isPro) {
+      profileList.createEl("p", { text: "Unlock Pro to save workspace-style search profiles." });
+    } else {
+      new import_obsidian.Setting(profileList).setName("Save current settings as profile").setDesc("Profiles remember file type toggles, excluded folders, preview preference, and a default query/mode.").addButton(
+        (button) => button.setButtonText("Add profile").onClick(() => {
+          const profile = createProfileFromSettings(`Profile ${this.plugin.settings.searchProfiles.length + 1}`, this.plugin.settings);
+          this.plugin.settings.searchProfiles = [...this.plugin.settings.searchProfiles, profile].slice(0, 20);
+          void this.plugin.saveSettings().then(() => this.display());
+        })
+      );
+      if (this.plugin.settings.searchProfiles.length === 0) {
+        profileList.createEl("p", { text: "No search profiles yet. Add one here or save one from the action palette." });
+      } else {
+        for (const profile of this.plugin.settings.searchProfiles) {
+          const row = profileList.createDiv({ cls: "vault-spotlight-starred-row" });
+          const active = profile.id === this.plugin.settings.activeProfileId;
+          row.createSpan({ text: `${active ? "\u2713 " : ""}${profile.name}: ${profile.defaultMode}${profile.defaultQuery ? ` \xB7 ${profile.defaultQuery}` : ""}` });
+          const activate = row.createEl("button", { text: active ? "Active" : "Activate" });
+          activate.disabled = active;
+          activate.addEventListener("click", () => {
+            this.plugin.settings.activeProfileId = profile.id;
+            void this.plugin.saveSettings().then(() => this.display());
+          });
+          const remove = row.createEl("button", { text: "Remove" });
+          remove.addEventListener("click", () => {
+            this.plugin.settings.searchProfiles = this.plugin.settings.searchProfiles.filter((p) => p.id !== profile.id);
+            if (this.plugin.settings.activeProfileId === profile.id) this.plugin.settings.activeProfileId = "";
+            void this.plugin.saveSettings().then(() => this.display());
+          });
+        }
       }
     }
     new import_obsidian.Setting(containerEl).setName("Custom searches (Pro)").setHeading();
@@ -2960,6 +3033,64 @@ var PromptModal = class extends import_obsidian4.Modal {
   }
 };
 
+// src/core/frontmatterTags.mjs
+function normalizeTag2(raw) {
+  return String(raw != null ? raw : "").replace(/^#/, "").trim().replace(/\s+/g, "-");
+}
+function applyTagToMarkdown(markdown, rawTag) {
+  const tag = normalizeTag2(rawTag);
+  if (!tag) return markdown;
+  const content = String(markdown != null ? markdown : "");
+  if (new RegExp(`(^|\\s)#${escapeRegExp(tag)}(\\s|$)`).test(content)) return content;
+  const fm = parseFrontmatter(content);
+  if (!fm) return `---
+tags: [${tag}]
+---
+${content}`;
+  const lines = fm.body.split("\n");
+  const tagLineIndex = lines.findIndex((line) => /^tags\s*:/.test(line.trim()));
+  if (tagLineIndex === -1) {
+    lines.push(`tags: [${tag}]`);
+  } else {
+    lines[tagLineIndex] = appendTagToLine(lines[tagLineIndex], tag);
+  }
+  return `---
+${lines.join("\n")}
+---${fm.rest}`;
+}
+function parseFrontmatter(content) {
+  if (!content.startsWith("---\n")) return null;
+  const close = content.indexOf("\n---", 4);
+  if (close === -1) return null;
+  return { body: content.slice(4, close), rest: content.slice(close + 4) };
+}
+function appendTagToLine(line, tag) {
+  if (line.includes(`[`) && line.includes(`]`)) {
+    return line.replace(/\[(.*)\]/, (_m, inner) => {
+      const tags2 = inner.split(",").map((s) => s.trim()).filter(Boolean);
+      if (!tags2.includes(tag)) tags2.push(tag);
+      return `[${tags2.join(", ")}]`;
+    });
+  }
+  const parts = line.split(":");
+  const existing = parts.slice(1).join(":").trim();
+  if (!existing) return `${parts[0]}: [${tag}]`;
+  const tags = existing.split(/\s+/).map((s) => s.replace(/^-\s*/, "").trim()).filter(Boolean);
+  if (!tags.includes(tag)) tags.push(tag);
+  return `${parts[0]}: [${tags.join(", ")}]`;
+}
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// src/core/resultMarkdown.mjs
+function buildResultMarkdown(rows) {
+  return rows.map((row) => {
+    var _a, _b;
+    return `${(_a = row.prefix) != null ? _a : "- "}${row.link}${(_b = row.suffix) != null ? _b : ""}`;
+  }).filter((line) => line.trim().length > 0).join("\n");
+}
+
 // src/spotlight/SpotlightModal.ts
 var MODE_ORDER = ["files", "content", "headings", "commands"];
 var SpotlightModal = class extends import_obsidian5.Modal {
@@ -3077,7 +3208,13 @@ var SpotlightModal = class extends import_obsidian5.Modal {
     this.contentEl.empty();
   }
   previewEnabled() {
-    return this.plugin.settings.isPro && this.plugin.settings.showPreview;
+    var _a;
+    const profile = this.currentProfile();
+    return this.plugin.settings.isPro && ((_a = profile == null ? void 0 : profile.showPreview) != null ? _a : this.plugin.settings.showPreview);
+  }
+  currentProfile() {
+    if (!this.plugin.settings.isPro) return null;
+    return activeProfile(this.plugin.settings.searchProfiles, this.plugin.settings.activeProfileId);
   }
   updateHint() {
     const isPro = this.plugin.settings.isPro;
@@ -3113,14 +3250,17 @@ var SpotlightModal = class extends import_obsidian5.Modal {
     return this.mode;
   }
   async runSearch() {
-    var _a;
+    var _a, _b, _c, _d;
     const generation = ++this.searchGeneration;
     const raw = this.inputEl.value;
     const trimmed = raw.trim();
     const mode = this.effectiveMode(trimmed);
     const isEmptyQuery = trimmed.length === 0;
     const isPro = this.plugin.settings.isPro;
-    const excludeFolders = this.plugin.settings.excludeFolders;
+    const profile = this.currentProfile();
+    const excludeFolders = (_a = profile == null ? void 0 : profile.excludeFolders) != null ? _a : this.plugin.settings.excludeFolders;
+    const includeCanvas = (_b = profile == null ? void 0 : profile.includeCanvas) != null ? _b : this.plugin.settings.includeCanvas;
+    const includePdf = (_c = profile == null ? void 0 : profile.includePdf) != null ? _c : this.plugin.settings.includePdf;
     this.isLoading = true;
     this.renderLoading();
     if (this.actionContext) {
@@ -3162,7 +3302,7 @@ var SpotlightModal = class extends import_obsidian5.Modal {
         const text = trimmed.startsWith(">") ? trimmed.replace(/^>\s?/, "").trim() : trimmed;
         this.setBadge("Content", "is-content");
         if (text.length === 0) {
-          const history = (_a = this.plugin.settings.recentSearches) != null ? _a : [];
+          const history = (_d = this.plugin.settings.recentSearches) != null ? _d : [];
           this.items = history.map((q) => ({ kind: "history", query: q }));
           if (generation !== this.searchGeneration) return;
           this.isLoading = false;
@@ -3184,7 +3324,7 @@ var SpotlightModal = class extends import_obsidian5.Modal {
         const contentResults = await this.plugin.contentSearcher.search(text, {
           useRipgrep: isPro,
           ripgrepCommand: this.plugin.settings.ripgrepCommand,
-          includeCanvas: isPro && this.plugin.settings.includeCanvas,
+          includeCanvas: isPro && includeCanvas,
           excludeFolders
         });
         if (generation !== this.searchGeneration) return;
@@ -3220,8 +3360,8 @@ var SpotlightModal = class extends import_obsidian5.Modal {
           recentPaths: this.plugin.settings.recentPaths,
           starredPaths: isPro ? this.plugin.settings.starredPaths : [],
           bookmarkedPaths: this.plugin.getBookmarkedPaths(),
-          includeCanvas: isPro && this.plugin.settings.includeCanvas,
-          includePdf: isPro && this.plugin.settings.includePdf,
+          includeCanvas: isPro && includeCanvas,
+          includePdf: isPro && includePdf,
           excludeFolders,
           frecency: this.plugin.settings.useFrecency ? this.plugin.settings.fileFrecency : void 0,
           limit: isEmptyQuery ? 40 : 50
@@ -3238,6 +3378,17 @@ var SpotlightModal = class extends import_obsidian5.Modal {
           isStarred: r.isStarred,
           isBookmarked: r.isBookmarked
         }));
+        if (isEmptyQuery && isPro && this.plugin.settings.searchProfiles.length > 0) {
+          const profiles = this.plugin.settings.searchProfiles.map((searchProfile) => ({
+            kind: "profile",
+            id: searchProfile.id,
+            name: searchProfile.name,
+            defaultMode: searchProfile.defaultMode,
+            defaultQuery: searchProfile.defaultQuery,
+            isActive: searchProfile.id === this.plugin.settings.activeProfileId
+          }));
+          this.items = [...profiles, ...this.items];
+        }
         if (isEmptyQuery && isPro && this.plugin.settings.customSearches.length > 0) {
           const pinned = new Set(this.plugin.settings.pinnedCustomSearchIds);
           const collections = this.plugin.settings.customSearches.slice().sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)) || a.name.localeCompare(b.name)).map((search) => ({
@@ -3276,6 +3427,7 @@ var SpotlightModal = class extends import_obsidian5.Modal {
     if (cls) this.modeBadgeEl.addClass(cls);
   }
   getBrowseSection(item) {
+    if (item.kind === "profile" && this.inputEl.value.trim().length === 0) return "Search profiles";
     if (item.kind === "collection" && this.inputEl.value.trim().length === 0) return "Smart collections";
     if (item.kind !== "file" || this.inputEl.value.trim().length > 0) return null;
     if (item.isStarred) return "Starred";
@@ -3395,6 +3547,11 @@ var SpotlightModal = class extends import_obsidian5.Modal {
         title.setText(item.name);
         titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isPinned ? "Pinned collection" : "Smart collection" });
         body.createDiv({ cls: "vault-spotlight-item-meta", text: item.query });
+      } else if (item.kind === "profile") {
+        (0, import_obsidian5.setIcon)(iconWrap, item.isActive ? "check-circle" : "sliders-horizontal");
+        title.setText(item.name);
+        titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isActive ? "Active profile" : "Search profile" });
+        body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.defaultMode}${item.defaultQuery ? ` \xB7 ${item.defaultQuery}` : ""}` });
       } else if (item.kind === "action") {
         (0, import_obsidian5.setIcon)(iconWrap, item.action.requiresPro ? "sparkles" : "bolt");
         title.setText(item.action.name);
@@ -3539,6 +3696,10 @@ var SpotlightModal = class extends import_obsidian5.Modal {
       void this.runSearch();
       return;
     }
+    if (selected.kind === "profile") {
+      this.activateProfile(selected.id);
+      return;
+    }
     if (selected.kind === "action") {
       if (selected.action.requiresPro && !this.plugin.settings.isPro) {
         new import_obsidian5.Notice("Vault Spotlight: Pro required for this action.");
@@ -3625,7 +3786,62 @@ var SpotlightModal = class extends import_obsidian5.Modal {
     this.focusInput();
     void this.runSearch();
   }
+  activateProfile(id) {
+    const profile = activeProfile(this.plugin.settings.searchProfiles, id);
+    if (!profile) return;
+    this.plugin.settings.activeProfileId = profile.id;
+    void this.plugin.saveSettings();
+    this.actionContext = null;
+    this.mode = profile.defaultMode;
+    this.inputEl.value = profile.defaultQuery;
+    this.focusInput();
+    void this.runSearch();
+  }
+  clearProfile() {
+    this.plugin.settings.activeProfileId = "";
+    void this.plugin.saveSettings();
+    this.actionContext = null;
+    this.inputEl.value = "";
+    this.mode = "files";
+    void this.runSearch();
+  }
+  saveCurrentProfile() {
+    new PromptModal(this.app, {
+      title: "Save search profile",
+      initial: "New profile",
+      cta: "Save profile",
+      onSubmit: (name) => {
+        const profile = createProfileFromSettings(name, this.plugin.settings, this.actionReturnMode || this.mode, this.actionReturnQuery || this.inputEl.value);
+        const exists = this.plugin.settings.searchProfiles.some((p) => p.id === profile.id);
+        this.plugin.settings.searchProfiles = [
+          ...this.plugin.settings.searchProfiles.filter((p) => p.id !== profile.id),
+          { ...profile, id: exists ? `${profile.id}-${Date.now()}` : profile.id }
+        ].slice(0, 20);
+        void this.plugin.saveSettings();
+        new import_obsidian5.Notice("Vault Spotlight: search profile saved.");
+        this.closeActionPalette();
+      }
+    }).open();
+  }
   availableActions(context) {
+    if (context.kind === "profile") {
+      return [
+        {
+          id: "activate-profile",
+          name: "Activate search profile",
+          description: `Switch to ${context.name} and run its default query.`,
+          requiresPro: true,
+          run: () => this.activateProfile(context.id)
+        },
+        {
+          id: "clear-profile",
+          name: "Clear active profile",
+          description: "Return Spotlight to the global search settings.",
+          requiresPro: true,
+          run: () => this.clearProfile()
+        }
+      ];
+    }
     if (context.kind === "collection") {
       return [
         {
@@ -3703,6 +3919,13 @@ var SpotlightModal = class extends import_obsidian5.Modal {
     }
     actions.push(
       {
+        id: "save-profile",
+        name: "Save current setup as profile",
+        description: "Create a Pro search profile from the current mode, query, preview, file type, and folder settings.",
+        requiresPro: true,
+        run: () => this.saveCurrentProfile()
+      },
+      {
         id: "copy-results",
         name: "Copy results as Markdown",
         description: "Copy selected results, or the current result list, as Markdown links.",
@@ -3736,15 +3959,15 @@ var SpotlightModal = class extends import_obsidian5.Modal {
     return source.filter((item) => !!this.itemFile(item));
   }
   resultsAsMarkdown() {
-    const rows = this.resultItemsForBatch();
-    return rows.map((item) => {
+    const rows = this.resultItemsForBatch().map((item) => {
       const file = this.itemFile(item);
-      if (!file) return "";
+      if (!file) return null;
       let suffix = "";
       if (item.kind === "content") suffix = ` \u2014 L${item.line}: ${item.snippet}`;
       else if (item.kind === "heading") suffix = ` \u2014 ${"#".repeat(item.level)} ${item.heading}`;
-      return `- ${this.app.fileManager.generateMarkdownLink(file, "")}${suffix}`;
-    }).filter(Boolean).join("\n");
+      return { link: this.app.fileManager.generateMarkdownLink(file, ""), suffix };
+    }).filter(Boolean);
+    return buildResultMarkdown(rows);
   }
   copyResultsAsMarkdown() {
     const markdown = this.resultsAsMarkdown();
@@ -3797,12 +4020,9 @@ ${markdown}
         void Promise.all(
           files.map(async (file) => {
             const content = await this.app.vault.cachedRead(file);
-            const tag = `#${cleaned}`;
-            if (content.includes(tag)) return;
-            await this.app.vault.modify(file, `${content.trimEnd()}
-
-${tag}
-`);
+            const next = applyTagToMarkdown(content, cleaned);
+            if (next === content) return;
+            await this.app.vault.modify(file, next);
           })
         ).then(() => new import_obsidian5.Notice(`Vault Spotlight: tag added to ${files.length} note${files.length === 1 ? "" : "s"}.`));
       }
@@ -4662,6 +4882,10 @@ var VaultSpotlightPlugin = class extends import_obsidian6.Plugin {
     if (!Array.isArray(this.settings.recentPaths)) this.settings.recentPaths = [];
     if (!Array.isArray(this.settings.starredPaths)) this.settings.starredPaths = [];
     if (!Array.isArray(this.settings.pinnedCustomSearchIds)) this.settings.pinnedCustomSearchIds = [];
+    this.settings.searchProfiles = normalizeProfiles(this.settings.searchProfiles);
+    if (!this.settings.searchProfiles.some((profile) => profile.id === this.settings.activeProfileId)) {
+      this.settings.activeProfileId = "";
+    }
     if (!Array.isArray(this.settings.excludeFolders)) this.settings.excludeFolders = [];
     if (!Array.isArray(this.settings.recentSearches)) {
       this.settings.recentSearches = [];

@@ -10,6 +10,7 @@ import {
 import { SpotlightModal, type SpotlightMode } from "./spotlight/SpotlightModal";
 import { LicenseManager } from "./license/LicenseManager";
 import { ContentSearcher } from "./search/ContentSearcher";
+import { normalizeProfiles } from "./core/searchProfiles.mjs";
 
 const MAX_FRECENCY_ENTRIES = 500;
 
@@ -295,6 +296,10 @@ export default class VaultSpotlightPlugin extends Plugin {
 		if (!Array.isArray(this.settings.recentPaths)) this.settings.recentPaths = [];
 		if (!Array.isArray(this.settings.starredPaths)) this.settings.starredPaths = [];
 		if (!Array.isArray(this.settings.pinnedCustomSearchIds)) this.settings.pinnedCustomSearchIds = [];
+		this.settings.searchProfiles = normalizeProfiles(this.settings.searchProfiles);
+		if (!this.settings.searchProfiles.some((profile) => profile.id === this.settings.activeProfileId)) {
+			this.settings.activeProfileId = "";
+		}
 		if (!Array.isArray(this.settings.excludeFolders)) this.settings.excludeFolders = [];
 		if (!Array.isArray(this.settings.recentSearches)) {
 			this.settings.recentSearches = [];

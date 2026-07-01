@@ -23,6 +23,7 @@ Vault Spotlight is a fast command center for large vaults: type a few letters to
 - **Live preview pane** — show rendered Markdown beside results and auto-scroll to the matched heading or passage.
 - **Search history** — recently used content searches resurface so repeated research queries are one Enter away.
 - **Keyboard action palette** — press `Ctrl+K` on a result to search actions like open, copy link/path, rename, star, export, or batch tag.
+- **Search profiles** — save workspace-style modes for writing, research, clients, PDFs, or any repeated vault context.
 - **Smart collections** — saved searches become reusable vault views in the browse screen; pin the ones you use daily.
 - **Starred pins** — press `Ctrl+D` to keep high-value files at the top of browse and search results.
 - **Canvas & PDF discovery** — include Canvas files and PDFs in file search, plus text search inside Canvas nodes.

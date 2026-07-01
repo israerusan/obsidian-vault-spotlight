@@ -1,10 +1,22 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type VaultSpotlightPlugin from "./main";
+import { createProfileFromSettings } from "./core/searchProfiles.mjs";
 
 export interface CustomSearch {
 	id: string;
 	name: string;
 	query: string;
+}
+
+export interface SearchProfile {
+	id: string;
+	name: string;
+	defaultMode: "files" | "content" | "headings" | "commands";
+	defaultQuery: string;
+	includeCanvas: boolean;
+	includePdf: boolean;
+	excludeFolders: string[];
+	showPreview: boolean;
 }
 
 export interface FrecencyEntry {
@@ -23,6 +35,8 @@ export interface VaultSpotlightSettings {
 	maxStarred: number;
 	customSearches: CustomSearch[];
 	pinnedCustomSearchIds: string[];
+	searchProfiles: SearchProfile[];
+	activeProfileId: string;
 	showModifiedTime: boolean;
 	ripgrepCommand: string;
 	includeCanvas: boolean;
@@ -48,6 +62,8 @@ export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	maxStarred: 50,
 	customSearches: [],
 	pinnedCustomSearchIds: [],
+	searchProfiles: [],
+	activeProfileId: "",
 	showModifiedTime: true,
 	ripgrepCommand: "rg",
 	includeCanvas: true,
@@ -225,6 +241,44 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 					this.plugin.settings.starredPaths = this.plugin.settings.starredPaths.filter((p) => p !== path);
 					void this.plugin.saveSettings().then(() => this.display());
 				});
+			}
+		}
+
+		new Setting(containerEl).setName("Search profiles (Pro)").setHeading();
+		const profileList = containerEl.createDiv();
+		if (!this.plugin.settings.isPro) {
+			profileList.createEl("p", { text: "Unlock Pro to save workspace-style search profiles." });
+		} else {
+			new Setting(profileList)
+				.setName("Save current settings as profile")
+				.setDesc("Profiles remember file type toggles, excluded folders, preview preference, and a default query/mode.")
+				.addButton((button) =>
+					button.setButtonText("Add profile").onClick(() => {
+						const profile = createProfileFromSettings(`Profile ${this.plugin.settings.searchProfiles.length + 1}`, this.plugin.settings);
+						this.plugin.settings.searchProfiles = [...this.plugin.settings.searchProfiles, profile].slice(0, 20);
+						void this.plugin.saveSettings().then(() => this.display());
+					})
+				);
+			if (this.plugin.settings.searchProfiles.length === 0) {
+				profileList.createEl("p", { text: "No search profiles yet. Add one here or save one from the action palette." });
+			} else {
+				for (const profile of this.plugin.settings.searchProfiles) {
+					const row = profileList.createDiv({ cls: "vault-spotlight-starred-row" });
+					const active = profile.id === this.plugin.settings.activeProfileId;
+					row.createSpan({ text: `${active ? "✓ " : ""}${profile.name}: ${profile.defaultMode}${profile.defaultQuery ? ` · ${profile.defaultQuery}` : ""}` });
+					const activate = row.createEl("button", { text: active ? "Active" : "Activate" });
+					activate.disabled = active;
+					activate.addEventListener("click", () => {
+						this.plugin.settings.activeProfileId = profile.id;
+						void this.plugin.saveSettings().then(() => this.display());
+					});
+					const remove = row.createEl("button", { text: "Remove" });
+					remove.addEventListener("click", () => {
+						this.plugin.settings.searchProfiles = this.plugin.settings.searchProfiles.filter((p) => p.id !== profile.id);
+						if (this.plugin.settings.activeProfileId === profile.id) this.plugin.settings.activeProfileId = "";
+						void this.plugin.saveSettings().then(() => this.display());
+					});
+				}
 			}
 		}
 

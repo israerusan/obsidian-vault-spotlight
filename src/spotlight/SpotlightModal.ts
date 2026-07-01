@@ -19,6 +19,9 @@ import { renderHighlightedText, tokenizeQuery } from "../search/fuzzy";
 import { SaveSearchPromptModal } from "./SaveSearchPromptModal";
 import { PromptModal } from "./PromptModal";
 import { iconForFileKind, type VaultFileKind } from "../search/vaultFiles";
+import { applyTagToMarkdown } from "../core/frontmatterTags.mjs";
+import { buildResultMarkdown } from "../core/resultMarkdown.mjs";
+import { activeProfile, createProfileFromSettings } from "../core/searchProfiles.mjs";
 
 export type SpotlightMode = "files" | "content" | "headings" | "commands";
 
@@ -67,6 +70,14 @@ type ResultItem =
 			name: string;
 			query: string;
 			isPinned: boolean;
+	  }
+	| {
+			kind: "profile";
+			id: string;
+			name: string;
+			defaultMode: SpotlightMode;
+			defaultQuery: string;
+			isActive: boolean;
 	  }
 	| {
 			kind: "action";
@@ -235,7 +246,13 @@ export class SpotlightModal extends Modal {
 	}
 
 	private previewEnabled(): boolean {
-		return this.plugin.settings.isPro && this.plugin.settings.showPreview;
+		const profile = this.currentProfile();
+		return this.plugin.settings.isPro && (profile?.showPreview ?? this.plugin.settings.showPreview);
+	}
+
+	private currentProfile(): any | null {
+		if (!this.plugin.settings.isPro) return null;
+		return activeProfile(this.plugin.settings.searchProfiles, this.plugin.settings.activeProfileId);
 	}
 
 	private updateHint(): void {
@@ -283,7 +300,10 @@ export class SpotlightModal extends Modal {
 		const mode = this.effectiveMode(trimmed);
 		const isEmptyQuery = trimmed.length === 0;
 		const isPro = this.plugin.settings.isPro;
-		const excludeFolders = this.plugin.settings.excludeFolders;
+		const profile = this.currentProfile();
+		const excludeFolders = profile?.excludeFolders ?? this.plugin.settings.excludeFolders;
+		const includeCanvas = profile?.includeCanvas ?? this.plugin.settings.includeCanvas;
+		const includePdf = profile?.includePdf ?? this.plugin.settings.includePdf;
 
 		this.isLoading = true;
 		this.renderLoading();
@@ -357,7 +377,7 @@ export class SpotlightModal extends Modal {
 				const contentResults = await this.plugin.contentSearcher.search(text, {
 					useRipgrep: isPro,
 					ripgrepCommand: this.plugin.settings.ripgrepCommand,
-					includeCanvas: isPro && this.plugin.settings.includeCanvas,
+					includeCanvas: isPro && includeCanvas,
 					excludeFolders,
 				});
 				if (generation !== this.searchGeneration) return;
@@ -393,8 +413,8 @@ export class SpotlightModal extends Modal {
 					recentPaths: this.plugin.settings.recentPaths,
 					starredPaths: isPro ? this.plugin.settings.starredPaths : [],
 					bookmarkedPaths: this.plugin.getBookmarkedPaths(),
-					includeCanvas: isPro && this.plugin.settings.includeCanvas,
-					includePdf: isPro && this.plugin.settings.includePdf,
+					includeCanvas: isPro && includeCanvas,
+					includePdf: isPro && includePdf,
 					excludeFolders,
 					frecency: this.plugin.settings.useFrecency ? this.plugin.settings.fileFrecency : undefined,
 					limit: isEmptyQuery ? 40 : 50,
@@ -411,6 +431,18 @@ export class SpotlightModal extends Modal {
 					isStarred: r.isStarred,
 					isBookmarked: r.isBookmarked,
 				}));
+
+				if (isEmptyQuery && isPro && this.plugin.settings.searchProfiles.length > 0) {
+					const profiles = this.plugin.settings.searchProfiles.map((searchProfile) => ({
+						kind: "profile" as const,
+						id: searchProfile.id,
+						name: searchProfile.name,
+						defaultMode: searchProfile.defaultMode,
+						defaultQuery: searchProfile.defaultQuery,
+						isActive: searchProfile.id === this.plugin.settings.activeProfileId,
+					}));
+					this.items = [...profiles, ...this.items];
+				}
 
 				if (isEmptyQuery && isPro && this.plugin.settings.customSearches.length > 0) {
 					const pinned = new Set(this.plugin.settings.pinnedCustomSearchIds);
@@ -459,6 +491,7 @@ export class SpotlightModal extends Modal {
 	}
 
 	private getBrowseSection(item: ResultItem): string | null {
+		if (item.kind === "profile" && this.inputEl.value.trim().length === 0) return "Search profiles";
 		if (item.kind === "collection" && this.inputEl.value.trim().length === 0) return "Smart collections";
 		if (item.kind !== "file" || this.inputEl.value.trim().length > 0) return null;
 		if (item.isStarred) return "Starred";
@@ -594,6 +627,11 @@ export class SpotlightModal extends Modal {
 				title.setText(item.name);
 				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isPinned ? "Pinned collection" : "Smart collection" });
 				body.createDiv({ cls: "vault-spotlight-item-meta", text: item.query });
+			} else if (item.kind === "profile") {
+				setIcon(iconWrap, item.isActive ? "check-circle" : "sliders-horizontal");
+				title.setText(item.name);
+				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isActive ? "Active profile" : "Search profile" });
+				body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.defaultMode}${item.defaultQuery ? ` · ${item.defaultQuery}` : ""}` });
 			} else if (item.kind === "action") {
 				setIcon(iconWrap, item.action.requiresPro ? "sparkles" : "bolt");
 				title.setText(item.action.name);
@@ -759,6 +797,11 @@ export class SpotlightModal extends Modal {
 			return;
 		}
 
+		if (selected.kind === "profile") {
+			this.activateProfile(selected.id);
+			return;
+		}
+
 		if (selected.kind === "action") {
 			if (selected.action.requiresPro && !this.plugin.settings.isPro) {
 				new Notice("Vault Spotlight: Pro required for this action.");
@@ -860,7 +903,66 @@ export class SpotlightModal extends Modal {
 		void this.runSearch();
 	}
 
+	private activateProfile(id: string): void {
+		const profile = activeProfile(this.plugin.settings.searchProfiles, id);
+		if (!profile) return;
+		this.plugin.settings.activeProfileId = profile.id;
+		void this.plugin.saveSettings();
+		this.actionContext = null;
+		this.mode = profile.defaultMode;
+		this.inputEl.value = profile.defaultQuery;
+		this.focusInput();
+		void this.runSearch();
+	}
+
+	private clearProfile(): void {
+		this.plugin.settings.activeProfileId = "";
+		void this.plugin.saveSettings();
+		this.actionContext = null;
+		this.inputEl.value = "";
+		this.mode = "files";
+		void this.runSearch();
+	}
+
+	private saveCurrentProfile(): void {
+		new PromptModal(this.app, {
+			title: "Save search profile",
+			initial: "New profile",
+			cta: "Save profile",
+			onSubmit: (name) => {
+				const profile = createProfileFromSettings(name, this.plugin.settings, this.actionReturnMode || this.mode, this.actionReturnQuery || this.inputEl.value);
+				const exists = this.plugin.settings.searchProfiles.some((p) => p.id === profile.id);
+				this.plugin.settings.searchProfiles = [
+					...this.plugin.settings.searchProfiles.filter((p) => p.id !== profile.id),
+					{ ...profile, id: exists ? `${profile.id}-${Date.now()}` : profile.id },
+				].slice(0, 20);
+				void this.plugin.saveSettings();
+				new Notice("Vault Spotlight: search profile saved.");
+				this.closeActionPalette();
+			},
+		}).open();
+	}
+
 	private availableActions(context: ResultItem): SpotlightAction[] {
+		if (context.kind === "profile") {
+			return [
+				{
+					id: "activate-profile",
+					name: "Activate search profile",
+					description: `Switch to ${context.name} and run its default query.`,
+					requiresPro: true,
+					run: () => this.activateProfile(context.id),
+				},
+				{
+					id: "clear-profile",
+					name: "Clear active profile",
+					description: "Return Spotlight to the global search settings.",
+					requiresPro: true,
+					run: () => this.clearProfile(),
+				},
+			];
+		}
+
 		if (context.kind === "collection") {
 			return [
 				{
@@ -940,6 +1042,13 @@ export class SpotlightModal extends Modal {
 
 		actions.push(
 			{
+				id: "save-profile",
+				name: "Save current setup as profile",
+				description: "Create a Pro search profile from the current mode, query, preview, file type, and folder settings.",
+				requiresPro: true,
+				run: () => this.saveCurrentProfile(),
+			},
+			{
 				id: "copy-results",
 				name: "Copy results as Markdown",
 				description: "Copy selected results, or the current result list, as Markdown links.",
@@ -975,18 +1084,15 @@ export class SpotlightModal extends Modal {
 	}
 
 	private resultsAsMarkdown(): string {
-		const rows = this.resultItemsForBatch();
-		return rows
-			.map((item) => {
-				const file = this.itemFile(item);
-				if (!file) return "";
-				let suffix = "";
-				if (item.kind === "content") suffix = ` — L${item.line}: ${item.snippet}`;
-				else if (item.kind === "heading") suffix = ` — ${"#".repeat(item.level)} ${item.heading}`;
-				return `- ${this.app.fileManager.generateMarkdownLink(file, "")}${suffix}`;
-			})
-			.filter(Boolean)
-			.join("\n");
+		const rows = this.resultItemsForBatch().map((item) => {
+			const file = this.itemFile(item);
+			if (!file) return null;
+			let suffix = "";
+			if (item.kind === "content") suffix = ` — L${item.line}: ${item.snippet}`;
+			else if (item.kind === "heading") suffix = ` — ${"#".repeat(item.level)} ${item.heading}`;
+			return { link: this.app.fileManager.generateMarkdownLink(file, ""), suffix };
+		}).filter(Boolean) as Array<{ link: string; suffix?: string }>;
+		return buildResultMarkdown(rows);
 	}
 
 	private copyResultsAsMarkdown(): void {
@@ -1039,9 +1145,9 @@ export class SpotlightModal extends Modal {
 				void Promise.all(
 					files.map(async (file) => {
 						const content = await this.app.vault.cachedRead(file);
-						const tag = `#${cleaned}`;
-						if (content.includes(tag)) return;
-						await this.app.vault.modify(file, `${content.trimEnd()}\n\n${tag}\n`);
+						const next = applyTagToMarkdown(content, cleaned);
+						if (next === content) return;
+						await this.app.vault.modify(file, next);
 					})
 				).then(() => new Notice(`Vault Spotlight: tag added to ${files.length} note${files.length === 1 ? "" : "s"}.`));
 			},
