@@ -306,6 +306,7 @@ export class SpotlightModal extends Modal {
 		const excludeFolders = profile?.excludeFolders ?? this.plugin.settings.excludeFolders;
 		const includeCanvas = profile?.includeCanvas ?? this.plugin.settings.includeCanvas;
 		const includePdf = profile?.includePdf ?? this.plugin.settings.includePdf;
+		const includeBases = profile?.includeBases ?? this.plugin.settings.includeBases;
 
 		this.isLoading = true;
 		// Only show the skeleton when a search is genuinely slow — instant
@@ -400,6 +401,7 @@ export class SpotlightModal extends Modal {
 				const contentResults = await this.plugin.contentSearcher.search(text, {
 					useRipgrep: isPro,
 					includeCanvas: isPro && includeCanvas,
+					includeBases: isPro && includeBases,
 					excludeFolders,
 				});
 				if (generation !== this.searchGeneration) return;
@@ -520,6 +522,7 @@ export class SpotlightModal extends Modal {
 					openPaths: this.editorSearcher.openFilePaths(),
 					includeCanvas: isPro && includeCanvas,
 					includePdf: isPro && includePdf,
+					includeBases: isPro && includeBases,
 					excludeFolders,
 					frecency: this.plugin.settings.useFrecency ? this.plugin.settings.fileFrecency : undefined,
 					limit: isEmptyQuery ? 40 : 50,

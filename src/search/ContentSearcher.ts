@@ -1,6 +1,7 @@
 import { App, TFile } from "obsidian";
 import { RipgrepSearcher } from "./RipgrepSearcher";
 import { CanvasSearcher } from "./CanvasSearcher";
+import { BaseSearcher } from "./BaseSearcher";
 import { isPathExcluded, normalizeExcludeFolders } from "./vaultFiles";
 
 export interface ContentSearchResult {
@@ -8,12 +9,13 @@ export interface ContentSearchResult {
 	line: number;
 	snippet: string;
 	score: number;
-	engine: "ripgrep" | "vault" | "canvas";
+	engine: "ripgrep" | "vault" | "canvas" | "base";
 }
 
 export interface ContentSearchOptions {
 	useRipgrep: boolean;
 	includeCanvas: boolean;
+	includeBases?: boolean;
 	excludeFolders?: string[];
 	limit?: number;
 }
@@ -24,10 +26,12 @@ export class ContentSearcher {
 	private buildPromise: Promise<void> | null = null;
 	private ripgrep: RipgrepSearcher;
 	private canvas: CanvasSearcher;
+	private bases: BaseSearcher;
 
 	constructor(private app: App, ripgrepCommand = "rg") {
 		this.ripgrep = new RipgrepSearcher(app, ripgrepCommand);
 		this.canvas = new CanvasSearcher(app);
+		this.bases = new BaseSearcher(app);
 	}
 
 	setRipgrepCommand(command: string): void {
@@ -43,6 +47,7 @@ export class ContentSearcher {
 		if (options.useRipgrep) {
 			const rgResults = await this.ripgrep.search(query, {
 				includeCanvas: options.includeCanvas,
+				includeBases: options.includeBases ?? false,
 				excludeFolders: options.excludeFolders,
 				limit,
 			});
@@ -52,10 +57,16 @@ export class ContentSearcher {
 		}
 
 		const vaultResults = await this.searchVaultIndex(tokens, limit, excluded);
-		if (!options.includeCanvas) return vaultResults;
-
-		const canvasResults = await this.canvas.search(tokens, Math.max(10, Math.floor(limit / 2)), excluded);
-		return this.mergeResults(vaultResults, canvasResults, limit);
+		const extraLimit = Math.max(10, Math.floor(limit / 2));
+		const extras: ContentSearchResult[] = [];
+		if (options.includeCanvas) {
+			extras.push(...(await this.canvas.search(tokens, extraLimit, excluded)));
+		}
+		if (options.includeBases) {
+			extras.push(...(await this.bases.search(tokens, extraLimit, excluded)));
+		}
+		if (extras.length === 0) return vaultResults;
+		return this.mergeResults(vaultResults, extras, limit);
 	}
 
 	private async searchVaultIndex(

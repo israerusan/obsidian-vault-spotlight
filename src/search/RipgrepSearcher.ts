@@ -110,7 +110,12 @@ export class RipgrepSearcher {
 	 */
 	async search(
 		query: string,
-		options: { includeCanvas: boolean; limit: number; excludeFolders?: string[] }
+		options: {
+			includeCanvas: boolean;
+			includeBases?: boolean;
+			limit: number;
+			excludeFolders?: string[];
+		}
 	): Promise<ContentSearchResult[] | null> {
 		const tokens = query.trim().split(/\s+/).filter(Boolean);
 		if (tokens.length === 0) return [];
@@ -156,6 +161,10 @@ export class RipgrepSearcher {
 
 		if (options.includeCanvas) {
 			args.push("-g", "*.canvas");
+		}
+
+		if (options.includeBases) {
+			args.push("-g", "*.base");
 		}
 
 		for (const folder of options.excludeFolders ?? []) {

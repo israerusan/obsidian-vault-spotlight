@@ -2295,6 +2295,7 @@ function normalizeProfiles(rawProfiles) {
     defaultQuery: String(profile.defaultQuery || ""),
     includeCanvas: profile.includeCanvas !== false,
     includePdf: profile.includePdf !== false,
+    includeBases: profile.includeBases !== false,
     excludeFolders: Array.isArray(profile.excludeFolders) ? profile.excludeFolders.map((f) => String(f).trim()).filter(Boolean) : [],
     showPreview: profile.showPreview === true
   })).slice(0, 20);
@@ -2311,6 +2312,7 @@ function createProfileFromSettings(name, settings, mode = "files", query = "") {
     defaultQuery: String(query || ""),
     includeCanvas: (settings == null ? void 0 : settings.includeCanvas) !== false,
     includePdf: (settings == null ? void 0 : settings.includePdf) !== false,
+    includeBases: (settings == null ? void 0 : settings.includeBases) !== false,
     excludeFolders: Array.isArray(settings == null ? void 0 : settings.excludeFolders) ? [...settings.excludeFolders] : [],
     showPreview: (settings == null ? void 0 : settings.showPreview) === true
   };
@@ -2420,6 +2422,7 @@ var DEFAULT_SETTINGS = {
   ripgrepCommand: "rg",
   includeCanvas: true,
   includePdf: true,
+  includeBases: true,
   excludeFolders: [],
   fileFrecency: {},
   useFrecency: true,
@@ -2561,6 +2564,16 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
       (setting) => setting.addToggle(
         (toggle) => toggle.setValue(this.plugin.settings.includePdf).onChange((value) => {
           this.plugin.settings.includePdf = value;
+          void this.plugin.saveSettings();
+        })
+      )
+    );
+    proSearch(
+      "Include Base files",
+      "Show Bases (.base) in file search and search text inside their view and filter definitions.",
+      (setting) => setting.addToggle(
+        (toggle) => toggle.setValue(this.plugin.settings.includeBases).onChange((value) => {
+          this.plugin.settings.includeBases = value;
           void this.plugin.saveSettings();
         })
       )
@@ -2920,6 +2933,7 @@ function collectFileTags(cache) {
 function getVaultFileKind(file) {
   if (file.extension === "canvas") return "canvas";
   if (file.extension === "pdf") return "pdf";
+  if (file.extension === "base") return "base";
   return "markdown";
 }
 function normalizeExcludeFolders(folders) {
@@ -2942,6 +2956,8 @@ function getSearchableFiles(app, options) {
       files.push(file);
     } else if (options.includePdf && file.extension === "pdf") {
       files.push(file);
+    } else if (options.includeBases && file.extension === "base") {
+      files.push(file);
     }
   }
   return files;
@@ -2952,6 +2968,8 @@ function iconForFileKind(kind) {
       return "layout-dashboard";
     case "pdf":
       return "file-type";
+    case "base":
+      return "database";
     default:
       return "file-text";
   }
@@ -2980,17 +2998,18 @@ var FileSearcher = class {
     this.app = app;
   }
   async search(options) {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f;
     const files = getSearchableFiles(this.app, {
       includeCanvas: options.includeCanvas,
       includePdf: options.includePdf,
+      includeBases: (_a = options.includeBases) != null ? _a : false,
       excludeFolders: options.excludeFolders
     });
-    const limit = (_a = options.limit) != null ? _a : 50;
+    const limit = (_b = options.limit) != null ? _b : 50;
     const results = [];
     const recentSet = new Map(options.recentPaths.map((p, i) => [p, i]));
     const starredSet = new Map(options.starredPaths.map((p, i) => [p, i]));
-    const bookmarkedSet = new Set((_b = options.bookmarkedPaths) != null ? _b : []);
+    const bookmarkedSet = new Set((_c = options.bookmarkedPaths) != null ? _c : []);
     const hasActiveFilters = options.tags.length > 0 || options.properties.length > 0 || options.extFilters.length > 0;
     const isBrowseMode = options.textTokens.length === 0 && !hasActiveFilters;
     const isFilterOnly = options.textTokens.length === 0 && hasActiveFilters;
@@ -3007,7 +3026,7 @@ var FileSearcher = class {
         score = 100;
       } else {
         let matched = true;
-        for (const token of [...(_c = options.nameTerms) != null ? _c : [], ...options.textTokens]) {
+        for (const token of [...(_d = options.nameTerms) != null ? _d : [], ...options.textTokens]) {
           const basenameMatch = fuzzyMatch2(token, basename);
           if (basenameMatch) {
             score += basenameMatch.score;
@@ -3037,8 +3056,8 @@ var FileSearcher = class {
       } else {
         score += Math.max(0, 10 - Math.floor((Date.now() - file.stat.mtime) / 864e5));
       }
-      if ((_d = options.openPaths) == null ? void 0 : _d.has(file.path)) score += 400;
-      const fr = (_e = options.frecency) == null ? void 0 : _e[file.path];
+      if ((_e = options.openPaths) == null ? void 0 : _e.has(file.path)) score += 400;
+      const fr = (_f = options.frecency) == null ? void 0 : _f[file.path];
       if (fr) {
         const freqBoost = Math.min(300, fr.count * 15);
         const ageDays = (Date.now() - fr.last) / 864e5;
@@ -3628,9 +3647,12 @@ function renderResultRow(row, item, options) {
     }
     body.createDiv({ cls: "vault-spotlight-item-meta", text: ((_a = item.file.parent) == null ? void 0 : _a.path) || "/" });
   } else if (item.kind === "content") {
-    (0, import_obsidian7.setIcon)(iconWrap, item.file.extension === "canvas" ? "layout-dashboard" : "text");
+    (0, import_obsidian7.setIcon)(
+      iconWrap,
+      item.file.extension === "canvas" ? "layout-dashboard" : item.file.extension === "base" ? "database" : "text"
+    );
     title.setText(item.file.basename);
-    const engineLabel = item.engine === "ripgrep" ? "Ripgrep" : item.engine === "canvas" ? "Canvas" : "Match";
+    const engineLabel = item.engine === "ripgrep" ? "Ripgrep" : item.engine === "canvas" ? "Canvas" : item.engine === "base" ? "Base" : "Match";
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: `${engineLabel} \xB7 L${item.line}` });
     body.createDiv({ cls: "vault-spotlight-item-snippet", text: item.snippet });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: item.file.path });
@@ -4206,7 +4228,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     return { mode: this.mode, body: raw.trim() };
   }
   async runSearch() {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g;
     const generation = ++this.searchGeneration;
     const raw = this.expandAliases(this.inputEl.value);
     const trimmed = raw.trim();
@@ -4217,6 +4239,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     const excludeFolders = (_a = profile == null ? void 0 : profile.excludeFolders) != null ? _a : this.plugin.settings.excludeFolders;
     const includeCanvas = (_b = profile == null ? void 0 : profile.includeCanvas) != null ? _b : this.plugin.settings.includeCanvas;
     const includePdf = (_c = profile == null ? void 0 : profile.includePdf) != null ? _c : this.plugin.settings.includePdf;
+    const includeBases = (_d = profile == null ? void 0 : profile.includeBases) != null ? _d : this.plugin.settings.includeBases;
     this.isLoading = true;
     if (this.loadingTimer !== null) window.clearTimeout(this.loadingTimer);
     this.loadingTimer = window.setTimeout(() => {
@@ -4272,7 +4295,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
         const text = body;
         this.setBadge("Content", "is-content");
         if (text.length === 0) {
-          const history = (_d = this.plugin.settings.recentSearches) != null ? _d : [];
+          const history = (_e = this.plugin.settings.recentSearches) != null ? _e : [];
           this.items = history.map((q) => ({ kind: "history", query: q }));
           if (generation !== this.searchGeneration) return;
           this.isLoading = false;
@@ -4294,6 +4317,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
         const contentResults = await this.plugin.contentSearcher.search(text, {
           useRipgrep: isPro,
           includeCanvas: isPro && includeCanvas,
+          includeBases: isPro && includeBases,
           excludeFolders
         });
         if (generation !== this.searchGeneration) return;
@@ -4326,7 +4350,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
           matchIndices: r.matchIndices
         }));
       } else if (mode === "symbols") {
-        const target = (_e = this.drillFile) != null ? _e : this.app.workspace.getActiveFile();
+        const target = (_f = this.drillFile) != null ? _f : this.app.workspace.getActiveFile();
         this.setBadge(target ? `Symbols \xB7 ${target.basename}` : "Symbols", "is-content");
         if (!target || target.extension !== "md") {
           this.items = [];
@@ -4380,7 +4404,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
           return;
         }
       } else if (mode === "links") {
-        const linkTarget = (_f = this.drillFile) != null ? _f : this.app.workspace.getActiveFile();
+        const linkTarget = (_g = this.drillFile) != null ? _g : this.app.workspace.getActiveFile();
         this.setBadge(linkTarget && !body ? `Links \xB7 ${linkTarget.basename}` : "Links", "is-content");
         this.items = this.linkModeItems(body);
         if (this.items.length === 0) {
@@ -4413,6 +4437,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
           openPaths: this.editorSearcher.openFilePaths(),
           includeCanvas: isPro && includeCanvas,
           includePdf: isPro && includePdf,
+          includeBases: isPro && includeBases,
           excludeFolders,
           frecency: this.plugin.settings.useFrecency ? this.plugin.settings.fileFrecency : void 0,
           limit: isEmptyQuery ? 40 : 50
@@ -5529,6 +5554,9 @@ var RipgrepSearcher = class {
     if (options.includeCanvas) {
       args.push("-g", "*.canvas");
     }
+    if (options.includeBases) {
+      args.push("-g", "*.base");
+    }
     for (const folder of (_a = options.excludeFolders) != null ? _a : []) {
       const f = folder.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
       if (f) args.push("-g", `!${f}/**`);
@@ -5685,6 +5713,45 @@ var CanvasSearcher = class {
   }
 };
 
+// src/search/BaseSearcher.ts
+var BaseSearcher = class {
+  constructor(app) {
+    this.app = app;
+  }
+  async search(tokens, limit = 20, excluded = []) {
+    const needAll = tokens.map((t) => t.toLowerCase()).filter(Boolean);
+    if (needAll.length === 0) return [];
+    const results = [];
+    for (const file of this.app.vault.getFiles()) {
+      if (file.extension !== "base") continue;
+      if (isPathExcluded(file.path, excluded)) continue;
+      let raw;
+      try {
+        raw = await this.app.vault.cachedRead(file);
+      } catch (e) {
+        continue;
+      }
+      const lines = raw.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const text = lines[i].trim();
+        if (!text) continue;
+        const low = text.toLowerCase();
+        if (!needAll.every((tk) => low.includes(tk))) continue;
+        results.push({
+          file,
+          line: i + 1,
+          snippet: text.slice(0, 160),
+          // Slightly below markdown and canvas matches, floored so it
+          // never goes negative.
+          score: Math.max(1, 85 - Math.floor(i / 10)),
+          engine: "base"
+        });
+      }
+    }
+    return results.sort((a, b) => b.score - a.score).slice(0, limit);
+  }
+};
+
 // src/search/ContentSearcher.ts
 var ContentSearcher = class {
   constructor(app, ripgrepCommand = "rg") {
@@ -5694,12 +5761,13 @@ var ContentSearcher = class {
     this.buildPromise = null;
     this.ripgrep = new RipgrepSearcher(app, ripgrepCommand);
     this.canvas = new CanvasSearcher(app);
+    this.bases = new BaseSearcher(app);
   }
   setRipgrepCommand(command) {
     this.ripgrep = new RipgrepSearcher(this.app, command);
   }
   async search(query, options) {
-    var _a;
+    var _a, _b;
     if (!query.trim()) return [];
     const limit = (_a = options.limit) != null ? _a : 40;
     const excluded = normalizeExcludeFolders(options.excludeFolders);
@@ -5707,15 +5775,23 @@ var ContentSearcher = class {
     if (options.useRipgrep) {
       const rgResults = await this.ripgrep.search(query, {
         includeCanvas: options.includeCanvas,
+        includeBases: (_b = options.includeBases) != null ? _b : false,
         excludeFolders: options.excludeFolders,
         limit
       });
       if (rgResults !== null) return rgResults;
     }
     const vaultResults = await this.searchVaultIndex(tokens, limit, excluded);
-    if (!options.includeCanvas) return vaultResults;
-    const canvasResults = await this.canvas.search(tokens, Math.max(10, Math.floor(limit / 2)), excluded);
-    return this.mergeResults(vaultResults, canvasResults, limit);
+    const extraLimit = Math.max(10, Math.floor(limit / 2));
+    const extras = [];
+    if (options.includeCanvas) {
+      extras.push(...await this.canvas.search(tokens, extraLimit, excluded));
+    }
+    if (options.includeBases) {
+      extras.push(...await this.bases.search(tokens, extraLimit, excluded));
+    }
+    if (extras.length === 0) return vaultResults;
+    return this.mergeResults(vaultResults, extras, limit);
   }
   async searchVaultIndex(tokens, limit, excluded) {
     await this.ensureIndex();
@@ -5935,6 +6011,7 @@ var VaultSpotlightPlugin = class extends import_obsidian11.Plugin {
         const results = await this.contentSearcher.search(query, {
           useRipgrep: true,
           includeCanvas: this.settings.includeCanvas,
+          includeBases: this.settings.includeBases,
           excludeFolders: this.settings.excludeFolders
         });
         return results.map((r) => ({

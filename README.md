@@ -39,6 +39,7 @@ Vault Spotlight is a fast command center for large vaults: type a few letters to
 - **Smart collections** — saved searches become reusable vault views in the browse screen; pin the ones you use daily.
 - **Starred pins** — press `Ctrl+D` to keep high-value files at the top of browse and search results.
 - **Canvas & PDF discovery** — include Canvas files and PDFs in file search, plus text search inside Canvas nodes.
+- **Bases discovery** — include Bases (`.base`) in file search and open them straight into their database view; content search also looks inside base view/filter definitions, so `> status active` finds the base that queries it.
 - **Batch open** — select multiple results with `Ctrl+Space` and open the whole working set at once.
 - **Export results** — copy selected/current results as Markdown links or create a search-results note for handoff and review.
 - **Batch actions** — apply actions such as adding a tag to selected Markdown notes directly from Spotlight.

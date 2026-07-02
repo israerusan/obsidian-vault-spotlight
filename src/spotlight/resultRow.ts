@@ -46,10 +46,23 @@ export function renderResultRow(
 		}
 		body.createDiv({ cls: "vault-spotlight-item-meta", text: item.file.parent?.path || "/" });
 	} else if (item.kind === "content") {
-		setIcon(iconWrap, item.file.extension === "canvas" ? "layout-dashboard" : "text");
+		setIcon(
+			iconWrap,
+			item.file.extension === "canvas"
+				? "layout-dashboard"
+				: item.file.extension === "base"
+					? "database"
+					: "text"
+		);
 		title.setText(item.file.basename);
 		const engineLabel =
-			item.engine === "ripgrep" ? "Ripgrep" : item.engine === "canvas" ? "Canvas" : "Match";
+			item.engine === "ripgrep"
+				? "Ripgrep"
+				: item.engine === "canvas"
+					? "Canvas"
+					: item.engine === "base"
+						? "Base"
+						: "Match";
 		titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: `${engineLabel} · L${item.line}` });
 		body.createDiv({ cls: "vault-spotlight-item-snippet", text: item.snippet });
 		body.createDiv({ cls: "vault-spotlight-item-meta", text: item.file.path });

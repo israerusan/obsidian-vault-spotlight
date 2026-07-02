@@ -20,6 +20,7 @@ export function normalizeProfiles(rawProfiles) {
 			defaultQuery: String(profile.defaultQuery || ""),
 			includeCanvas: profile.includeCanvas !== false,
 			includePdf: profile.includePdf !== false,
+			includeBases: profile.includeBases !== false,
 			excludeFolders: Array.isArray(profile.excludeFolders)
 				? profile.excludeFolders.map((f) => String(f).trim()).filter(Boolean)
 				: [],
@@ -40,6 +41,7 @@ export function createProfileFromSettings(name, settings, mode = "files", query 
 		defaultQuery: String(query || ""),
 		includeCanvas: settings?.includeCanvas !== false,
 		includePdf: settings?.includePdf !== false,
+		includeBases: settings?.includeBases !== false,
 		excludeFolders: Array.isArray(settings?.excludeFolders) ? [...settings.excludeFolders] : [],
 		showPreview: settings?.showPreview === true,
 	};

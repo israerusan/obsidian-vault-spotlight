@@ -46,6 +46,7 @@ export interface FileSearchOptions {
 	openPaths?: Set<string>;
 	includeCanvas: boolean;
 	includePdf: boolean;
+	includeBases?: boolean;
 	excludeFolders?: string[];
 	frecency?: Record<string, FrecencyEntry>;
 	limit?: number;
@@ -58,6 +59,7 @@ export class FileSearcher {
 		const files = getSearchableFiles(this.app, {
 			includeCanvas: options.includeCanvas,
 			includePdf: options.includePdf,
+			includeBases: options.includeBases ?? false,
 			excludeFolders: options.excludeFolders,
 		});
 		const limit = options.limit ?? 50;

@@ -193,6 +193,7 @@ export default class VaultSpotlightPlugin extends Plugin {
 				const results = await this.contentSearcher.search(query, {
 					useRipgrep: true,
 					includeCanvas: this.settings.includeCanvas,
+					includeBases: this.settings.includeBases,
 					excludeFolders: this.settings.excludeFolders,
 				});
 				return results.map((r) => ({

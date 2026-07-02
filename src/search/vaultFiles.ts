@@ -1,10 +1,11 @@
 import { App, TFile } from "obsidian";
 
-export type VaultFileKind = "markdown" | "canvas" | "pdf";
+export type VaultFileKind = "markdown" | "canvas" | "pdf" | "base";
 
 export function getVaultFileKind(file: TFile): VaultFileKind {
 	if (file.extension === "canvas") return "canvas";
 	if (file.extension === "pdf") return "pdf";
+	if (file.extension === "base") return "base";
 	return "markdown";
 }
 
@@ -23,7 +24,12 @@ export function isPathExcluded(path: string, normalizedFolders: string[]): boole
 
 export function getSearchableFiles(
 	app: App,
-	options: { includeCanvas: boolean; includePdf: boolean; excludeFolders?: string[] }
+	options: {
+		includeCanvas: boolean;
+		includePdf: boolean;
+		includeBases?: boolean;
+		excludeFolders?: string[];
+	}
 ): TFile[] {
 	const excluded = normalizeExcludeFolders(options.excludeFolders);
 	const files: TFile[] = [];
@@ -34,6 +40,8 @@ export function getSearchableFiles(
 		} else if (options.includeCanvas && file.extension === "canvas") {
 			files.push(file);
 		} else if (options.includePdf && file.extension === "pdf") {
+			files.push(file);
+		} else if (options.includeBases && file.extension === "base") {
 			files.push(file);
 		}
 	}
@@ -46,6 +54,8 @@ export function iconForFileKind(kind: VaultFileKind): string {
 			return "layout-dashboard";
 		case "pdf":
 			return "file-type";
+		case "base":
+			return "database";
 		default:
 			return "file-text";
 	}

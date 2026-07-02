@@ -10,6 +10,12 @@ const profiles = normalizeProfiles([
 assert.equal(profiles.length, 2, "valid profiles should be preserved");
 assert.equal(activeProfile(profiles, "research")?.defaultMode, "content", "active profile should resolve by id");
 assert.equal(activeProfile(profiles, "missing"), null, "missing profile should resolve to null");
+assert.equal(profiles[0].includeBases, true, "profiles saved before Bases support default to including .base files");
+assert.equal(
+	normalizeProfiles([{ id: "x", name: "X", defaultMode: "files", includeBases: false }])[0].includeBases,
+	false,
+	"explicit includeBases: false survives normalization"
+);
 
 assert.deepEqual(addTagToTags(["work"], "client"), ["work", "client"], "should append to existing frontmatter tags");
 assert.deepEqual(addTagToTags(undefined, "client"), ["client"], "should create frontmatter tags when missing");

@@ -26,6 +26,7 @@ export interface SearchProfile {
 	defaultQuery: string;
 	includeCanvas: boolean;
 	includePdf: boolean;
+	includeBases: boolean;
 	excludeFolders: string[];
 	showPreview: boolean;
 }
@@ -53,6 +54,7 @@ export interface VaultSpotlightSettings {
 	ripgrepCommand: string;
 	includeCanvas: boolean;
 	includePdf: boolean;
+	includeBases: boolean;
 	excludeFolders: string[];
 	fileFrecency: Record<string, FrecencyEntry>;
 	useFrecency: boolean;
@@ -85,6 +87,7 @@ export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	ripgrepCommand: "rg",
 	includeCanvas: true,
 	includePdf: true,
+	includeBases: true,
 	excludeFolders: [],
 	fileFrecency: {},
 	useFrecency: true,
@@ -285,6 +288,18 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 					void this.plugin.saveSettings();
 				})
 			)
+		);
+
+		proSearch(
+			"Include Base files",
+			"Show Bases (.base) in file search and search text inside their view and filter definitions.",
+			(setting) =>
+				setting.addToggle((toggle) =>
+					toggle.setValue(this.plugin.settings.includeBases).onChange((value) => {
+						this.plugin.settings.includeBases = value;
+						void this.plugin.saveSettings();
+					})
+				)
 		);
 
 		proSearch(
