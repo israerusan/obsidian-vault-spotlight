@@ -1,15 +1,12 @@
 import {
 	App,
-	Component,
 	type EventRef,
-	MarkdownRenderer,
 	MarkdownView,
 	Menu,
 	Notice,
 	Modal,
 	TFile,
 	TFolder,
-	type WorkspaceLeaf,
 	normalizePath,
 	setIcon,
 } from "obsidian";
@@ -17,146 +14,37 @@ import type VaultSpotlightPlugin from "../main";
 import { FileSearcher } from "../search/FileSearcher";
 import { HeadingSearcher } from "../search/HeadingSearcher";
 import { CommandSearcher } from "../search/CommandSearcher";
-import { SymbolSearcher, iconForSymbolType, type SymbolType } from "../search/SymbolSearcher";
+import { SymbolSearcher } from "../search/SymbolSearcher";
 import { EditorSearcher } from "../search/EditorSearcher";
 import { detectModeFromPrefix, parseHeadingQuery } from "../core/modeTriggers.mjs";
-import { fuzzyMatch, renderHighlightedText, tokenizeQuery } from "../search/fuzzy";
+import { fuzzyMatch, tokenizeQuery } from "../search/fuzzy";
 import { SaveSearchPromptModal } from "./SaveSearchPromptModal";
 import { PromptModal } from "./PromptModal";
-import { getVaultFileKind, iconForFileKind, type VaultFileKind } from "../search/vaultFiles";
-import { addTagToTags, normalizeTag, removeInlineTag, removeTagFromTags } from "../core/frontmatterTags.mjs";
-import { collectFileTags } from "../search/metadata";
-import { buildMocMarkdown, buildResultMarkdown } from "../core/resultMarkdown.mjs";
+import { getVaultFileKind } from "../search/vaultFiles";
 import { activeProfile, createProfileFromSettings } from "../core/searchProfiles.mjs";
 import { detectSearchIntegrations } from "../core/integrations.mjs";
 import { findBacklinks, findOutlinks } from "../core/linkGraph.mjs";
+import {
+	MODE_ORDER,
+	itemFile,
+	type PaneTarget,
+	type ResultItem,
+	type SpotlightAction,
+	type SpotlightMode,
+} from "./resultTypes";
+import { PreviewPane } from "./PreviewPane";
+import { renderResultRow } from "./resultRow";
+import * as batchOps from "./batchOps";
+import { copyToClipboard, renameFile } from "./batchOps";
 
-export type SpotlightMode =
-	| "files"
-	| "content"
-	| "headings"
-	| "symbols"
-	| "commands"
-	| "links"
-	| "editors"
-	| "folders";
-
-type ResultItem =
-	| {
-			kind: "file";
-			file: TFile;
-			score: number;
-			matchIndices: number[];
-			modifiedLabel: string;
-			fileKind: VaultFileKind;
-			isRecent: boolean;
-			isStarred: boolean;
-			isBookmarked: boolean;
-	  }
-	| {
-			kind: "content";
-			file: TFile;
-			line: number;
-			snippet: string;
-			score: number;
-			engine: "ripgrep" | "vault" | "canvas";
-	  }
-	| {
-			kind: "heading";
-			file: TFile;
-			line: number;
-			heading: string;
-			level: number;
-			score: number;
-			matchIndices: number[];
-	  }
-	| {
-			kind: "command";
-			id: string;
-			name: string;
-			matchIndices: number[];
-			isRecent?: boolean;
-	  }
-	| {
-			kind: "symbol";
-			file: TFile;
-			line: number;
-			text: string;
-			symbolType: SymbolType;
-			level: number;
-			matchIndices: number[];
-	  }
-	| {
-			kind: "editor";
-			leaf: WorkspaceLeaf;
-			file: TFile | null;
-			title: string;
-			viewType: string;
-			isActive: boolean;
-			isPinned: boolean;
-			matchIndices: number[];
-	  }
-	| {
-			kind: "folder";
-			folder: TFolder;
-			matchIndices: number[];
-	  }
-	| {
-			kind: "history";
-			query: string;
-	  }
-	| {
-			kind: "collection";
-			id: string;
-			name: string;
-			query: string;
-			isPinned: boolean;
-	  }
-	| {
-			kind: "profile";
-			id: string;
-			name: string;
-			defaultMode: SpotlightMode;
-			defaultQuery: string;
-			isActive: boolean;
-	  }
-	| {
-			kind: "action";
-			action: SpotlightAction;
-	  }
-	| {
-			kind: "create";
-			name: string;
-	  };
-
-type SpotlightAction = {
-	id: string;
-	name: string;
-	description: string;
-	requiresPro?: boolean;
-	run: () => void | Promise<void>;
-};
-
-/** Where to open a result: null = current tab, or an Obsidian pane type. */
-type PaneTarget = "tab" | "split" | "window" | null;
-
-export const MODE_ORDER: SpotlightMode[] = [
-	"files",
-	"content",
-	"headings",
-	"symbols",
-	"commands",
-	"links",
-	"editors",
-	"folders",
-];
+// Re-exported so existing importers keep working after the types moved to
+// resultTypes.ts.
+export { MODE_ORDER, type SpotlightMode } from "./resultTypes";
 
 export class SpotlightModal extends Modal {
 	private inputEl!: HTMLInputElement;
 	private resultsEl!: HTMLDivElement;
-	private previewEl: HTMLDivElement | null = null;
-	private previewComponent: Component | null = null;
-	private previewTimer: number | null = null;
+	private preview: PreviewPane;
 	private footerEl!: HTMLDivElement;
 	private statusEl!: HTMLSpanElement;
 	private modeBadgeEl!: HTMLSpanElement;
@@ -195,6 +83,7 @@ export class SpotlightModal extends Modal {
 	) {
 		super(app);
 		this.shouldRestoreSelection = false;
+		this.preview = new PreviewPane(app);
 		this.fileSearcher = new FileSearcher(app);
 		this.headingSearcher = new HeadingSearcher(app);
 		this.commandSearcher = new CommandSearcher(app);
@@ -247,10 +136,8 @@ export class SpotlightModal extends Modal {
 		this.renderLoading();
 
 		if (this.previewEnabled()) {
-			this.previewEl = body.createDiv({ cls: "vault-spotlight-preview" });
+			this.preview.mount(body);
 			this.containerEl.addClass("has-preview");
-			this.previewComponent = new Component();
-			this.previewComponent.load();
 		}
 
 		this.footerEl = contentEl.createDiv({ cls: "vault-spotlight-footer" });
@@ -286,7 +173,7 @@ export class SpotlightModal extends Modal {
 				evt.key === prefixes.symbols[0] ? "symbols" : evt.key === prefixes.links[0] ? "links" : null;
 			if (!drillMode) return;
 			const item = this.items[this.selectedIndex];
-			const file = item ? this.itemFile(item) : null;
+			const file = item ? itemFile(item) : null;
 			if (!file || file.extension !== "md") return;
 			evt.preventDefault();
 			this.drillInto(file, drillMode);
@@ -318,15 +205,7 @@ export class SpotlightModal extends Modal {
 			window.clearTimeout(this.loadingTimer);
 			this.loadingTimer = null;
 		}
-		if (this.previewTimer !== null) {
-			window.clearTimeout(this.previewTimer);
-			this.previewTimer = null;
-		}
-		if (this.previewComponent) {
-			this.previewComponent.unload();
-			this.previewComponent = null;
-		}
-		this.previewEl = null;
+		this.preview.unload();
 		this.plugin.onSpotlightClosed(this);
 		this.containerEl.removeClass("vault-spotlight-container");
 		this.containerEl.removeClass("has-preview");
@@ -737,14 +616,6 @@ export class SpotlightModal extends Modal {
 		return "All notes";
 	}
 
-	private itemFile(item: ResultItem): TFile | null {
-		if (item.kind === "file" || item.kind === "content" || item.kind === "heading" || item.kind === "symbol") {
-			return item.file;
-		}
-		if (item.kind === "editor") return item.file;
-		return null;
-	}
-
 	private fileToResult(file: TFile, score: number, bookmarkedPaths: Set<string>): ResultItem {
 		return {
 			kind: "file",
@@ -887,7 +758,7 @@ export class SpotlightModal extends Modal {
 			row.dataset.index = String(index);
 			this.applyRowState(row, index);
 
-			const file = this.itemFile(item);
+			const file = itemFile(item);
 
 			if (this.plugin.settings.isPro && file) {
 				const check = row.createDiv({ cls: "vault-spotlight-check" });
@@ -896,107 +767,10 @@ export class SpotlightModal extends Modal {
 				}
 			}
 
-			const iconWrap = row.createDiv({ cls: "vault-spotlight-item-icon-wrap" });
-			const body = row.createDiv({ cls: "vault-spotlight-item-body" });
-			const titleRow = body.createDiv({ cls: "vault-spotlight-item-title-row" });
-			const title = titleRow.createDiv({ cls: "vault-spotlight-item-title" });
-
-			if (item.kind === "file") {
-				setIcon(iconWrap, iconForFileKind(item.fileKind));
-				row.toggleClass("is-starred", item.isStarred);
-				renderHighlightedText(title, item.file.basename, item.matchIndices);
-				if (item.isStarred && !isEmptyQuery) {
-					titleRow.createSpan({ cls: "vault-spotlight-item-badge is-star", text: "Starred" });
-				} else if (item.isBookmarked && !isEmptyQuery) {
-					titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Bookmark" });
-				} else if (item.isRecent && !isEmptyQuery) {
-					titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Recent" });
-				}
-				if (item.fileKind !== "markdown") {
-					titleRow.createSpan({
-						cls: "vault-spotlight-item-badge is-type",
-						text: item.fileKind.toUpperCase(),
-					});
-				}
-				if (this.plugin.settings.showModifiedTime) {
-					titleRow.createSpan({ cls: "vault-spotlight-item-time", text: item.modifiedLabel });
-				}
-				body.createDiv({ cls: "vault-spotlight-item-meta", text: item.file.parent?.path || "/" });
-			} else if (item.kind === "content") {
-				setIcon(iconWrap, item.file.extension === "canvas" ? "layout-dashboard" : "text");
-				title.setText(item.file.basename);
-				const engineLabel =
-					item.engine === "ripgrep" ? "Ripgrep" : item.engine === "canvas" ? "Canvas" : "Match";
-				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: `${engineLabel} · L${item.line}` });
-				body.createDiv({ cls: "vault-spotlight-item-snippet", text: item.snippet });
-				body.createDiv({ cls: "vault-spotlight-item-meta", text: item.file.path });
-			} else if (item.kind === "heading") {
-				setIcon(iconWrap, "heading");
-				renderHighlightedText(title, item.heading, item.matchIndices);
-				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: `H${item.level}` });
-				body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.file.basename} · L${item.line}` });
-			} else if (item.kind === "command") {
-				setIcon(iconWrap, "terminal-square");
-				renderHighlightedText(title, item.name, item.matchIndices);
-				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isRecent ? "Recent" : "Command" });
-				body.createDiv({ cls: "vault-spotlight-item-meta", text: "Run command" });
-			} else if (item.kind === "symbol") {
-				setIcon(iconWrap, iconForSymbolType(item.symbolType));
-				if (item.symbolType === "heading" && item.level > 1) {
-					row.addClass(`vault-spotlight-indent-${Math.min(item.level, 6)}`);
-				}
-				renderHighlightedText(title, item.text, item.matchIndices);
-				titleRow.createSpan({
-					cls: "vault-spotlight-item-badge",
-					text: item.symbolType === "heading" ? `H${item.level}` : capitalize(item.symbolType),
-				});
-				body.createDiv({ cls: "vault-spotlight-item-meta", text: `L${item.line}` });
-			} else if (item.kind === "editor") {
-				setIcon(iconWrap, item.file ? iconForFileKind(getVaultFileKind(item.file)) : "layout");
-				renderHighlightedText(title, item.title, item.matchIndices);
-				if (item.isActive) {
-					titleRow.createSpan({ cls: "vault-spotlight-item-badge is-star", text: "Active" });
-				} else if (item.isPinned) {
-					titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Pinned" });
-				}
-				if (item.viewType && item.viewType !== "markdown") {
-					titleRow.createSpan({ cls: "vault-spotlight-item-badge is-type", text: item.viewType.toUpperCase() });
-				}
-				body.createDiv({ cls: "vault-spotlight-item-meta", text: item.file ? item.file.path : "Open editor" });
-			} else if (item.kind === "folder") {
-				setIcon(iconWrap, "folder");
-				renderHighlightedText(title, item.folder.name, item.matchIndices);
-				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Folder" });
-				body.createDiv({
-					cls: "vault-spotlight-item-meta",
-					text: `${item.folder.path} · ${item.folder.children.length} item${item.folder.children.length === 1 ? "" : "s"}`,
-				});
-			} else if (item.kind === "history") {
-				setIcon(iconWrap, "history");
-				title.setText(item.query);
-				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Recent search" });
-				body.createDiv({ cls: "vault-spotlight-item-meta", text: "Press ↵ to search again" });
-			} else if (item.kind === "collection") {
-				setIcon(iconWrap, item.isPinned ? "star" : "search");
-				title.setText(item.name);
-				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isPinned ? "Pinned collection" : "Smart collection" });
-				body.createDiv({ cls: "vault-spotlight-item-meta", text: item.query });
-			} else if (item.kind === "profile") {
-				setIcon(iconWrap, item.isActive ? "check-circle" : "sliders-horizontal");
-				title.setText(item.name);
-				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isActive ? "Active profile" : "Search profile" });
-				body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.defaultMode}${item.defaultQuery ? ` · ${item.defaultQuery}` : ""}` });
-			} else if (item.kind === "action") {
-				setIcon(iconWrap, item.action.requiresPro ? "sparkles" : "bolt");
-				title.setText(item.action.name);
-				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.action.requiresPro ? "Pro action" : "Action" });
-				body.createDiv({ cls: "vault-spotlight-item-meta", text: item.action.description });
-			} else {
-				setIcon(iconWrap, "file-plus");
-				title.setText(`Create “${item.name}”`);
-				titleRow.createSpan({ cls: "vault-spotlight-item-badge is-star", text: "New" });
-				body.createDiv({ cls: "vault-spotlight-item-meta", text: "Create a new note" });
-			}
+			renderResultRow(row, item, {
+				isEmptyQuery,
+				showModifiedTime: this.plugin.settings.showModifiedTime,
+			});
 
 			if (this.plugin.settings.isPro && item.kind === "file") {
 				const starBtn = row.createDiv({ cls: "vault-spotlight-star-btn" });
@@ -1036,7 +810,7 @@ export class SpotlightModal extends Modal {
 		row.toggleClass("is-selected", selected);
 		row.setAttribute("aria-selected", String(selected));
 		const item = this.items[index];
-		const file = item ? this.itemFile(item) : null;
+		const file = item ? itemFile(item) : null;
 		if (file) {
 			row.toggleClass("is-checked", this.checkedPaths.has(file.path));
 		}
@@ -1138,7 +912,7 @@ export class SpotlightModal extends Modal {
 
 	private toggleCheck(): void {
 		const item = this.items[this.selectedIndex];
-		const file = item ? this.itemFile(item) : null;
+		const file = item ? itemFile(item) : null;
 		if (!file) return;
 		if (this.checkedPaths.has(file.path)) {
 			this.checkedPaths.delete(file.path);
@@ -1242,7 +1016,7 @@ export class SpotlightModal extends Modal {
 		const targets =
 			this.checkedPaths.size > 0
 				? this.items.filter((i) => {
-						const f = this.itemFile(i);
+						const f = itemFile(i);
 						return f ? this.checkedPaths.has(f.path) : false;
 				  })
 				: [selected];
@@ -1258,7 +1032,7 @@ export class SpotlightModal extends Modal {
 		const target: PaneTarget = targets.length > 1 ? "tab" : paneOverride ?? defaultTarget;
 
 		for (const item of targets) {
-			const file = this.itemFile(item);
+			const file = itemFile(item);
 			if (!file) continue;
 			try {
 				await this.openItem(item, target);
@@ -1270,7 +1044,7 @@ export class SpotlightModal extends Modal {
 	}
 
 	private async openItem(item: ResultItem, target: PaneTarget): Promise<void> {
-		const file = this.itemFile(item);
+		const file = itemFile(item);
 		if (!file) return;
 		const leaf = target === null ? this.app.workspace.getLeaf(false) : this.app.workspace.getLeaf(target);
 		await leaf.openFile(file);
@@ -1420,12 +1194,12 @@ export class SpotlightModal extends Modal {
 					id: "copy-collection-query",
 					name: "Copy collection query",
 					description: "Copy the saved search query to the clipboard.",
-					run: () => this.copyToClipboard(context.query, "Query copied"),
+					run: () => copyToClipboard(context.query, "Query copied"),
 				},
 			];
 		}
 
-		const file = this.itemFile(context);
+		const file = itemFile(context);
 		const actions: SpotlightAction[] = [];
 		if (file) {
 			actions.push(
@@ -1443,20 +1217,20 @@ export class SpotlightModal extends Modal {
 					id: "copy-link",
 					name: "Copy link",
 					description: "Copy a Markdown link for this result.",
-					run: () => this.copyToClipboard(this.app.fileManager.generateMarkdownLink(file, ""), "Link copied"),
+					run: () => copyToClipboard(this.app.fileManager.generateMarkdownLink(file, ""), "Link copied"),
 				},
 				{
 					id: "copy-path",
 					name: "Copy path",
 					description: "Copy this file path.",
-					run: () => this.copyToClipboard(file.path, "Path copied"),
+					run: () => copyToClipboard(file.path, "Path copied"),
 				},
 				{
 					id: "rename",
 					name: "Rename",
 					description: "Rename the selected note or file.",
 					requiresPro: true,
-					run: () => this.renameFile(file),
+					run: () => renameFile(this.app, file),
 				},
 				{
 					id: "toggle-star",
@@ -1484,70 +1258,70 @@ export class SpotlightModal extends Modal {
 				name: "Copy results as Markdown",
 				description: "Copy selected results, or the current result list, as Markdown links.",
 				requiresPro: true,
-				run: () => this.copyResultsAsMarkdown(),
+				run: () => batchOps.copyResultsAsMarkdown(this.batchContext()),
 			},
 			{
 				id: "export-results",
 				name: "Export results to note",
 				description: "Create a Markdown note containing selected/search results.",
 				requiresPro: true,
-				run: () => this.exportResultsToNote(),
+				run: () => batchOps.exportResultsToNote(this.batchContext()),
 			},
 			{
 				id: "batch-add-tag",
 				name: "Batch add tag",
 				description: "Append a tag to selected Markdown files.",
 				requiresPro: true,
-				run: () => this.batchAddTag(),
+				run: () => batchOps.batchAddTag(this.batchContext()),
 			},
 			{
 				id: "batch-remove-tag",
 				name: "Batch remove tag",
 				description: "Remove a tag from selected Markdown files.",
 				requiresPro: true,
-				run: () => this.batchRemoveTag(),
+				run: () => batchOps.batchRemoveTag(this.batchContext()),
 			},
 			{
 				id: "batch-set-property",
 				name: "Batch set property",
 				description: "Set a frontmatter property on selected Markdown files.",
 				requiresPro: true,
-				run: () => this.batchSetProperty(),
+				run: () => batchOps.batchSetProperty(this.batchContext()),
 			},
 			{
 				id: "batch-move",
 				name: "Batch move files",
 				description: "Move selected files into a target folder.",
 				requiresPro: true,
-				run: () => this.batchMoveFiles(),
+				run: () => batchOps.batchMoveFiles(this.batchContext()),
 			},
 			{
 				id: "batch-star",
 				name: "Batch star results",
 				description: "Add selected/current result files to Starred pins.",
 				requiresPro: true,
-				run: () => this.batchSetStarred(true),
+				run: () => batchOps.batchSetStarred(this.batchContext(), true),
 			},
 			{
 				id: "batch-unstar",
 				name: "Batch unstar results",
 				description: "Remove selected/current result files from Starred pins.",
 				requiresPro: true,
-				run: () => this.batchSetStarred(false),
+				run: () => batchOps.batchSetStarred(this.batchContext(), false),
 			},
 			{
 				id: "create-moc",
 				name: "Create MOC from results",
 				description: "Create a grouped index note from selected/current results.",
 				requiresPro: true,
-				run: () => this.createMocFromResults(),
+				run: () => batchOps.createMocFromResults(this.batchContext()),
 			},
 			{
 				id: "append-links",
 				name: "Append links to active note",
 				description: "Append selected/current result links to the active Markdown note.",
 				requiresPro: true,
-				run: () => this.appendLinksToActiveNote(),
+				run: () => batchOps.appendLinksToActiveNote(this.batchContext()),
 			}
 		);
 		const integrations = this.installedSearchIntegrations();
@@ -1575,233 +1349,31 @@ export class SpotlightModal extends Modal {
 	private resultItemsForBatch(): ResultItem[] {
 		const allItems = this.actionContext ? this.resultSnapshot : this.items;
 		const checked = allItems.filter((item) => {
-			const file = this.itemFile(item);
+			const file = itemFile(item);
 			return file ? this.checkedPaths.has(file.path) : false;
 		});
 		const source = checked.length > 0 ? checked : allItems;
-		return source.filter((item) => !!this.itemFile(item));
+		return source.filter((item) => !!itemFile(item));
 	}
 
-	private resultsAsMarkdown(): string {
-		const rows = this.resultItemsForBatch().map((item) => {
-			const file = this.itemFile(item);
-			if (!file) return null;
-			let suffix = "";
-			if (item.kind === "content") suffix = ` — L${item.line}: ${item.snippet}`;
-			else if (item.kind === "heading") suffix = ` — ${"#".repeat(item.level)} ${item.heading}`;
-			return { link: this.app.fileManager.generateMarkdownLink(file, ""), suffix };
-		}).filter(Boolean) as Array<{ link: string; suffix?: string }>;
-		return buildResultMarkdown(rows);
-	}
-
-	private copyResultsAsMarkdown(): void {
-		const markdown = this.resultsAsMarkdown();
-		if (!markdown) {
-			new Notice("Vault Spotlight: no results to copy.");
-			return;
-		}
-		this.copyToClipboard(markdown, "Results copied");
-	}
-
-	private async exportResultsToNote(): Promise<void> {
-		const markdown = this.resultsAsMarkdown();
-		if (!markdown) {
-			new Notice("Vault Spotlight: no results to export.");
-			return;
-		}
-		const stamp = new Date().toISOString().slice(0, 16).replace("T", " ").replace(":", "-");
-		const dir = "Vault Spotlight Exports";
-		if (!this.app.vault.getAbstractFileByPath(dir)) await this.app.vault.createFolder(dir);
-		const basePath = normalizePath(`${dir}/Search results ${stamp}.md`);
-		let path = basePath;
-		let counter = 2;
-		while (this.app.vault.getAbstractFileByPath(path)) {
-			path = normalizePath(`${dir}/Search results ${stamp} ${counter}.md`);
-			counter++;
-		}
-		const note = `# Vault Spotlight search results\n\nQuery: ${this.actionReturnQuery || this.inputEl.value || "Browse"}\n\n${markdown}\n`;
-		const file = await this.app.vault.create(path, note);
-		this.close();
-		await this.app.workspace.getLeaf(false).openFile(file);
-		new Notice("Vault Spotlight: results exported.");
-	}
-
-	private batchAddTag(): void {
-		const files = this.markdownFilesForBatch();
-		if (files.length === 0) {
-			new Notice("Vault Spotlight: select Markdown notes first.");
-			return;
-		}
-		new PromptModal(this.app, {
-			title: "Add tag to selected notes",
-			initial: "spotlight",
-			cta: "Add tag",
-			onSubmit: (raw) => {
-				const cleaned = normalizeTag(raw);
-				if (!cleaned) return;
-				// processFrontMatter handles YAML serialization (inline AND
-				// block-style tag lists) — never edit frontmatter text by hand.
-				void Promise.all(
-					files.map(async (file) => {
-						const cache = this.app.metadataCache.getFileCache(file);
-						const existing = cache ? collectFileTags(cache) : new Set<string>();
-						// Already tagged (frontmatter or inline) — leave the note untouched.
-						if (existing.has(cleaned.toLowerCase())) return;
-						await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
-							fm.tags = addTagToTags(fm.tags, cleaned);
-						});
-					})
-				).then(() => new Notice(`Vault Spotlight: tag added to ${files.length} note${files.length === 1 ? "" : "s"}.`));
-			},
-		}).open();
-	}
-
-	private batchRemoveTag(): void {
-		const files = this.markdownFilesForBatch();
-		if (files.length === 0) {
-			new Notice("Vault Spotlight: select Markdown notes first.");
-			return;
-		}
-		new PromptModal(this.app, {
-			title: "Remove tag from selected notes",
-			initial: "spotlight",
-			cta: "Remove tag",
-			onSubmit: (raw) => {
-				const cleaned = normalizeTag(raw);
-				if (!cleaned) return;
-				void Promise.all(
-					files.map(async (file) => {
-						await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
-							const next = removeTagFromTags(fm.tags, cleaned);
-							if (next === null) delete fm.tags;
-							else fm.tags = next;
-						});
-						// Inline #tag occurrences in the body are plain text, not
-						// frontmatter — strip them with an atomic read-modify-write.
-						await this.app.vault.process(file, (content) => removeInlineTag(content, cleaned));
-					})
-				).then(() => new Notice(`Vault Spotlight: tag removed from ${files.length} note${files.length === 1 ? "" : "s"}.`));
-			},
-		}).open();
-	}
-
-	private batchSetProperty(): void {
-		const files = this.markdownFilesForBatch();
-		if (files.length === 0) {
-			new Notice("Vault Spotlight: select Markdown notes first.");
-			return;
-		}
-		new PromptModal(this.app, {
-			title: "Set property on selected notes",
-			initial: "status=active",
-			cta: "Set property",
-			onSubmit: (raw) => {
-				const sep = raw.indexOf("=");
-				if (sep <= 0) {
-					new Notice("Vault Spotlight: use key=value.");
-					return;
-				}
-				const key = raw.slice(0, sep).trim();
-				const value = raw.slice(sep + 1).trim();
-				if (!key) return;
-				void Promise.all(
-					files.map((file) =>
-						this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
-							// Reuse an existing key that differs only in case rather
-							// than adding a near-duplicate property.
-							const existingKey =
-								Object.keys(fm).find((k) => k.toLowerCase() === key.toLowerCase()) ?? key;
-							fm[existingKey] = value;
-						})
-					)
-				).then(() => new Notice(`Vault Spotlight: property set on ${files.length} note${files.length === 1 ? "" : "s"}.`));
-			},
-		}).open();
-	}
-
-	private batchMoveFiles(): void {
-		const files = this.filesForBatch();
-		if (files.length === 0) return;
-		new PromptModal(this.app, {
-			title: "Move selected files to folder",
-			initial: "Archive",
-			cta: "Move files",
-			onSubmit: (raw) => {
-				const folder = normalizePath(raw.trim());
-				if (!folder) return;
-				void (async () => {
-					if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
-					for (const file of files) {
-						await this.app.fileManager.renameFile(file, normalizePath(`${folder}/${file.name}`));
-					}
-					new Notice(`Vault Spotlight: moved ${files.length} file${files.length === 1 ? "" : "s"}.`);
-				})();
-			},
-		}).open();
-	}
-
-	private batchSetStarred(starred: boolean): void {
-		const files = this.filesForBatch();
-		for (const file of files) {
-			const isStarred = this.plugin.isStarred(file.path);
-			if (starred !== isStarred) this.plugin.toggleStar(file.path);
-		}
-		new Notice(`Vault Spotlight: ${starred ? "starred" : "unstarred"} ${files.length} file${files.length === 1 ? "" : "s"}.`);
-		void this.runSearch();
-	}
-
-	private createMocFromResults(): void {
-		const rows = this.resultItemsForBatch().map((item) => {
-			const file = this.itemFile(item);
-			if (!file) return null;
-			return {
-				link: this.app.fileManager.generateMarkdownLink(file, ""),
-				folder: file.parent?.path || "/",
-				snippet: item.kind === "content" ? item.snippet : item.kind === "heading" ? item.heading : "",
-			};
-		}).filter(Boolean) as Array<{ link: string; folder: string; snippet?: string }>;
-		if (rows.length === 0) return;
-		const stamp = new Date().toISOString().slice(0, 10);
-		const note = buildMocMarkdown(rows, { title: `Vault Spotlight MOC ${stamp}`, groupBy: "folder", includeSnippets: true });
-		void this.createExportNote(`MOC ${stamp}.md`, note, "MOC created");
-	}
-
-	private appendLinksToActiveNote(): void {
-		const active = this.app.workspace.getActiveFile();
-		if (!active || active.extension !== "md") {
-			new Notice("Vault Spotlight: open a Markdown note first.");
-			return;
-		}
-		const markdown = this.resultsAsMarkdown();
-		if (!markdown) return;
-		void this.app.vault.process(active, (content) => `${content.trimEnd()}\n\n${markdown}\n`).then(() => new Notice("Vault Spotlight: links appended."));
-	}
-
-	private markdownFilesForBatch(): TFile[] {
-		return this.filesForBatch().filter((file) => file.extension === "md");
-	}
-
-	private filesForBatch(): TFile[] {
-		return this.resultItemsForBatch().map((item) => this.itemFile(item)).filter((file): file is TFile => !!file);
-	}
-
-	private async createExportNote(filename: string, note: string, message: string): Promise<void> {
-		const dir = "Vault Spotlight Exports";
-		if (!this.app.vault.getAbstractFileByPath(dir)) await this.app.vault.createFolder(dir);
-		let path = normalizePath(`${dir}/${filename}`);
-		let counter = 2;
-		while (this.app.vault.getAbstractFileByPath(path)) {
-			path = normalizePath(`${dir}/${filename.replace(/\.md$/, ` ${counter}.md`)}`);
-			counter++;
-		}
-		const file = await this.app.vault.create(path, note);
-		this.close();
-		await this.app.workspace.getLeaf(false).openFile(file);
-		new Notice(`Vault Spotlight: ${message}.`);
+	/**
+	 * Everything the extracted batch/export operations need from the modal —
+	 * see batchOps.ts, which owns the actual file-mutation logic.
+	 */
+	private batchContext(): batchOps.BatchOpsContext {
+		return {
+			app: this.app,
+			plugin: this.plugin,
+			resultItems: () => this.resultItemsForBatch(),
+			exportQuery: () => this.actionReturnQuery || this.inputEl.value,
+			close: () => this.close(),
+			runSearch: () => void this.runSearch(),
+			closeActionPalette: () => this.closeActionPalette(),
+		};
 	}
 
 	private openActionsMenu(item: ResultItem, evt?: MouseEvent): void {
-		const file = this.itemFile(item);
+		const file = itemFile(item);
 		if (!file) return;
 		const line = item.kind === "content" || item.kind === "heading" ? item.line : null;
 		const menu = new Menu();
@@ -1832,20 +1404,20 @@ export class SpotlightModal extends Modal {
 				.setIcon("link")
 				.onClick(() => {
 					const link = this.app.fileManager.generateMarkdownLink(file, "");
-					this.copyToClipboard(link, "Link copied");
+					copyToClipboard(link, "Link copied");
 				})
 		);
 		menu.addItem((i) =>
 			i
 				.setTitle("Copy path")
 				.setIcon("copy")
-				.onClick(() => this.copyToClipboard(file.path, "Path copied"))
+				.onClick(() => copyToClipboard(file.path, "Path copied"))
 		);
 		menu.addItem((i) =>
 			i
 				.setTitle("Rename…")
 				.setIcon("pencil")
-				.onClick(() => this.renameFile(file))
+				.onClick(() => renameFile(this.app, file))
 		);
 
 		const showInFolder = (this.app as unknown as { showInFolder?: (p: string) => void }).showInFolder;
@@ -1865,36 +1437,6 @@ export class SpotlightModal extends Modal {
 			if (rect) menu.showAtPosition({ x: rect.left + 40, y: rect.bottom });
 			else menu.showAtPosition({ x: 100, y: 100 });
 		}
-	}
-
-	private copyToClipboard(text: string, okMessage: string): void {
-		const clip = navigator.clipboard;
-		if (clip?.writeText) {
-			void clip.writeText(text).then(
-				() => new Notice(`Vault Spotlight: ${okMessage}`),
-				() => new Notice("Vault Spotlight: copy failed")
-			);
-		} else {
-			new Notice("Vault Spotlight: clipboard unavailable");
-		}
-	}
-
-	private renameFile(file: TFile): void {
-		new PromptModal(this.app, {
-			title: "Rename note",
-			initial: file.basename,
-			cta: "Rename",
-			onSubmit: (name) => {
-				const cleaned = name.replace(/[\\/:*?"<>|]/g, "").trim();
-				if (!cleaned || cleaned === file.basename) return;
-				const dir = file.parent?.path ? `${file.parent.path}/` : "";
-				const newPath = normalizePath(`${dir}${cleaned}.${file.extension}`);
-				void this.app.fileManager.renameFile(file, newPath).catch((err) => {
-					console.error("[VaultSpotlight] rename failed", err);
-					new Notice("Vault Spotlight: rename failed (name may already exist).");
-				});
-			},
-		}).open();
 	}
 
 	private saveCustomSearch(): void {
@@ -1929,48 +1471,9 @@ export class SpotlightModal extends Modal {
 	}
 
 	private updatePreview(): void {
-		if (!this.previewEl || !this.previewComponent) return;
-		if (this.previewTimer !== null) window.clearTimeout(this.previewTimer);
-		const previewEl = this.previewEl;
-		const component = this.previewComponent;
+		if (!this.preview.isMounted) return;
 		const item = this.items[this.selectedIndex];
-
-		this.previewTimer = window.setTimeout(() => {
-			this.previewTimer = null;
-			previewEl.empty();
-			const file = item ? this.itemFile(item) : null;
-			if (!file) {
-				previewEl.createDiv({ cls: "vault-spotlight-preview-empty", text: "No preview" });
-				return;
-			}
-			if (file.extension !== "md") {
-				previewEl.createDiv({
-					cls: "vault-spotlight-preview-empty",
-					text: `${file.extension.toUpperCase()} file — no preview`,
-				});
-				return;
-			}
-			previewEl.createDiv({ cls: "vault-spotlight-preview-title", text: file.basename });
-			const bodyEl = previewEl.createDiv({ cls: "vault-spotlight-preview-body markdown-rendered" });
-			const terms = this.previewHighlightTerms(item);
-			void this.app.vault
-				.cachedRead(file)
-				.then((content) => {
-					if (this.previewComponent !== component || !previewEl.isConnected) return;
-					return MarkdownRenderer.render(this.app, content.slice(0, 10000), bodyEl, file.path, component);
-				})
-				.then(() => {
-					if (this.previewComponent !== component || !bodyEl.isConnected) return;
-					// Scroll the matched term into view and mark it, so a content or
-					// heading hit lands on the relevant passage instead of the top.
-					const hit = highlightFirstMatch(bodyEl, terms);
-					hit?.scrollIntoView({ block: "center" });
-				})
-				.catch(() => {
-					previewEl.empty();
-					previewEl.createDiv({ cls: "vault-spotlight-preview-empty", text: "Preview unavailable" });
-				});
-		}, 120);
+		this.preview.update(item ? itemFile(item) : null, this.previewHighlightTerms(item));
 	}
 
 	/** Terms to highlight in the preview for the current selection. */
@@ -2079,49 +1582,4 @@ export class SpotlightModal extends Modal {
 		window.setTimeout(applyFocus, 0);
 		window.setTimeout(applyFocus, 50);
 	}
-}
-
-/**
- * Wraps the first occurrence of any term (case-insensitive) inside `root` in a
- * <mark> and returns it, or null if no term is found. Walks text nodes so it
- * marks rendered text without disturbing the surrounding markdown structure.
- */
-function capitalize(text: string): string {
-	return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-function highlightFirstMatch(root: HTMLElement, terms: string[]): HTMLElement | null {
-	const needles = terms.map((t) => t.toLowerCase()).filter((t) => t.length > 0);
-	if (needles.length === 0) return null;
-
-	const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-	let node: Node | null;
-	while ((node = walker.nextNode())) {
-		const text = node.nodeValue ?? "";
-		if (!text.trim()) continue;
-		const low = text.toLowerCase();
-		let idx = -1;
-		let len = 0;
-		for (const needle of needles) {
-			const at = low.indexOf(needle);
-			if (at !== -1 && (idx === -1 || at < idx)) {
-				idx = at;
-				len = needle.length;
-			}
-		}
-		if (idx === -1) continue;
-
-		const range = document.createRange();
-		range.setStart(node, idx);
-		range.setEnd(node, idx + len);
-		const mark = document.createElement("mark");
-		mark.className = "vault-spotlight-preview-hit";
-		try {
-			range.surroundContents(mark);
-			return mark;
-		} catch {
-			return null;
-		}
-	}
-	return null;
 }

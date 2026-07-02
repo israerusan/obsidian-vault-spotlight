@@ -5,7 +5,14 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
-const spotlight = fs.readFileSync(path.join(repoRoot, "src", "spotlight", "SpotlightModal.ts"), "utf8");
+// The spotlight UI is split across modules (modal, batch ops, rendering,
+// preview, types) — feature assertions scan the whole directory.
+const spotlightDir = path.join(repoRoot, "src", "spotlight");
+const spotlight = fs
+	.readdirSync(spotlightDir)
+	.filter((name) => name.endsWith(".ts"))
+	.map((name) => fs.readFileSync(path.join(spotlightDir, name), "utf8"))
+	.join("\n");
 const settings = fs.readFileSync(path.join(repoRoot, "src", "settings.ts"), "utf8");
 const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
 
