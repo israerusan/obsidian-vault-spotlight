@@ -2,6 +2,7 @@ import { App, TFile } from "obsidian";
 import { RipgrepSearcher } from "./RipgrepSearcher";
 import { CanvasSearcher } from "./CanvasSearcher";
 import { BaseSearcher } from "./BaseSearcher";
+import { WorkerIndex } from "./WorkerIndex";
 import { isPathExcluded, normalizeExcludeFolders } from "./vaultFiles";
 
 export interface ContentSearchResult {
@@ -27,11 +28,26 @@ export class ContentSearcher {
 	private ripgrep: RipgrepSearcher;
 	private canvas: CanvasSearcher;
 	private bases: BaseSearcher;
+	// undefined = not tried yet; null = unavailable or died → in-process fallback.
+	private workerIndex: WorkerIndex | null | undefined = undefined;
 
 	constructor(private app: App, ripgrepCommand = "rg") {
 		this.ripgrep = new RipgrepSearcher(app, ripgrepCommand);
 		this.canvas = new CanvasSearcher(app);
 		this.bases = new BaseSearcher(app);
+	}
+
+	private getWorkerIndex(): WorkerIndex | null {
+		if (this.workerIndex === undefined) {
+			this.workerIndex = WorkerIndex.create(this.app);
+		}
+		return this.workerIndex;
+	}
+
+	/** Permanently drop a failed worker and use the in-process index instead. */
+	private retireWorker(): void {
+		this.workerIndex?.dispose();
+		this.workerIndex = null;
 	}
 
 	setRipgrepCommand(command: string): void {
@@ -74,6 +90,31 @@ export class ContentSearcher {
 		limit: number,
 		excluded: string[]
 	): Promise<ContentSearchResult[]> {
+		// Preferred path: the index lives in a web worker, so the per-keystroke
+		// scan (and the retained vault text) stays off the main thread.
+		const worker = this.getWorkerIndex();
+		if (worker) {
+			try {
+				const rows = await worker.search(tokens, limit, excluded);
+				const results: ContentSearchResult[] = [];
+				for (const row of rows) {
+					const file = this.app.vault.getAbstractFileByPath(row.path);
+					if (!(file instanceof TFile)) continue;
+					results.push({
+						file,
+						line: row.line,
+						snippet: row.snippet,
+						score: row.score,
+						engine: "vault",
+					});
+				}
+				return results;
+			} catch (err) {
+				console.warn("[VaultSpotlight] content index worker failed, falling back in-process", err);
+				this.retireWorker();
+			}
+		}
+
 		await this.ensureIndex();
 		const results: ContentSearchResult[] = [];
 
@@ -123,6 +164,7 @@ export class ContentSearcher {
 
 	/** Full reset — use when the ripgrep command or global config changes. */
 	invalidate(): void {
+		this.workerIndex?.invalidate();
 		this.index.clear();
 		this.indexBuilt = false;
 		this.buildPromise = null;
@@ -131,6 +173,9 @@ export class ContentSearcher {
 	/** Incremental: re-read a single changed/created file into the index. */
 	async updateFile(file: TFile): Promise<void> {
 		if (file.extension !== "md") return;
+		if (this.workerIndex) {
+			await this.workerIndex.updateFile(file);
+		}
 		// If a build is in flight, wait for it so this update lands on the final
 		// index instead of racing the builder over the same path.
 		if (this.buildPromise) await this.buildPromise;
@@ -147,7 +192,14 @@ export class ContentSearcher {
 
 	/** Incremental: drop a deleted file from the index. */
 	removeFile(path: string): void {
+		this.workerIndex?.removeFile(path);
 		this.index.delete(path);
+	}
+
+	/** Release the worker when the plugin unloads. */
+	dispose(): void {
+		this.workerIndex?.dispose();
+		this.workerIndex = null;
 	}
 
 	private ensureIndex(): Promise<void> {

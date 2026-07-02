@@ -170,6 +170,7 @@ export default class VaultSpotlightPlugin extends Plugin {
 		// pending focus timers are released with the plugin.
 		this.activeSpotlight?.close();
 		this.activeSpotlight = null;
+		this.contentSearcher?.dispose();
 		const globals = globalThis as Record<string, unknown>;
 		if (globals.vaultSpotlight) delete globals.vaultSpotlight;
 		this.flushSave();

@@ -2270,7 +2270,7 @@ __export(main_exports, {
   default: () => VaultSpotlightPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian11 = require("obsidian");
+var import_obsidian12 = require("obsidian");
 
 // src/settings.ts
 var import_obsidian = require("obsidian");
@@ -5422,6 +5422,9 @@ function base64ToBytes(value) {
   return bytes;
 }
 
+// src/search/ContentSearcher.ts
+var import_obsidian11 = require("obsidian");
+
 // src/search/RipgrepSearcher.ts
 var import_obsidian10 = require("obsidian");
 function getChildProcess() {
@@ -5752,6 +5755,147 @@ var BaseSearcher = class {
   }
 };
 
+// src/core/workerSource.mjs
+var WORKER_SOURCE = `
+const index = new Map();
+self.onmessage = (evt) => {
+	const msg = evt.data || {};
+	if (msg.type === "set") {
+		index.set(msg.path, msg.content.split("\\n"));
+	} else if (msg.type === "remove") {
+		index.delete(msg.path);
+	} else if (msg.type === "clear") {
+		index.clear();
+	} else if (msg.type === "search") {
+		const tokens = msg.tokens || [];
+		const excluded = msg.excluded || [];
+		const results = [];
+		for (const entry of index) {
+			const path = entry[0];
+			const lines = entry[1];
+			const p = path.toLowerCase();
+			let skip = false;
+			for (const f of excluded) {
+				if (p === f || p.startsWith(f + "/")) { skip = true; break; }
+			}
+			if (skip) continue;
+			for (let i = 0; i < lines.length; i++) {
+				const low = lines[i].toLowerCase();
+				let ok = true;
+				for (const tk of tokens) {
+					if (!low.includes(tk)) { ok = false; break; }
+				}
+				if (!ok) continue;
+				results.push({
+					path,
+					line: i + 1,
+					snippet: lines[i].trim().slice(0, 160),
+					score: Math.max(1, 100 - Math.floor(i / 10)),
+				});
+			}
+		}
+		results.sort((a, b) => b.score - a.score);
+		self.postMessage({ type: "results", id: msg.id, results: results.slice(0, msg.limit || 40) });
+	}
+};
+`;
+
+// src/search/WorkerIndex.ts
+var WorkerIndex = class _WorkerIndex {
+  constructor(app, worker, blobUrl) {
+    this.app = app;
+    this.worker = worker;
+    this.blobUrl = blobUrl;
+    this.built = false;
+    this.buildPromise = null;
+    this.nextId = 1;
+    this.pending = /* @__PURE__ */ new Map();
+    this.worker.onmessage = (evt) => {
+      var _a;
+      const msg = evt.data;
+      if ((msg == null ? void 0 : msg.type) !== "results" || typeof msg.id !== "number") return;
+      const entry = this.pending.get(msg.id);
+      if (!entry) return;
+      this.pending.delete(msg.id);
+      entry.resolve((_a = msg.results) != null ? _a : []);
+    };
+    this.worker.onerror = () => this.failPending(new Error("content index worker error"));
+  }
+  /** Returns null when Workers/Blob URLs aren't available in this environment. */
+  static create(app) {
+    try {
+      const url = URL.createObjectURL(new Blob([WORKER_SOURCE], { type: "text/javascript" }));
+      const worker = new Worker(url);
+      return new _WorkerIndex(app, worker, url);
+    } catch (e) {
+      return null;
+    }
+  }
+  /**
+   * Stream every markdown file into the worker once, coalescing concurrent
+   * callers. Message ordering guarantees a search posted afterwards sees the
+   * complete index.
+   */
+  ensureBuilt() {
+    if (this.buildPromise) return this.buildPromise;
+    if (this.built) return Promise.resolve();
+    this.buildPromise = (async () => {
+      for (const file of this.app.vault.getMarkdownFiles()) {
+        try {
+          const content = await this.app.vault.cachedRead(file);
+          this.worker.postMessage({ type: "set", path: file.path, content });
+        } catch (e) {
+        }
+      }
+      this.built = true;
+    })().finally(() => {
+      this.buildPromise = null;
+    });
+    return this.buildPromise;
+  }
+  async search(tokens, limit, excluded) {
+    await this.ensureBuilt();
+    return new Promise((resolve, reject) => {
+      const id = this.nextId++;
+      this.pending.set(id, { resolve, reject });
+      try {
+        this.worker.postMessage({ type: "search", id, tokens, limit, excluded });
+      } catch (err) {
+        this.pending.delete(id);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    });
+  }
+  async updateFile(file) {
+    if (file.extension !== "md") return;
+    if (this.buildPromise) await this.buildPromise;
+    if (!this.built) return;
+    try {
+      const content = await this.app.vault.cachedRead(file);
+      this.worker.postMessage({ type: "set", path: file.path, content });
+    } catch (e) {
+      this.worker.postMessage({ type: "remove", path: file.path });
+    }
+  }
+  removeFile(path) {
+    if (!this.built && !this.buildPromise) return;
+    this.worker.postMessage({ type: "remove", path });
+  }
+  invalidate() {
+    this.built = false;
+    this.worker.postMessage({ type: "clear" });
+  }
+  dispose() {
+    this.failPending(new Error("content index worker disposed"));
+    this.worker.terminate();
+    URL.revokeObjectURL(this.blobUrl);
+  }
+  failPending(error) {
+    for (const entry of this.pending.values()) entry.reject(error);
+    this.pending.clear();
+  }
+};
+
 // src/search/ContentSearcher.ts
 var ContentSearcher = class {
   constructor(app, ripgrepCommand = "rg") {
@@ -5759,9 +5903,23 @@ var ContentSearcher = class {
     this.index = /* @__PURE__ */ new Map();
     this.indexBuilt = false;
     this.buildPromise = null;
+    // undefined = not tried yet; null = unavailable or died → in-process fallback.
+    this.workerIndex = void 0;
     this.ripgrep = new RipgrepSearcher(app, ripgrepCommand);
     this.canvas = new CanvasSearcher(app);
     this.bases = new BaseSearcher(app);
+  }
+  getWorkerIndex() {
+    if (this.workerIndex === void 0) {
+      this.workerIndex = WorkerIndex.create(this.app);
+    }
+    return this.workerIndex;
+  }
+  /** Permanently drop a failed worker and use the in-process index instead. */
+  retireWorker() {
+    var _a;
+    (_a = this.workerIndex) == null ? void 0 : _a.dispose();
+    this.workerIndex = null;
   }
   setRipgrepCommand(command) {
     this.ripgrep = new RipgrepSearcher(this.app, command);
@@ -5794,6 +5952,28 @@ var ContentSearcher = class {
     return this.mergeResults(vaultResults, extras, limit);
   }
   async searchVaultIndex(tokens, limit, excluded) {
+    const worker = this.getWorkerIndex();
+    if (worker) {
+      try {
+        const rows = await worker.search(tokens, limit, excluded);
+        const results2 = [];
+        for (const row of rows) {
+          const file = this.app.vault.getAbstractFileByPath(row.path);
+          if (!(file instanceof import_obsidian11.TFile)) continue;
+          results2.push({
+            file,
+            line: row.line,
+            snippet: row.snippet,
+            score: row.score,
+            engine: "vault"
+          });
+        }
+        return results2;
+      } catch (err) {
+        console.warn("[VaultSpotlight] content index worker failed, falling back in-process", err);
+        this.retireWorker();
+      }
+    }
     await this.ensureIndex();
     const results = [];
     for (const file of this.app.vault.getMarkdownFiles()) {
@@ -5831,6 +6011,8 @@ var ContentSearcher = class {
   }
   /** Full reset — use when the ripgrep command or global config changes. */
   invalidate() {
+    var _a;
+    (_a = this.workerIndex) == null ? void 0 : _a.invalidate();
     this.index.clear();
     this.indexBuilt = false;
     this.buildPromise = null;
@@ -5838,6 +6020,9 @@ var ContentSearcher = class {
   /** Incremental: re-read a single changed/created file into the index. */
   async updateFile(file) {
     if (file.extension !== "md") return;
+    if (this.workerIndex) {
+      await this.workerIndex.updateFile(file);
+    }
     if (this.buildPromise) await this.buildPromise;
     if (!this.indexBuilt) return;
     try {
@@ -5849,7 +6034,15 @@ var ContentSearcher = class {
   }
   /** Incremental: drop a deleted file from the index. */
   removeFile(path) {
+    var _a;
+    (_a = this.workerIndex) == null ? void 0 : _a.removeFile(path);
     this.index.delete(path);
+  }
+  /** Release the worker when the plugin unloads. */
+  dispose() {
+    var _a;
+    (_a = this.workerIndex) == null ? void 0 : _a.dispose();
+    this.workerIndex = null;
   }
   ensureIndex() {
     if (this.buildPromise) return this.buildPromise;
@@ -5875,7 +6068,7 @@ var MAX_FRECENCY_ENTRIES = 500;
 function isSpotlightMode(value) {
   return typeof value === "string" && MODE_ORDER.includes(value);
 }
-var VaultSpotlightPlugin = class extends import_obsidian11.Plugin {
+var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
@@ -5951,12 +6144,12 @@ var VaultSpotlightPlugin = class extends import_obsidian11.Plugin {
     this.app.workspace.onLayoutReady(() => {
       this.registerEvent(
         this.app.vault.on("modify", (file) => {
-          if (file instanceof import_obsidian11.TFile) void this.contentSearcher.updateFile(file);
+          if (file instanceof import_obsidian12.TFile) void this.contentSearcher.updateFile(file);
         })
       );
       this.registerEvent(
         this.app.vault.on("create", (file) => {
-          if (file instanceof import_obsidian11.TFile) void this.contentSearcher.updateFile(file);
+          if (file instanceof import_obsidian12.TFile) void this.contentSearcher.updateFile(file);
         })
       );
       this.registerEvent(
@@ -5968,7 +6161,7 @@ var VaultSpotlightPlugin = class extends import_obsidian11.Plugin {
       this.registerEvent(
         this.app.vault.on("rename", (file, oldPath) => {
           this.contentSearcher.removeFile(oldPath);
-          if (file instanceof import_obsidian11.TFile) void this.contentSearcher.updateFile(file);
+          if (file instanceof import_obsidian12.TFile) void this.contentSearcher.updateFile(file);
           this.renamePath(oldPath, file.path);
         })
       );
@@ -5987,9 +6180,10 @@ var VaultSpotlightPlugin = class extends import_obsidian11.Plugin {
     this.addSettingTab(new VaultSpotlightSettingTab(this.app, this));
   }
   onunload() {
-    var _a;
+    var _a, _b;
     (_a = this.activeSpotlight) == null ? void 0 : _a.close();
     this.activeSpotlight = null;
+    (_b = this.contentSearcher) == null ? void 0 : _b.dispose();
     const globals = globalThis;
     if (globals.vaultSpotlight) delete globals.vaultSpotlight;
     this.flushSave();
@@ -6078,8 +6272,8 @@ var VaultSpotlightPlugin = class extends import_obsidian11.Plugin {
     const active = this.app.workspace.getActiveFile();
     const path = previousFilePath(this.settings.recentPaths, (_a = active == null ? void 0 : active.path) != null ? _a : "");
     const file = path ? this.app.vault.getAbstractFileByPath(path) : null;
-    if (!(file instanceof import_obsidian11.TFile)) {
-      new import_obsidian11.Notice("Vault Spotlight: no previous file yet.");
+    if (!(file instanceof import_obsidian12.TFile)) {
+      new import_obsidian12.Notice("Vault Spotlight: no previous file yet.");
       return;
     }
     await this.app.workspace.getLeaf(false).openFile(file);

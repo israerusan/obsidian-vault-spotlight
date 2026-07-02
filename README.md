@@ -24,7 +24,7 @@ Vault Spotlight is a fast command center for large vaults: type a few letters to
 
 ## Pro features ($8 one-time)
 
-- **Content search** — prefix with `>` to search inside note bodies; multi-word queries require every word on the matching line.
+- **Content search** — prefix with `>` to search inside note bodies; multi-word queries require every word on the matching line. Without ripgrep, the built-in index runs in a background web worker, so typing stays smooth even on very large vaults.
 - **Ripgrep acceleration** — use `rg` when available for faster full-vault content search, with safe fallback to the built-in vault index. Common install locations (winget, scoop, chocolatey, Homebrew, VS Code's bundled rg) are auto-detected when `rg` isn't on your PATH.
 - **Heading jump** — search headings across the vault (`^` prefix) and open directly at the matching section; scope with `file#heading` and filter depth with `level:1-2`.
 - **Live preview pane** — show rendered Markdown beside results and auto-scroll to the matched heading or passage.
