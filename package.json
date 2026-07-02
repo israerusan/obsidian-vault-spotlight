@@ -1,7 +1,7 @@
 {
 	"name": "obsidian-vault-spotlight",
-	"version": "2.3.0",
-	"description": "Spotlight-style vault launcher for Obsidian",
+	"version": "2.4.0",
+	"description": "Spotlight-style vault launcher for Obsidian: fuzzy file search, commands, headings, ripgrep-fast content search, Canvas and Bases support, search profiles, and batch actions",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
