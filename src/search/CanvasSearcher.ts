@@ -35,7 +35,8 @@ export class CanvasSearcher {
 					file,
 					line,
 					snippet: text.slice(0, 160),
-					score: 90 - line,
+					// Slightly below markdown matches, floored so it never goes negative.
+					score: Math.max(1, 90 - Math.floor(line / 10)),
 					engine: "canvas",
 				});
 			}

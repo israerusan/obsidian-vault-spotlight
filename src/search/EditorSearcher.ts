@@ -59,10 +59,13 @@ export class EditorSearcher {
 			let score = 1;
 			let matchIndices: number[] = [];
 			if (q.length > 0) {
-				const match = fuzzyMatch(q, title) ?? (file ? fuzzyMatch(q, file.path) : null);
+				const titleMatch = fuzzyMatch(q, title);
+				const match = titleMatch ?? (file ? fuzzyMatch(q, file.path) : null);
 				if (!match) return;
 				score = match.score;
-				matchIndices = fuzzyMatch(q, title) ? match.indices : [];
+				// Path-only matches get no indices — they'd point into the path,
+				// not the rendered title.
+				matchIndices = titleMatch ? match.indices : [];
 			}
 
 			const extras = leaf as unknown as { activeTime?: number; pinned?: boolean };

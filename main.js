@@ -2270,7 +2270,7 @@ __export(main_exports, {
   default: () => VaultSpotlightPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian7 = require("obsidian");
+var import_obsidian8 = require("obsidian");
 
 // src/settings.ts
 var import_obsidian = require("obsidian");
@@ -2536,7 +2536,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
     };
     proSearch(
       "Ripgrep command",
-      "Faster content search when ripgrep (rg) is installed. Leave as rg if it's on your PATH.",
+      "Faster content search when ripgrep (rg) is installed. Leave as rg \u2014 common install locations (winget, scoop, chocolatey, Homebrew, VS Code's bundled rg) are auto-detected when it isn't on your PATH.",
       (setting) => setting.addText(
         (text) => text.setPlaceholder("rg").setValue(this.plugin.settings.ripgrepCommand).onChange((value) => {
           this.plugin.settings.ripgrepCommand = value.trim() || "rg";
@@ -2664,97 +2664,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
 // src/spotlight/SpotlightModal.ts
 var import_obsidian6 = require("obsidian");
 
-// src/core/advancedQuery.mjs
-function parseAdvancedQuery(raw) {
-  const tokens = tokenizeAdvanced(raw);
-  const out = {
-    textTokens: [],
-    phrases: [],
-    exclusions: [],
-    folderIncludes: [],
-    pathTerms: [],
-    nameTerms: [],
-    tags: [],
-    properties: [],
-    extFilters: [],
-    isStarred: false,
-    isBookmarked: false,
-    modifiedDays: null,
-    createdDays: null
-  };
-  for (const token of tokens) {
-    const value = token.value.trim();
-    if (!value) continue;
-    if (token.quoted) {
-      out.phrases.push(value.toLowerCase());
-      continue;
-    }
-    const lower = value.toLowerCase();
-    if (lower.startsWith("-") && lower.length > 1) out.exclusions.push(lower.slice(1));
-    else if (lower.startsWith("in:") && lower.length > 3) out.folderIncludes.push(lower.slice(3));
-    else if (lower.startsWith("path:") && lower.length > 5) out.pathTerms.push(lower.slice(5));
-    else if (lower.startsWith("name:") && lower.length > 5) out.nameTerms.push(lower.slice(5));
-    else if (lower.startsWith("tag:") && lower.length > 4) out.tags.push(lower.slice(4).replace(/^#/, ""));
-    else if (lower.startsWith("#") && lower.length > 1) out.tags.push(lower.slice(1));
-    else if (lower.startsWith("prop:") && lower.length > 5) addProperty(out, lower.slice(5));
-    else if (lower.startsWith("@") && lower.length > 1) addProperty(out, lower.slice(1));
-    else if (lower.startsWith("ext:") && lower.length > 4) out.extFilters.push(lower.slice(4).replace(/^\./, ""));
-    else if (lower.startsWith("modified:") && lower.length > 9) out.modifiedDays = parseDays(lower.slice(9));
-    else if (lower.startsWith("created:") && lower.length > 8) out.createdDays = parseDays(lower.slice(8));
-    else if (lower === "is:starred") out.isStarred = true;
-    else if (lower === "is:bookmarked") out.isBookmarked = true;
-    else if (lower !== "#" && lower !== "@" && lower !== "ext:") out.textTokens.push(lower);
-  }
-  return out;
-}
-function addProperty(out, raw) {
-  const eq = raw.indexOf("=");
-  const colon = raw.indexOf(":");
-  const sep = eq === -1 ? colon : colon === -1 ? eq : Math.min(eq, colon);
-  if (sep === -1) out.properties.push({ key: raw, value: null });
-  else {
-    const key = raw.slice(0, sep);
-    if (key) out.properties.push({ key, value: raw.slice(sep + 1) || null });
-  }
-}
-function parseDays(raw) {
-  const n = Number(String(raw).replace(/d$/, ""));
-  return Number.isFinite(n) && n >= 0 ? n : null;
-}
-function tokenizeAdvanced(raw) {
-  const tokens = [];
-  const input = String(raw || "").trim();
-  let current = "";
-  let quoted = false;
-  let inlineQuote = false;
-  for (let i = 0; i < input.length; i++) {
-    const ch = input[i];
-    if (ch === '"') {
-      if (inlineQuote) {
-        inlineQuote = false;
-      } else if (quoted) {
-        tokens.push({ value: current, quoted: true });
-        current = "";
-        quoted = false;
-      } else if (current.length > 0) {
-        inlineQuote = true;
-      } else {
-        quoted = true;
-      }
-      continue;
-    }
-    if (!quoted && !inlineQuote && /\s/.test(ch)) {
-      if (current.trim()) tokens.push({ value: current.trim(), quoted: false });
-      current = "";
-      continue;
-    }
-    current += ch;
-  }
-  if (current.trim()) tokens.push({ value: current.trim(), quoted });
-  return tokens;
-}
-
-// src/search/fuzzy.ts
+// src/core/fuzzy.mjs
 function fuzzyMatch(query, text) {
   var _a;
   if (!query) {
@@ -2822,6 +2732,100 @@ function boundedLevenshtein(a, b, max) {
   }
   return prev[bl];
 }
+
+// src/core/advancedQuery.mjs
+function parseAdvancedQuery(raw) {
+  const tokens = tokenizeAdvanced(raw);
+  const out = {
+    textTokens: [],
+    phrases: [],
+    exclusions: [],
+    folderIncludes: [],
+    pathTerms: [],
+    nameTerms: [],
+    tags: [],
+    properties: [],
+    extFilters: [],
+    isStarred: false,
+    isBookmarked: false,
+    modifiedDays: null,
+    createdDays: null
+  };
+  for (const token of tokens) {
+    const value = token.value.trim();
+    if (!value) continue;
+    if (token.quoted) {
+      out.phrases.push(value.toLowerCase());
+      continue;
+    }
+    const lower = value.toLowerCase();
+    if (lower.startsWith("-") && lower.length > 1) out.exclusions.push(lower.slice(1));
+    else if (lower.startsWith("in:") && lower.length > 3) out.folderIncludes.push(lower.slice(3));
+    else if (lower.startsWith("path:") && lower.length > 5) out.pathTerms.push(lower.slice(5));
+    else if (lower.startsWith("name:") && lower.length > 5) out.nameTerms.push(lower.slice(5));
+    else if (lower.startsWith("tag:") && lower.length > 4) out.tags.push(lower.slice(4).replace(/^#/, ""));
+    else if (lower.startsWith("#") && lower.length > 1) out.tags.push(lower.slice(1));
+    else if (lower.startsWith("prop:") && lower.length > 5) addProperty(out, lower.slice(5));
+    else if (lower.startsWith("@") && lower.length > 1) addProperty(out, lower.slice(1));
+    else if (lower.startsWith("ext:") && lower.length > 4) out.extFilters.push(lower.slice(4).replace(/^\./, ""));
+    else if (lower.startsWith("modified:") && lower.length > 9) out.modifiedDays = parseDays(lower.slice(9));
+    else if (lower.startsWith("created:") && lower.length > 8) out.createdDays = parseDays(lower.slice(8));
+    else if (lower === "is:starred") out.isStarred = true;
+    else if (lower === "is:bookmarked") out.isBookmarked = true;
+    else if (lower !== "#" && lower !== "@" && lower !== "ext:") out.textTokens.push(lower);
+  }
+  return out;
+}
+function addProperty(out, raw) {
+  const eq = raw.indexOf("=");
+  const colon = raw.indexOf(":");
+  const sep = eq === -1 ? colon : colon === -1 ? eq : Math.min(eq, colon);
+  if (sep === -1) out.properties.push({ key: raw, value: null });
+  else {
+    const key = raw.slice(0, sep);
+    if (key) out.properties.push({ key, value: raw.slice(sep + 1) || null });
+  }
+}
+function parseDays(raw) {
+  const n = Number(String(raw).replace(/d$/, ""));
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.max(1, n);
+}
+function tokenizeAdvanced(raw) {
+  const tokens = [];
+  const input = String(raw || "").trim();
+  let current = "";
+  let quoted = false;
+  let inlineQuote = false;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (ch === '"') {
+      if (inlineQuote) {
+        inlineQuote = false;
+      } else if (quoted) {
+        tokens.push({ value: current, quoted: true });
+        current = "";
+        quoted = false;
+      } else if (current.length > 0) {
+        inlineQuote = true;
+      } else {
+        quoted = true;
+      }
+      continue;
+    }
+    if (!quoted && !inlineQuote && /\s/.test(ch)) {
+      if (current.trim()) tokens.push({ value: current.trim(), quoted: false });
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) tokens.push({ value: current.trim(), quoted });
+  return tokens;
+}
+
+// src/search/fuzzy.ts
+var fuzzyMatch2 = fuzzyMatch;
 function renderHighlightedText(parent, text, indices) {
   parent.empty();
   if (indices.length === 0) {
@@ -2846,30 +2850,15 @@ function renderHighlightedText(parent, text, indices) {
   }
 }
 function tokenizeQuery(raw) {
-  const trimmed = raw.trim();
-  const contentMode = trimmed.startsWith(">");
-  const body = contentMode ? trimmed.slice(1).trim() : trimmed;
-  return { ...parseAdvancedQuery(body), contentMode };
+  return parseAdvancedQuery(raw.trim());
 }
 
 // src/search/metadata.ts
 var import_obsidian2 = require("obsidian");
+
+// src/core/metadataCore.mjs
 function normalizeTag(tag) {
   return tag.replace(/^#/, "").toLowerCase();
-}
-function collectFileTags(cache) {
-  var _a, _b, _c, _d;
-  const tags = /* @__PURE__ */ new Set();
-  for (const tag of (_a = (0, import_obsidian2.getAllTags)(cache)) != null ? _a : []) {
-    tags.add(normalizeTag(tag));
-  }
-  for (const entry of (_b = cache.tags) != null ? _b : []) {
-    tags.add(normalizeTag(entry.tag));
-  }
-  for (const tag of (_d = (0, import_obsidian2.parseFrontMatterTags)((_c = cache.frontmatter) != null ? _c : null)) != null ? _d : []) {
-    tags.add(normalizeTag(tag));
-  }
-  return tags;
 }
 function fileMatchesTags(fileTags, queryTags) {
   for (const queryTag of queryTags) {
@@ -2905,6 +2894,26 @@ function frontmatterValueMatches(raw, queryValue) {
     return JSON.stringify(raw).toLowerCase().includes(queryValue);
   }
   return String(raw).toLowerCase().includes(queryValue);
+}
+
+// src/search/metadata.ts
+var normalizeTag2 = normalizeTag;
+var fileMatchesTags2 = fileMatchesTags;
+var getFrontmatterValue2 = getFrontmatterValue;
+var frontmatterValueMatches2 = frontmatterValueMatches;
+function collectFileTags(cache) {
+  var _a, _b, _c, _d;
+  const tags = /* @__PURE__ */ new Set();
+  for (const tag of (_a = (0, import_obsidian2.getAllTags)(cache)) != null ? _a : []) {
+    tags.add(normalizeTag2(tag));
+  }
+  for (const entry of (_b = cache.tags) != null ? _b : []) {
+    tags.add(normalizeTag2(entry.tag));
+  }
+  for (const tag of (_d = (0, import_obsidian2.parseFrontMatterTags)((_c = cache.frontmatter) != null ? _c : null)) != null ? _d : []) {
+    tags.add(normalizeTag2(tag));
+  }
+  return tags;
 }
 
 // src/search/vaultFiles.ts
@@ -2999,13 +3008,13 @@ var FileSearcher = class {
       } else {
         let matched = true;
         for (const token of [...(_c = options.nameTerms) != null ? _c : [], ...options.textTokens]) {
-          const basenameMatch = fuzzyMatch(token, basename);
+          const basenameMatch = fuzzyMatch2(token, basename);
           if (basenameMatch) {
             score += basenameMatch.score;
             indices.push(...basenameMatch.indices);
             continue;
           }
-          const pathMatch = fuzzyMatch(token, file.path);
+          const pathMatch = fuzzyMatch2(token, file.path);
           if (!pathMatch && !this.aliasMatches(file, token)) {
             matched = false;
             break;
@@ -3068,13 +3077,13 @@ var FileSearcher = class {
     if (!cache) return options.tags.length === 0 && options.properties.length === 0;
     if (options.tags.length > 0) {
       const tags = collectFileTags(cache);
-      if (!fileMatchesTags(tags, options.tags)) return false;
+      if (!fileMatchesTags2(tags, options.tags)) return false;
     }
     for (const prop of options.properties) {
       const fm = cache.frontmatter;
       if (!fm) return false;
-      const raw = getFrontmatterValue(fm, prop.key);
-      if (!frontmatterValueMatches(raw, prop.value)) return false;
+      const raw = getFrontmatterValue2(fm, prop.key);
+      if (!frontmatterValueMatches2(raw, prop.value)) return false;
     }
     return true;
   }
@@ -3092,7 +3101,7 @@ var FileSearcher = class {
       if (!lowerPath.includes(term.toLowerCase())) return false;
     }
     for (const term of (_c = options.nameTerms) != null ? _c : []) {
-      if (!lowerName.includes(term.toLowerCase()) && !fuzzyMatch(term, lowerName)) return false;
+      if (!lowerName.includes(term.toLowerCase()) && !fuzzyMatch2(term, lowerName)) return false;
     }
     for (const phrase of (_d = options.phrases) != null ? _d : []) {
       if (!lowerPath.includes(phrase.toLowerCase())) return false;
@@ -3135,7 +3144,7 @@ var HeadingSearcher = class {
     const results = [];
     for (const file of this.app.vault.getMarkdownFiles()) {
       if (isPathExcluded(file.path, excluded)) continue;
-      if (fileQuery && !fuzzyMatch(fileQuery, file.basename) && !fuzzyMatch(fileQuery, file.path)) continue;
+      if (fileQuery && !fuzzyMatch2(fileQuery, file.basename) && !fuzzyMatch2(fileQuery, file.path)) continue;
       const cache = this.app.metadataCache.getFileCache(file);
       const headings = cache == null ? void 0 : cache.headings;
       if (!headings || headings.length === 0) continue;
@@ -3145,7 +3154,7 @@ var HeadingSearcher = class {
         let score = 1;
         let matchIndices = [];
         if (q.length > 0) {
-          const match = fuzzyMatch(q, h.heading);
+          const match = fuzzyMatch2(q, h.heading);
           if (!match) continue;
           score = match.score;
           matchIndices = match.indices;
@@ -3197,7 +3206,7 @@ var CommandSearcher = class {
         results.push({ id: cmd.id, name: cmd.name, score: 1, matchIndices: [] });
         continue;
       }
-      const match = fuzzyMatch(q, cmd.name);
+      const match = fuzzyMatch2(q, cmd.name);
       if (!match) continue;
       results.push({ id: cmd.id, name: cmd.name, score: match.score, matchIndices: match.indices });
     }
@@ -3262,7 +3271,7 @@ var SymbolSearcher = class {
       let score = 1;
       let matchIndices = [];
       if (q.length > 0) {
-        const match = fuzzyMatch(q, symbol.text);
+        const match = fuzzyMatch2(q, symbol.text);
         if (!match) continue;
         score = match.score;
         matchIndices = match.indices;
@@ -3307,7 +3316,7 @@ var EditorSearcher = class {
     const activeLeaf = this.app.workspace.getMostRecentLeaf();
     const rows = [];
     this.app.workspace.iterateAllLeaves((leaf) => {
-      var _a, _b, _c, _d;
+      var _a, _b, _c;
       const viewType = (_c = (_b = (_a = leaf.view) == null ? void 0 : _a.getViewType) == null ? void 0 : _b.call(_a)) != null ? _c : "";
       if (IGNORED_VIEW_TYPES.has(viewType)) return;
       const file = this.leafFile(leaf);
@@ -3316,10 +3325,11 @@ var EditorSearcher = class {
       let score = 1;
       let matchIndices = [];
       if (q.length > 0) {
-        const match = (_d = fuzzyMatch(q, title)) != null ? _d : file ? fuzzyMatch(q, file.path) : null;
+        const titleMatch = fuzzyMatch2(q, title);
+        const match = titleMatch != null ? titleMatch : file ? fuzzyMatch2(q, file.path) : null;
         if (!match) return;
         score = match.score;
-        matchIndices = fuzzyMatch(q, title) ? match.indices : [];
+        matchIndices = titleMatch ? match.indices : [];
       }
       const extras = leaf;
       rows.push({
@@ -3441,87 +3451,29 @@ var PromptModal = class extends import_obsidian5.Modal {
 };
 
 // src/core/frontmatterTags.mjs
-function normalizeTag2(raw) {
+function normalizeTag3(raw) {
   return String(raw != null ? raw : "").replace(/^#/, "").trim().replace(/\s+/g, "-");
 }
-function applyTagToMarkdown(markdown, rawTag) {
-  const tag = normalizeTag2(rawTag);
+function tagsValueToList(value) {
+  if (value === null || value === void 0) return [];
+  const entries = Array.isArray(value) ? value : String(value).split(",");
+  return entries.map((entry) => normalizeTag3(entry)).filter(Boolean);
+}
+function addTagToTags(value, rawTag) {
+  const tag = normalizeTag3(rawTag);
+  const list = tagsValueToList(value);
+  if (!tag || list.some((entry) => entry.toLowerCase() === tag.toLowerCase())) return list;
+  return [...list, tag];
+}
+function removeTagFromTags(value, rawTag) {
+  const tag = normalizeTag3(rawTag).toLowerCase();
+  const list = tagsValueToList(value).filter((entry) => entry.toLowerCase() !== tag);
+  return list.length > 0 ? list : null;
+}
+function removeInlineTag(markdown, rawTag) {
+  const tag = normalizeTag3(rawTag);
   if (!tag) return markdown;
-  const content = String(markdown != null ? markdown : "");
-  if (frontmatterHasTag(content, tag) || new RegExp(`(^|\\s)#${escapeRegExp(tag)}(\\s|$)`).test(content)) return content;
-  const fm = parseFrontmatter(content);
-  if (!fm) return `---
-tags: [${tag}]
----
-${content}`;
-  const lines = fm.body.split("\n");
-  const tagLineIndex = lines.findIndex((line) => /^tags\s*:/.test(line.trim()));
-  if (tagLineIndex === -1) lines.push(`tags: [${tag}]`);
-  else lines[tagLineIndex] = appendTagToLine(lines[tagLineIndex], tag);
-  return `---
-${lines.join("\n")}
----${fm.rest}`;
-}
-function removeTagFromMarkdown(markdown, rawTag) {
-  const tag = normalizeTag2(rawTag);
-  if (!tag) return markdown;
-  let content = String(markdown != null ? markdown : "");
-  const fm = parseFrontmatter(content);
-  if (fm) {
-    const lines = fm.body.split("\n").map((line) => /^tags\s*:/.test(line.trim()) ? removeTagFromLine(line, tag) : line).filter((line) => line.trim() !== "tags: []");
-    content = `---
-${lines.join("\n")}
----${fm.rest}`;
-  }
-  return content.replace(new RegExp(`(^|\\s)#${escapeRegExp(tag)}(?=\\s|$)`, "g"), (m, lead) => lead || "").replace(/[ \t]+\n/g, "\n");
-}
-function setFrontmatterProperty(markdown, key, value) {
-  const cleanKey = String(key || "").trim();
-  if (!cleanKey) return markdown;
-  const line = `${cleanKey}: ${formatYamlScalar(value)}`;
-  const content = String(markdown != null ? markdown : "");
-  const fm = parseFrontmatter(content);
-  if (!fm) return `---
-${line}
----
-${content}`;
-  const lines = fm.body.split("\n");
-  const idx = lines.findIndex((existing) => existing.split(":", 1)[0].trim().toLowerCase() === cleanKey.toLowerCase());
-  if (idx === -1) lines.push(line);
-  else lines[idx] = line;
-  return `---
-${lines.join("\n")}
----${fm.rest}`;
-}
-function frontmatterHasTag(content, tag) {
-  const fm = parseFrontmatter(content);
-  if (!fm) return false;
-  const line = fm.body.split("\n").find((entry) => /^tags\s*:/.test(entry.trim()));
-  return line ? tagValuesFromLine(line).includes(tag) : false;
-}
-function parseFrontmatter(content) {
-  if (!content.startsWith("---\n")) return null;
-  const close = content.indexOf("\n---", 4);
-  if (close === -1) return null;
-  return { body: content.slice(4, close), rest: content.slice(close + 4) };
-}
-function appendTagToLine(line, tag) {
-  const tags = tagValuesFromLine(line);
-  if (!tags.includes(tag)) tags.push(tag);
-  return `${line.split(":", 1)[0]}: [${tags.join(", ")}]`;
-}
-function removeTagFromLine(line, tag) {
-  const tags = tagValuesFromLine(line).filter((entry) => entry !== tag);
-  return `${line.split(":", 1)[0]}: [${tags.join(", ")}]`;
-}
-function tagValuesFromLine(line) {
-  const raw = line.split(":").slice(1).join(":").trim();
-  const inner = raw.startsWith("[") && raw.endsWith("]") ? raw.slice(1, -1) : raw;
-  return inner.split(/[ ,]+/).map((s) => s.replace(/^#/, "").trim()).filter(Boolean);
-}
-function formatYamlScalar(value) {
-  const text = String(value != null ? value : "").trim();
-  return /^[A-Za-z0-9_./@-]+$/.test(text) ? text : JSON.stringify(text);
+  return String(markdown != null ? markdown : "").replace(new RegExp(`(^|\\s)#${escapeRegExp(tag)}(?=\\s|$)`, "g"), (m, lead) => lead || "").replace(/[ \t]+\n/g, "\n");
 }
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -3612,6 +3564,7 @@ var SpotlightModal = class extends import_obsidian6.Modal {
     this.selectedIndex = 0;
     this.checkedPaths = /* @__PURE__ */ new Set();
     this.searchTimer = null;
+    this.loadingTimer = null;
     this.searchGeneration = 0;
     this.isLoading = false;
     this.metadataRef = null;
@@ -3698,7 +3651,7 @@ var SpotlightModal = class extends import_obsidian6.Modal {
     this.inputEl.addEventListener("keydown", (evt) => {
       if (!this.hasNavigated || evt.ctrlKey || evt.metaKey || evt.altKey) return;
       const prefixes = this.plugin.settings.modePrefixes;
-      const drillMode = evt.key === prefixes.symbols ? "symbols" : evt.key === prefixes.links ? "links" : null;
+      const drillMode = evt.key === prefixes.symbols[0] ? "symbols" : evt.key === prefixes.links[0] ? "links" : null;
       if (!drillMode) return;
       const item = this.items[this.selectedIndex];
       const file = item ? this.itemFile(item) : null;
@@ -3723,6 +3676,10 @@ var SpotlightModal = class extends import_obsidian6.Modal {
       window.clearTimeout(this.searchTimer);
       this.searchTimer = null;
     }
+    if (this.loadingTimer !== null) {
+      window.clearTimeout(this.loadingTimer);
+      this.loadingTimer = null;
+    }
     if (this.previewTimer !== null) {
       window.clearTimeout(this.previewTimer);
       this.previewTimer = null;
@@ -3746,25 +3703,33 @@ var SpotlightModal = class extends import_obsidian6.Modal {
     if (!this.plugin.settings.isPro) return null;
     return activeProfile(this.plugin.settings.searchProfiles, this.plugin.settings.activeProfileId);
   }
+  /**
+   * Trigger cheatsheet: every mode prefix stays visible in the modal so the
+   * mode system is discoverable without reading docs (the top complaint
+   * about comparable switcher plugins).
+   */
   updateHint() {
     const isPro = this.plugin.settings.isPro;
     const prefixes = this.plugin.settings.modePrefixes;
     this.hintEl.empty();
-    this.hintEl.createEl("span", { text: "Try " });
-    this.hintEl.createEl("code", { text: "#journal" });
-    this.hintEl.appendText(" \xB7 ");
-    this.hintEl.createEl("code", { text: "Tab" });
-    this.hintEl.appendText(" mode \xB7 ");
-    this.hintEl.createEl("code", { text: `${prefixes.commands} command` });
-    this.hintEl.appendText(" \xB7 ");
-    this.hintEl.createEl("code", { text: `${prefixes.symbols} outline` });
-    this.hintEl.appendText(" \xB7 ");
-    this.hintEl.createEl("code", { text: `${prefixes.editors} tabs` });
-    this.hintEl.appendText(" \xB7 ");
-    this.hintEl.createEl("code", { text: `${prefixes.folders} folders` });
+    const hints = [
+      ["#journal", "tag"],
+      [prefixes.commands, "commands"],
+      [prefixes.symbols, "outline"],
+      [prefixes.editors, "tabs"],
+      [prefixes.folders, "folders"],
+      [prefixes.content, "content"],
+      [prefixes.headings, "headings"],
+      [prefixes.links, "links"],
+      ["Tab", "cycle"],
+      [this.plugin.settings.escapeChar, "literal"]
+    ];
+    hints.forEach(([code, label], index) => {
+      if (index > 0) this.hintEl.appendText(" \xB7 ");
+      this.hintEl.createEl("code", { text: code });
+      this.hintEl.appendText(` ${label}`);
+    });
     if (isPro) {
-      this.hintEl.appendText(" \xB7 ");
-      this.hintEl.createEl("code", { text: `${prefixes.content} phrase` });
       this.hintEl.appendText(" \xB7 ");
       this.hintEl.createEl("code", { text: "Ctrl+D" });
       this.hintEl.appendText(" star");
@@ -3820,7 +3785,11 @@ var SpotlightModal = class extends import_obsidian6.Modal {
     const includeCanvas = (_b = profile == null ? void 0 : profile.includeCanvas) != null ? _b : this.plugin.settings.includeCanvas;
     const includePdf = (_c = profile == null ? void 0 : profile.includePdf) != null ? _c : this.plugin.settings.includePdf;
     this.isLoading = true;
-    this.renderLoading();
+    if (this.loadingTimer !== null) window.clearTimeout(this.loadingTimer);
+    this.loadingTimer = window.setTimeout(() => {
+      this.loadingTimer = null;
+      if (this.isLoading) this.renderLoading();
+    }, 100);
     if (this.actionContext) {
       const actions = this.availableActions(this.actionContext);
       const query = trimmed.toLowerCase();
@@ -3891,7 +3860,6 @@ var SpotlightModal = class extends import_obsidian6.Modal {
         }
         const contentResults = await this.plugin.contentSearcher.search(text, {
           useRipgrep: isPro,
-          ripgrepCommand: this.plugin.settings.ripgrepCommand,
           includeCanvas: isPro && includeCanvas,
           excludeFolders
         });
@@ -4092,7 +4060,7 @@ var SpotlightModal = class extends import_obsidian6.Modal {
     if (item.kind === "editor") return item.file;
     return null;
   }
-  fileToResult(file, score) {
+  fileToResult(file, score, bookmarkedPaths) {
     return {
       kind: "file",
       file,
@@ -4102,7 +4070,7 @@ var SpotlightModal = class extends import_obsidian6.Modal {
       fileKind: getVaultFileKind(file),
       isRecent: this.plugin.settings.recentPaths.includes(file.path),
       isStarred: this.plugin.isStarred(file.path),
-      isBookmarked: this.plugin.getBookmarkedPaths().includes(file.path)
+      isBookmarked: bookmarkedPaths.has(file.path)
     };
   }
   linkModeItems(query) {
@@ -4110,11 +4078,32 @@ var SpotlightModal = class extends import_obsidian6.Modal {
     const active = this.app.workspace.getActiveFile();
     const files = this.app.vault.getMarkdownFiles();
     const q = query.replace(/^(<-|->|\[\[)\s?/, "").trim().toLowerCase();
-    const target = (_a = this.drillFile) != null ? _a : q ? files.find((file) => file.basename.toLowerCase().includes(q) || file.path.toLowerCase().includes(q)) : active;
+    const target = (_a = this.drillFile) != null ? _a : q ? this.bestFileMatch(files, q) : active;
     if (!target) return [];
     const resolvedLinks = (_b = this.app.metadataCache.resolvedLinks) != null ? _b : {};
-    const linked = query.trim().startsWith("->") ? findOutlinks(files, resolvedLinks, target.path) : findBacklinks(files, resolvedLinks, target.path);
-    return linked.slice(0, 60).map((file, index) => this.fileToResult(file, 1e3 - index));
+    let linked = query.trim().startsWith("->") ? findOutlinks(files, resolvedLinks, target.path) : findBacklinks(files, resolvedLinks, target.path);
+    if (this.drillFile && q) {
+      linked = linked.filter((file) => {
+        var _a2;
+        return (_a2 = fuzzyMatch2(q, file.basename)) != null ? _a2 : fuzzyMatch2(q, file.path);
+      });
+    }
+    const bookmarkedPaths = new Set(this.plugin.getBookmarkedPaths());
+    return linked.slice(0, 60).map((file, index) => this.fileToResult(file, 1e3 - index, bookmarkedPaths));
+  }
+  /** The highest-scoring fuzzy match for `q`, not just the first substring hit. */
+  bestFileMatch(files, q) {
+    var _a;
+    let best = null;
+    let bestScore = -1;
+    for (const file of files) {
+      const match = (_a = fuzzyMatch2(q, file.basename)) != null ? _a : fuzzyMatch2(q, file.path);
+      if (match && match.score > bestScore) {
+        best = file;
+        bestScore = match.score;
+      }
+    }
+    return best;
   }
   folderItems(query) {
     const q = query.trim();
@@ -4125,8 +4114,8 @@ var SpotlightModal = class extends import_obsidian6.Modal {
         rows.push({ folder: abstract, score: 1, indices: [] });
         continue;
       }
-      const nameMatch = fuzzyMatch(q, abstract.name);
-      const match = nameMatch != null ? nameMatch : fuzzyMatch(q, abstract.path);
+      const nameMatch = fuzzyMatch2(q, abstract.name);
+      const match = nameMatch != null ? nameMatch : fuzzyMatch2(q, abstract.path);
       if (!match) continue;
       rows.push({
         folder: abstract,
@@ -4151,6 +4140,10 @@ var SpotlightModal = class extends import_obsidian6.Modal {
     }
   }
   renderEmptyState(icon, title, desc) {
+    if (this.loadingTimer !== null) {
+      window.clearTimeout(this.loadingTimer);
+      this.loadingTimer = null;
+    }
     this.resultsEl.empty();
     this.resultsEl.removeClass("vault-spotlight-loading");
     const empty = this.resultsEl.createDiv({ cls: "vault-spotlight-empty" });
@@ -4160,6 +4153,10 @@ var SpotlightModal = class extends import_obsidian6.Modal {
     empty.createDiv({ cls: "vault-spotlight-empty-desc", text: desc });
   }
   renderResults() {
+    if (this.loadingTimer !== null) {
+      window.clearTimeout(this.loadingTimer);
+      this.loadingTimer = null;
+    }
     this.resultsEl.empty();
     this.resultsEl.removeClass("vault-spotlight-loading");
     if (this.items.length === 0) {
@@ -4884,9 +4881,18 @@ ${markdown}
       initial: "spotlight",
       cta: "Add tag",
       onSubmit: (raw) => {
-        const cleaned = raw.replace(/^#/, "").trim().replace(/\s+/g, "-");
+        const cleaned = normalizeTag3(raw);
         if (!cleaned) return;
-        void Promise.all(files.map((file) => this.modifyMarkdownFile(file, (content) => applyTagToMarkdown(content, cleaned)))).then(() => new import_obsidian6.Notice(`Vault Spotlight: tag added to ${files.length} note${files.length === 1 ? "" : "s"}.`));
+        void Promise.all(
+          files.map(async (file) => {
+            const cache = this.app.metadataCache.getFileCache(file);
+            const existing = cache ? collectFileTags(cache) : /* @__PURE__ */ new Set();
+            if (existing.has(cleaned.toLowerCase())) return;
+            await this.app.fileManager.processFrontMatter(file, (fm) => {
+              fm.tags = addTagToTags(fm.tags, cleaned);
+            });
+          })
+        ).then(() => new import_obsidian6.Notice(`Vault Spotlight: tag added to ${files.length} note${files.length === 1 ? "" : "s"}.`));
       }
     }).open();
   }
@@ -4901,9 +4907,18 @@ ${markdown}
       initial: "spotlight",
       cta: "Remove tag",
       onSubmit: (raw) => {
-        const cleaned = raw.replace(/^#/, "").trim().replace(/\s+/g, "-");
+        const cleaned = normalizeTag3(raw);
         if (!cleaned) return;
-        void Promise.all(files.map((file) => this.modifyMarkdownFile(file, (content) => removeTagFromMarkdown(content, cleaned)))).then(() => new import_obsidian6.Notice(`Vault Spotlight: tag removed from ${files.length} note${files.length === 1 ? "" : "s"}.`));
+        void Promise.all(
+          files.map(async (file) => {
+            await this.app.fileManager.processFrontMatter(file, (fm) => {
+              const next = removeTagFromTags(fm.tags, cleaned);
+              if (next === null) delete fm.tags;
+              else fm.tags = next;
+            });
+            await this.app.vault.process(file, (content) => removeInlineTag(content, cleaned));
+          })
+        ).then(() => new import_obsidian6.Notice(`Vault Spotlight: tag removed from ${files.length} note${files.length === 1 ? "" : "s"}.`));
       }
     }).open();
   }
@@ -4925,7 +4940,16 @@ ${markdown}
         }
         const key = raw.slice(0, sep).trim();
         const value = raw.slice(sep + 1).trim();
-        void Promise.all(files.map((file) => this.modifyMarkdownFile(file, (content) => setFrontmatterProperty(content, key, value)))).then(() => new import_obsidian6.Notice(`Vault Spotlight: property set on ${files.length} note${files.length === 1 ? "" : "s"}.`));
+        if (!key) return;
+        void Promise.all(
+          files.map(
+            (file) => this.app.fileManager.processFrontMatter(file, (fm) => {
+              var _a;
+              const existingKey = (_a = Object.keys(fm).find((k) => k.toLowerCase() === key.toLowerCase())) != null ? _a : key;
+              fm[existingKey] = value;
+            })
+          )
+        ).then(() => new import_obsidian6.Notice(`Vault Spotlight: property set on ${files.length} note${files.length === 1 ? "" : "s"}.`));
       }
     }).open();
   }
@@ -4992,11 +5016,6 @@ ${markdown}
   }
   filesForBatch() {
     return this.resultItemsForBatch().map((item) => this.itemFile(item)).filter((file) => !!file);
-  }
-  async modifyMarkdownFile(file, updater) {
-    const content = await this.app.vault.cachedRead(file);
-    const next = updater(content);
-    if (next !== content) await this.app.vault.modify(file, next);
   }
   async createExportNote(filename, note, message) {
     const dir = "Vault Spotlight Exports";
@@ -5339,37 +5358,89 @@ function base64ToBytes(value) {
 }
 
 // src/search/RipgrepSearcher.ts
-function getExecFileAsync() {
+var import_obsidian7 = require("obsidian");
+function getChildProcess() {
   try {
     const req = globalThis.require;
     if (!req) return null;
-    const childProcess = req("child_process");
-    const util = req("util");
-    return util.promisify(childProcess.execFile);
+    return req("child_process");
   } catch (e) {
     return null;
   }
+}
+function getEnv(name) {
+  var _a, _b;
+  try {
+    const proc = globalThis.process;
+    return (_b = (_a = proc == null ? void 0 : proc.env) == null ? void 0 : _a[name]) != null ? _b : "";
+  } catch (e) {
+    return "";
+  }
+}
+function candidateCommands(configured) {
+  const candidates = [configured];
+  if (configured !== "rg") candidates.push("rg");
+  const home = getEnv("USERPROFILE") || getEnv("HOME");
+  const localAppData = getEnv("LOCALAPPDATA");
+  if (localAppData) {
+    candidates.push(
+      `${localAppData}\\Microsoft\\WinGet\\Links\\rg.exe`,
+      `${localAppData}\\Programs\\Microsoft VS Code\\resources\\app\\node_modules\\@vscode\\ripgrep\\bin\\rg.exe`
+    );
+  }
+  if (home) {
+    candidates.push(`${home}\\scoop\\shims\\rg.exe`);
+  }
+  candidates.push(
+    "C:\\ProgramData\\chocolatey\\bin\\rg.exe",
+    "/opt/homebrew/bin/rg",
+    "/usr/local/bin/rg",
+    "/usr/bin/rg"
+  );
+  return [...new Set(candidates)];
 }
 var RipgrepSearcher = class {
   constructor(app, command) {
     this.app = app;
     this.command = command;
-    this.available = null;
+    /** The command that answered `--version`, or null when none did. */
+    this.resolvedCommand = void 0;
+    this.currentChild = null;
   }
   async isAvailable() {
-    if (this.available !== null) return this.available;
-    const execFileAsync = getExecFileAsync();
-    if (!execFileAsync) {
-      this.available = false;
-      return false;
+    return await this.resolveCommand() !== null;
+  }
+  /**
+   * Try the configured command, then well-known install locations, caching
+   * whichever answers `--version` first.
+   */
+  async resolveCommand() {
+    if (this.resolvedCommand !== void 0) return this.resolvedCommand;
+    const cp = getChildProcess();
+    if (!cp) {
+      this.resolvedCommand = null;
+      return null;
     }
-    try {
-      await execFileAsync(this.command, ["--version"], { timeout: 3e3, windowsHide: true });
-      this.available = true;
-    } catch (e) {
-      this.available = false;
+    for (const candidate of candidateCommands(this.command)) {
+      const ok = await new Promise((resolve) => {
+        try {
+          cp.execFile(
+            candidate,
+            ["--version"],
+            { timeout: 3e3, windowsHide: true },
+            (error) => resolve(!error)
+          );
+        } catch (e) {
+          resolve(false);
+        }
+      });
+      if (ok) {
+        this.resolvedCommand = candidate;
+        return candidate;
+      }
     }
-    return this.available;
+    this.resolvedCommand = null;
+    return null;
   }
   /**
    * Returns matches, or `null` when ripgrep could not run at all (missing
@@ -5379,11 +5450,12 @@ var RipgrepSearcher = class {
    * and NOT build a full-vault index just to also find nothing.
    */
   async search(query, options) {
-    var _a, _b;
+    var _a;
     const tokens = query.trim().split(/\s+/).filter(Boolean);
     if (tokens.length === 0) return [];
-    const execFileAsync = getExecFileAsync();
-    if (!execFileAsync || !await this.isAvailable()) return null;
+    const cp = getChildProcess();
+    const command = await this.resolveCommand();
+    if (!cp || !command) return null;
     const vaultPath = this.app.vault.adapter.basePath;
     if (!vaultPath) return null;
     const anchor = tokens.reduce((a, b) => b.length >= a.length ? b : a);
@@ -5399,6 +5471,11 @@ var RipgrepSearcher = class {
       "--color",
       "never",
       "--no-follow",
+      // Vaults are often git repos with a .gitignore; without this rg
+      // silently skips ignored notes that Obsidian itself still indexes,
+      // so Pro users would see FEWER results than the free fallback.
+      // (Hidden/dot folders stay skipped — matching Obsidian's indexing.)
+      "--no-ignore",
       "--max-count",
       // A multi-word query needs more anchor hits per file to survive the
       // all-tokens filter below; a single word keeps the tight cap.
@@ -5418,31 +5495,54 @@ var RipgrepSearcher = class {
     }
     args.push("--", anchor, ".");
     const needAll = multi ? tokens.map((t) => t.toLowerCase()) : null;
-    try {
-      const { stdout } = await execFileAsync(this.command, args, {
-        cwd: vaultPath,
-        timeout: 8e3,
-        maxBuffer: 16 * 1024 * 1024,
-        windowsHide: true
-      });
-      return this.parseOutput(String(stdout), options.limit, needAll);
-    } catch (error) {
-      const err = error;
-      if (err.code === 1) {
-        return this.parseOutput(String((_b = err.stdout) != null ? _b : ""), options.limit, needAll);
+    if (this.currentChild) {
+      this.currentChild.superseded = true;
+      try {
+        this.currentChild.kill();
+      } catch (e) {
       }
-      return null;
+      this.currentChild = null;
     }
+    return new Promise((resolve) => {
+      let child;
+      try {
+        child = cp.execFile(
+          command,
+          args,
+          {
+            cwd: vaultPath,
+            timeout: 8e3,
+            maxBuffer: 16 * 1024 * 1024,
+            windowsHide: true
+          },
+          (error, stdout) => {
+            if (this.currentChild === child) this.currentChild = null;
+            if (!error) {
+              resolve(this.parseOutput(String(stdout != null ? stdout : ""), options.limit, needAll));
+              return;
+            }
+            if (error.code === 1) {
+              resolve(this.parseOutput(String(stdout != null ? stdout : ""), options.limit, needAll));
+              return;
+            }
+            if (child.superseded) {
+              resolve([]);
+              return;
+            }
+            resolve(null);
+          }
+        );
+      } catch (e) {
+        resolve(null);
+        return;
+      }
+      this.currentChild = child;
+    });
   }
   parseOutput(output, limit, needAll) {
-    var _a, _b;
-    const fileMap2 = this.app.vault.getFiles().reduce((map, file) => {
-      map.set(file.path, file);
-      map.set(file.path.replace(/\\/g, "/"), file);
-      return map;
-    }, /* @__PURE__ */ new Map());
     const results = [];
     const lines = output.split("\n").filter(Boolean);
+    let suffixMap = null;
     for (const line of lines) {
       const match = line.match(/^(.+?):(\d+):(.*)$/);
       if (!match) continue;
@@ -5452,22 +5552,38 @@ var RipgrepSearcher = class {
         if (!needAll.every((tk) => low.includes(tk))) continue;
       }
       const normalized = rawPath.replace(/\\/g, "/").replace(/^\.\//, "");
-      const file = (_b = (_a = fileMap2.get(normalized)) != null ? _a : fileMap2.get(normalized.split("/").slice(-3).join("/"))) != null ? _b : this.findFileBySuffix(fileMap2, normalized);
+      let file;
+      const direct = this.app.vault.getAbstractFileByPath(normalized);
+      if (direct instanceof import_obsidian7.TFile) {
+        file = direct;
+      } else {
+        suffixMap != null ? suffixMap : suffixMap = this.buildSuffixMap();
+        file = this.findFileBySuffix(suffixMap, normalized);
+      }
       if (!file) continue;
       results.push({
         file,
         line: Number(lineNum),
         snippet: snippet.trim().slice(0, 160),
-        score: 120 - Number(lineNum),
+        // Gentle early-line preference with a floor — never negative, so a
+        // late-line match can't sort below everything regardless of relevance.
+        score: Math.max(1, 120 - Math.floor(Number(lineNum) / 10)),
         engine: "ripgrep"
       });
     }
     return results.sort((a, b) => b.score - a.score).slice(0, limit);
   }
+  buildSuffixMap() {
+    const map = /* @__PURE__ */ new Map();
+    for (const file of this.app.vault.getFiles()) {
+      map.set(file.path, file);
+    }
+    return map;
+  }
   findFileBySuffix(fileMap2, path) {
     const suffix = path.replace(/\\/g, "/");
     for (const [key, file] of fileMap2.entries()) {
-      if (key.endsWith(suffix) || suffix.endsWith(key)) return file;
+      if (key === suffix || key.endsWith(`/${suffix}`) || suffix.endsWith(`/${key}`)) return file;
     }
     return void 0;
   }
@@ -5499,7 +5615,8 @@ var CanvasSearcher = class {
           file,
           line,
           snippet: text.slice(0, 160),
-          score: 90 - line,
+          // Slightly below markdown matches, floored so it never goes negative.
+          score: Math.max(1, 90 - Math.floor(line / 10)),
           engine: "canvas"
         });
       }
@@ -5533,6 +5650,7 @@ var ContentSearcher = class {
   constructor(app, ripgrepCommand = "rg") {
     this.app = app;
     this.index = /* @__PURE__ */ new Map();
+    this.indexBuilt = false;
     this.buildPromise = null;
     this.ripgrep = new RipgrepSearcher(app, ripgrepCommand);
     this.canvas = new CanvasSearcher(app);
@@ -5574,7 +5692,9 @@ var ContentSearcher = class {
           file,
           line: i + 1,
           snippet: line.trim().slice(0, 160),
-          score: 100 - i,
+          // Gentle early-line preference with a floor — a match on line
+          // 5000 must still rank, never go negative.
+          score: Math.max(1, 100 - Math.floor(i / 10)),
           engine: "vault"
         });
       }
@@ -5596,12 +5716,14 @@ var ContentSearcher = class {
   /** Full reset — use when the ripgrep command or global config changes. */
   invalidate() {
     this.index.clear();
+    this.indexBuilt = false;
     this.buildPromise = null;
   }
   /** Incremental: re-read a single changed/created file into the index. */
   async updateFile(file) {
     if (file.extension !== "md") return;
-    if (this.index.size === 0) return;
+    if (this.buildPromise) await this.buildPromise;
+    if (!this.indexBuilt) return;
     try {
       const content = await this.app.vault.cachedRead(file);
       this.index.set(file.path, content.split("\n"));
@@ -5614,8 +5736,8 @@ var ContentSearcher = class {
     this.index.delete(path);
   }
   ensureIndex() {
-    if (this.index.size > 0) return Promise.resolve();
     if (this.buildPromise) return this.buildPromise;
+    if (this.indexBuilt) return Promise.resolve();
     this.buildPromise = (async () => {
       for (const file of this.app.vault.getMarkdownFiles()) {
         try {
@@ -5624,20 +5746,20 @@ var ContentSearcher = class {
         } catch (e) {
         }
       }
-    })();
-    try {
-      return this.buildPromise;
-    } finally {
-      void this.buildPromise.finally(() => {
-        this.buildPromise = null;
-      });
-    }
+      this.indexBuilt = true;
+    })().finally(() => {
+      this.buildPromise = null;
+    });
+    return this.buildPromise;
   }
 };
 
 // src/main.ts
 var MAX_FRECENCY_ENTRIES = 500;
-var VaultSpotlightPlugin = class extends import_obsidian7.Plugin {
+function isSpotlightMode(value) {
+  return typeof value === "string" && MODE_ORDER.includes(value);
+}
+var VaultSpotlightPlugin = class extends import_obsidian8.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
@@ -5652,7 +5774,6 @@ var VaultSpotlightPlugin = class extends import_obsidian7.Plugin {
     this.addCommand({
       id: "open-spotlight",
       name: "Open spotlight",
-      hotkeys: [{ modifiers: ["Mod", "Shift"], key: "o" }],
       callback: () => this.openSpotlight()
     });
     this.addCommand({
@@ -5711,41 +5832,82 @@ var VaultSpotlightPlugin = class extends import_obsidian7.Plugin {
         this.registerCustomSearchCommand(search);
       }
     }
-    this.registerEvent(
-      this.app.vault.on("modify", (file) => {
-        if (file instanceof import_obsidian7.TFile) void this.contentSearcher.updateFile(file);
-      })
-    );
-    this.registerEvent(
-      this.app.vault.on("create", (file) => {
-        if (file instanceof import_obsidian7.TFile) void this.contentSearcher.updateFile(file);
-      })
-    );
-    this.registerEvent(
-      this.app.vault.on("delete", (file) => {
-        this.contentSearcher.removeFile(file.path);
-        this.untrackPath(file.path);
-      })
-    );
-    this.registerEvent(
-      this.app.vault.on("rename", (file, oldPath) => {
-        this.contentSearcher.removeFile(oldPath);
-        if (file instanceof import_obsidian7.TFile) void this.contentSearcher.updateFile(file);
-        this.renamePath(oldPath, file.path);
-      })
-    );
-    this.registerEvent(
-      this.app.workspace.on("file-open", (file) => {
-        if (file) this.trackRecent(file.path);
-      })
-    );
+    this.app.workspace.onLayoutReady(() => {
+      this.registerEvent(
+        this.app.vault.on("modify", (file) => {
+          if (file instanceof import_obsidian8.TFile) void this.contentSearcher.updateFile(file);
+        })
+      );
+      this.registerEvent(
+        this.app.vault.on("create", (file) => {
+          if (file instanceof import_obsidian8.TFile) void this.contentSearcher.updateFile(file);
+        })
+      );
+      this.registerEvent(
+        this.app.vault.on("delete", (file) => {
+          this.contentSearcher.removeFile(file.path);
+          this.untrackPath(file.path);
+        })
+      );
+      this.registerEvent(
+        this.app.vault.on("rename", (file, oldPath) => {
+          this.contentSearcher.removeFile(oldPath);
+          if (file instanceof import_obsidian8.TFile) void this.contentSearcher.updateFile(file);
+          this.renamePath(oldPath, file.path);
+        })
+      );
+      this.registerEvent(
+        this.app.workspace.on("file-open", (file) => {
+          if (file) this.trackRecent(file.path);
+        })
+      );
+    });
+    this.registerObsidianProtocolHandler("vault-spotlight", (params) => {
+      var _a;
+      const mode = isSpotlightMode(params.mode) ? params.mode : "files";
+      this.openSpotlight((_a = params.query) != null ? _a : "", mode);
+    });
+    globalThis.vaultSpotlight = this.createApi();
     this.addSettingTab(new VaultSpotlightSettingTab(this.app, this));
   }
   onunload() {
     var _a;
     (_a = this.activeSpotlight) == null ? void 0 : _a.close();
     this.activeSpotlight = null;
+    const globals = globalThis;
+    if (globals.vaultSpotlight) delete globals.vaultSpotlight;
     this.flushSave();
+  }
+  /**
+   * Public API exposed as `globalThis.vaultSpotlight` so other plugins,
+   * scripts, and external tools can build on Spotlight.
+   */
+  createApi() {
+    return {
+      open: (query = "", mode = "files") => {
+        this.openSpotlight(query, isSpotlightMode(mode) ? mode : "files");
+      },
+      search: async (query) => {
+        if (!this.settings.isPro) {
+          console.warn("[VaultSpotlight] api.search requires a Pro license.");
+          return [];
+        }
+        const results = await this.contentSearcher.search(query, {
+          useRipgrep: true,
+          includeCanvas: this.settings.includeCanvas,
+          excludeFolders: this.settings.excludeFolders
+        });
+        return results.map((r) => ({
+          path: r.file.path,
+          basename: r.file.basename,
+          line: r.line,
+          snippet: r.snippet,
+          score: r.score,
+          engine: r.engine
+        }));
+      },
+      isProActive: () => this.settings.isPro
+    };
   }
   openSpotlight(initialQuery = "", initialMode = "files") {
     var _a;
@@ -5799,8 +5961,8 @@ var VaultSpotlightPlugin = class extends import_obsidian7.Plugin {
     const active = this.app.workspace.getActiveFile();
     const path = previousFilePath(this.settings.recentPaths, (_a = active == null ? void 0 : active.path) != null ? _a : "");
     const file = path ? this.app.vault.getAbstractFileByPath(path) : null;
-    if (!(file instanceof import_obsidian7.TFile)) {
-      new import_obsidian7.Notice("Vault Spotlight: no previous file yet.");
+    if (!(file instanceof import_obsidian8.TFile)) {
+      new import_obsidian8.Notice("Vault Spotlight: no previous file yet.");
       return;
     }
     await this.app.workspace.getLeaf(false).openFile(file);
@@ -5916,7 +6078,6 @@ var VaultSpotlightPlugin = class extends import_obsidian7.Plugin {
     const result = LicenseManager.verify(this.settings.licenseKey);
     const isPro = result.valid;
     const licenseEmail = (_a = result.email) != null ? _a : "";
-    if (this.settings.isPro === isPro && this.settings.licenseEmail === licenseEmail) return false;
     this.settings.isPro = isPro;
     this.settings.licenseEmail = licenseEmail;
     await this.saveSettings();

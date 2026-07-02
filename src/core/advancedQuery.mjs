@@ -54,7 +54,10 @@ function addProperty(out, raw) {
 
 function parseDays(raw) {
 	const n = Number(String(raw).replace(/d$/, ""));
-	return Number.isFinite(n) && n >= 0 ? n : null;
+	if (!Number.isFinite(n) || n < 0) return null;
+	// "modified:0" reads as "today"; a literal 0-day window would exclude
+	// everything, so clamp to the last 24 hours.
+	return Math.max(1, n);
 }
 
 function tokenizeAdvanced(raw) {

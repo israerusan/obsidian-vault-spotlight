@@ -1,65 +1,47 @@
 import assert from "assert";
+import { fuzzyMatch } from "../src/core/fuzzy.mjs";
+import { parseAdvancedQuery } from "../src/core/advancedQuery.mjs";
 
-function fuzzyMatch(query, text) {
-	if (!query) return { score: 0, indices: [] };
-	const q = query.toLowerCase();
-	const t = text.toLowerCase();
-	let qi = 0;
-	let lastMatch = -1;
-	let score = 0;
-	const indices = [];
-	for (let ti = 0; ti < t.length && qi < q.length; ti++) {
-		if (t[ti] === q[qi]) {
-			indices.push(ti);
-			if (lastMatch === ti - 1) score += 8;
-			else if (ti === 0 || /[\s\-_/]/.test(text[ti - 1] ?? "")) score += 12;
-			else score += 4;
-			lastMatch = ti;
-			qi++;
-		}
-	}
-	if (qi < q.length) return null;
-	if (t.includes(q)) score += 20;
-	if (t.startsWith(q)) score += 30;
-	return { score, indices };
-}
-
-function tokenizeQuery(raw) {
-	const trimmed = raw.trim();
-	const contentMode = trimmed.startsWith(">");
-	const body = contentMode ? trimmed.slice(1).trim() : trimmed;
-	const parts = body.split(/\s+/).filter(Boolean);
-	const textTokens = [];
-	const tags = [];
-	const properties = [];
-	const extFilters = [];
-	for (const part of parts) {
-		if (part.startsWith("ext:") && part.length > 4) extFilters.push(part.slice(4).toLowerCase());
-		else if (part.startsWith("#") && part.length > 1) tags.push(part.slice(1).toLowerCase());
-		else if (part.startsWith("@")) {
-			const prop = part.slice(1);
-			const colon = prop.indexOf(":");
-			if (colon === -1) properties.push({ key: prop.toLowerCase(), value: null });
-			else properties.push({ key: prop.slice(0, colon).toLowerCase(), value: prop.slice(colon + 1).toLowerCase() || null });
-		} else textTokens.push(part.toLowerCase());
-	}
-	return { textTokens, tags, properties, extFilters, contentMode };
-}
+// --- fuzzyMatch (the real implementation, not a copy) ---
 
 const meeting = fuzzyMatch("meet", "Team Meeting Notes");
 assert.ok(meeting && meeting.score > 0, "fuzzy match should score meeting");
+assert.ok(meeting.indices.length === 4, "fuzzy match should return highlight indices");
 
 const miss = fuzzyMatch("zzqx", "Team Meeting Notes");
 assert.equal(miss, null, "non-matching query returns null");
 
-const parsed = tokenizeQuery("> project #work @status:done");
-assert.equal(parsed.contentMode, true);
+const prefix = fuzzyMatch("team", "Team Meeting Notes");
+const scattered = fuzzyMatch("tmn", "Team Meeting Notes");
+assert.ok(prefix && scattered && prefix.score > scattered.score, "prefix match should outrank scattered match");
+
+const typo = fuzzyMatch("dashbaord", "Dashboard");
+assert.ok(typo && typo.score > 0, "typo within tolerance should still match");
+assert.deepEqual(typo.indices, [], "typo fallback returns no highlight indices");
+
+const shortTypo = fuzzyMatch("dax", "dog");
+assert.equal(shortTypo, null, "short queries get no typo tolerance");
+
+const empty = fuzzyMatch("", "Anything");
+assert.deepEqual(empty, { score: 0, indices: [] }, "empty query matches everything at score 0");
+
+// --- parseAdvancedQuery (backs tokenizeQuery; prefixes are stripped upstream) ---
+
+const parsed = parseAdvancedQuery("project #work @status:done");
 assert.deepEqual(parsed.textTokens, ["project"]);
 assert.deepEqual(parsed.tags, ["work"]);
 assert.deepEqual(parsed.properties, [{ key: "status", value: "done" }]);
 
-const extParsed = tokenizeQuery("report ext:pdf ext:canvas");
+const extParsed = parseAdvancedQuery("report ext:pdf ext:canvas");
 assert.deepEqual(extParsed.extFilters, ["pdf", "canvas"]);
 assert.deepEqual(extParsed.textTokens, ["report"]);
+
+// A ">" that survives prefix-stripping (e.g. escaped "!>foo") is literal text,
+// not a mode trigger — the double-strip bug regression test.
+const literal = parseAdvancedQuery(">foo");
+assert.deepEqual(literal.textTokens, [">foo"], "leading > must not be re-stripped");
+
+const zeroDays = parseAdvancedQuery("notes modified:0");
+assert.equal(zeroDays.modifiedDays, 1, "modified:0 should clamp to the last 24 hours, not exclude everything");
 
 console.log("search tests passed");

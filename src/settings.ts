@@ -255,7 +255,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 
 		proSearch(
 			"Ripgrep command",
-			"Faster content search when ripgrep (rg) is installed. Leave as rg if it's on your PATH.",
+			"Faster content search when ripgrep (rg) is installed. Leave as rg — common install locations (winget, scoop, chocolatey, Homebrew, VS Code's bundled rg) are auto-detected when it isn't on your PATH.",
 			(setting) =>
 				setting.addText((text) =>
 					text

@@ -1,31 +1,66 @@
 import { App, TFile } from "obsidian";
 import type { ContentSearchResult } from "./ContentSearcher";
 
-interface ExecResult {
-	stdout: string;
-	stderr: string;
+interface ChildProcessModule {
+	execFile: (
+		command: string,
+		args: string[],
+		options: Record<string, unknown>,
+		callback: (error: (Error & { code?: number | string; killed?: boolean }) | null, stdout: string) => void
+	) => { kill: () => boolean };
 }
 
-type ExecFileFn = (
-	command: string,
-	args: string[],
-	options: Record<string, unknown>
-) => Promise<ExecResult>;
-
-function getExecFileAsync(): ExecFileFn | null {
+function getChildProcess(): ChildProcessModule | null {
 	try {
 		const req = (globalThis as { require?: (id: string) => unknown }).require;
 		if (!req) return null;
-		const childProcess = req("child_process") as { execFile: (...args: unknown[]) => void };
-		const util = req("util") as { promisify: (fn: unknown) => ExecFileFn };
-		return util.promisify(childProcess.execFile);
+		return req("child_process") as ChildProcessModule;
 	} catch {
 		return null;
 	}
 }
 
+function getEnv(name: string): string {
+	try {
+		const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
+		return proc?.env?.[name] ?? "";
+	} catch {
+		return "";
+	}
+}
+
+/**
+ * Places `rg` commonly lives when it isn't on PATH, tried in order after the
+ * configured command fails. VS Code bundles ripgrep, so many users have a
+ * working binary without knowing it.
+ */
+function candidateCommands(configured: string): string[] {
+	const candidates = [configured];
+	if (configured !== "rg") candidates.push("rg");
+	const home = getEnv("USERPROFILE") || getEnv("HOME");
+	const localAppData = getEnv("LOCALAPPDATA");
+	if (localAppData) {
+		candidates.push(
+			`${localAppData}\\Microsoft\\WinGet\\Links\\rg.exe`,
+			`${localAppData}\\Programs\\Microsoft VS Code\\resources\\app\\node_modules\\@vscode\\ripgrep\\bin\\rg.exe`
+		);
+	}
+	if (home) {
+		candidates.push(`${home}\\scoop\\shims\\rg.exe`);
+	}
+	candidates.push(
+		"C:\\ProgramData\\chocolatey\\bin\\rg.exe",
+		"/opt/homebrew/bin/rg",
+		"/usr/local/bin/rg",
+		"/usr/bin/rg"
+	);
+	return [...new Set(candidates)];
+}
+
 export class RipgrepSearcher {
-	private available: boolean | null = null;
+	/** The command that answered `--version`, or null when none did. */
+	private resolvedCommand: string | null | undefined = undefined;
+	private currentChild: { kill: () => boolean; superseded?: boolean } | null = null;
 
 	constructor(
 		private app: App,
@@ -33,19 +68,37 @@ export class RipgrepSearcher {
 	) {}
 
 	async isAvailable(): Promise<boolean> {
-		if (this.available !== null) return this.available;
-		const execFileAsync = getExecFileAsync();
-		if (!execFileAsync) {
-			this.available = false;
-			return false;
+		return (await this.resolveCommand()) !== null;
+	}
+
+	/**
+	 * Try the configured command, then well-known install locations, caching
+	 * whichever answers `--version` first.
+	 */
+	private async resolveCommand(): Promise<string | null> {
+		if (this.resolvedCommand !== undefined) return this.resolvedCommand;
+		const cp = getChildProcess();
+		if (!cp) {
+			this.resolvedCommand = null;
+			return null;
 		}
-		try {
-			await execFileAsync(this.command, ["--version"], { timeout: 3000, windowsHide: true });
-			this.available = true;
-		} catch {
-			this.available = false;
+		for (const candidate of candidateCommands(this.command)) {
+			const ok = await new Promise<boolean>((resolve) => {
+				try {
+					cp.execFile(candidate, ["--version"], { timeout: 3000, windowsHide: true }, (error) =>
+						resolve(!error)
+					);
+				} catch {
+					resolve(false);
+				}
+			});
+			if (ok) {
+				this.resolvedCommand = candidate;
+				return candidate;
+			}
 		}
-		return this.available;
+		this.resolvedCommand = null;
+		return null;
 	}
 
 	/**
@@ -61,8 +114,9 @@ export class RipgrepSearcher {
 	): Promise<ContentSearchResult[] | null> {
 		const tokens = query.trim().split(/\s+/).filter(Boolean);
 		if (tokens.length === 0) return [];
-		const execFileAsync = getExecFileAsync();
-		if (!execFileAsync || !(await this.isAvailable())) return null;
+		const cp = getChildProcess();
+		const command = await this.resolveCommand();
+		if (!cp || !command) return null;
 
 		const vaultPath = (this.app.vault.adapter as { basePath?: string }).basePath;
 		if (!vaultPath) return null;
@@ -84,6 +138,11 @@ export class RipgrepSearcher {
 			"--color",
 			"never",
 			"--no-follow",
+			// Vaults are often git repos with a .gitignore; without this rg
+			// silently skips ignored notes that Obsidian itself still indexes,
+			// so Pro users would see FEWER results than the free fallback.
+			// (Hidden/dot folders stay skipped — matching Obsidian's indexing.)
+			"--no-ignore",
 			"--max-count",
 			// A multi-word query needs more anchor hits per file to survive the
 			// all-tokens filter below; a single word keeps the tight cap.
@@ -110,24 +169,59 @@ export class RipgrepSearcher {
 
 		const needAll = multi ? tokens.map((t) => t.toLowerCase()) : null;
 
-		try {
-			const { stdout } = await execFileAsync(this.command, args, {
-				cwd: vaultPath,
-				timeout: 8000,
-				maxBuffer: 16 * 1024 * 1024,
-				windowsHide: true,
-			});
-			return this.parseOutput(String(stdout), options.limit, needAll);
-		} catch (error: unknown) {
-			const err = error as { stdout?: string; code?: number };
-			// Exit code 1 = ran successfully, no matches. Trust it (return the
-			// parsed — usually empty — result, NOT null).
-			if (err.code === 1) {
-				return this.parseOutput(String(err.stdout ?? ""), options.limit, needAll);
+		// A new keystroke supersedes any still-running search: kill it so fast
+		// typing can't stack up concurrent full-vault rg processes.
+		if (this.currentChild) {
+			this.currentChild.superseded = true;
+			try {
+				this.currentChild.kill();
+			} catch {
+				// Process may have already exited.
 			}
-			// Any other exit code means rg genuinely failed → fall back.
-			return null;
+			this.currentChild = null;
 		}
+
+		return new Promise<ContentSearchResult[] | null>((resolve) => {
+			let child: { kill: () => boolean; superseded?: boolean };
+			try {
+				child = cp.execFile(
+					command,
+					args,
+					{
+						cwd: vaultPath,
+						timeout: 8000,
+						maxBuffer: 16 * 1024 * 1024,
+						windowsHide: true,
+					},
+					(error, stdout) => {
+						if (this.currentChild === child) this.currentChild = null;
+						if (!error) {
+							resolve(this.parseOutput(String(stdout ?? ""), options.limit, needAll));
+							return;
+						}
+						// Exit code 1 = ran successfully, no matches. Trust it (return
+						// the parsed — usually empty — result, NOT null).
+						if (error.code === 1) {
+							resolve(this.parseOutput(String(stdout ?? ""), options.limit, needAll));
+							return;
+						}
+						// Killed because a newer search superseded this one: return
+						// empty (the caller's generation check discards it) rather
+						// than null, which would trigger a pointless index build.
+						if (child.superseded) {
+							resolve([]);
+							return;
+						}
+						// Any other failure (timeout, crash) → fall back.
+						resolve(null);
+					}
+				);
+			} catch {
+				resolve(null);
+				return;
+			}
+			this.currentChild = child;
+		});
 	}
 
 	private parseOutput(
@@ -135,14 +229,11 @@ export class RipgrepSearcher {
 		limit: number,
 		needAll: string[] | null
 	): ContentSearchResult[] {
-		const fileMap = this.app.vault.getFiles().reduce((map, file) => {
-			map.set(file.path, file);
-			map.set(file.path.replace(/\\/g, "/"), file);
-			return map;
-		}, new Map<string, TFile>());
-
 		const results: ContentSearchResult[] = [];
 		const lines = output.split("\n").filter(Boolean);
+		// Built lazily and only when a direct vault lookup misses (rare —
+		// rg emits vault-relative paths that normally map straight to TFile.path).
+		let suffixMap: Map<string, TFile> | null = null;
 
 		for (const line of lines) {
 			const match = line.match(/^(.+?):(\d+):(.*)$/);
@@ -158,10 +249,14 @@ export class RipgrepSearcher {
 			}
 
 			const normalized = rawPath.replace(/\\/g, "/").replace(/^\.\//, "");
-			const file =
-				fileMap.get(normalized) ??
-				fileMap.get(normalized.split("/").slice(-3).join("/")) ??
-				this.findFileBySuffix(fileMap, normalized);
+			let file: TFile | undefined;
+			const direct = this.app.vault.getAbstractFileByPath(normalized);
+			if (direct instanceof TFile) {
+				file = direct;
+			} else {
+				suffixMap ??= this.buildSuffixMap();
+				file = this.findFileBySuffix(suffixMap, normalized);
+			}
 
 			if (!file) continue;
 
@@ -169,7 +264,9 @@ export class RipgrepSearcher {
 				file,
 				line: Number(lineNum),
 				snippet: snippet.trim().slice(0, 160),
-				score: 120 - Number(lineNum),
+				// Gentle early-line preference with a floor — never negative, so a
+				// late-line match can't sort below everything regardless of relevance.
+				score: Math.max(1, 120 - Math.floor(Number(lineNum) / 10)),
 				engine: "ripgrep",
 			});
 		}
@@ -177,10 +274,20 @@ export class RipgrepSearcher {
 		return results.sort((a, b) => b.score - a.score).slice(0, limit);
 	}
 
+	private buildSuffixMap(): Map<string, TFile> {
+		const map = new Map<string, TFile>();
+		for (const file of this.app.vault.getFiles()) {
+			map.set(file.path, file);
+		}
+		return map;
+	}
+
 	private findFileBySuffix(fileMap: Map<string, TFile>, path: string): TFile | undefined {
 		const suffix = path.replace(/\\/g, "/");
 		for (const [key, file] of fileMap.entries()) {
-			if (key.endsWith(suffix) || suffix.endsWith(key)) return file;
+			// Require a path-separator boundary so "notes.md" can't claim a
+			// match that actually lives in "Bar/mynotes.md".
+			if (key === suffix || key.endsWith(`/${suffix}`) || suffix.endsWith(`/${key}`)) return file;
 		}
 		return undefined;
 	}

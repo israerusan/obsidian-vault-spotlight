@@ -13,7 +13,6 @@ export interface ContentSearchResult {
 
 export interface ContentSearchOptions {
 	useRipgrep: boolean;
-	ripgrepCommand: string;
 	includeCanvas: boolean;
 	excludeFolders?: string[];
 	limit?: number;
@@ -21,6 +20,7 @@ export interface ContentSearchOptions {
 
 export class ContentSearcher {
 	private index = new Map<string, string[]>();
+	private indexBuilt = false;
 	private buildPromise: Promise<void> | null = null;
 	private ripgrep: RipgrepSearcher;
 	private canvas: CanvasSearcher;
@@ -80,7 +80,9 @@ export class ContentSearcher {
 					file,
 					line: i + 1,
 					snippet: line.trim().slice(0, 160),
-					score: 100 - i,
+					// Gentle early-line preference with a floor — a match on line
+					// 5000 must still rank, never go negative.
+					score: Math.max(1, 100 - Math.floor(i / 10)),
 					engine: "vault",
 				});
 			}
@@ -111,15 +113,19 @@ export class ContentSearcher {
 	/** Full reset — use when the ripgrep command or global config changes. */
 	invalidate(): void {
 		this.index.clear();
+		this.indexBuilt = false;
 		this.buildPromise = null;
 	}
 
 	/** Incremental: re-read a single changed/created file into the index. */
 	async updateFile(file: TFile): Promise<void> {
 		if (file.extension !== "md") return;
+		// If a build is in flight, wait for it so this update lands on the final
+		// index instead of racing the builder over the same path.
+		if (this.buildPromise) await this.buildPromise;
 		// Only maintain incrementally once the index is populated; otherwise the
 		// next full build will read it anyway.
-		if (this.index.size === 0) return;
+		if (!this.indexBuilt) return;
 		try {
 			const content = await this.app.vault.cachedRead(file);
 			this.index.set(file.path, content.split("\n"));
@@ -134,10 +140,11 @@ export class ContentSearcher {
 	}
 
 	private ensureIndex(): Promise<void> {
-		if (this.index.size > 0) return Promise.resolve();
-		// Coalesce concurrent callers onto a single in-flight build so a second
-		// keystroke never races against a half-built (empty) index.
+		// The in-flight check MUST come before the built check: during a build
+		// the index is partially populated, so any "is it ready?" signal based
+		// on contents would hand a second keystroke a half-built index.
 		if (this.buildPromise) return this.buildPromise;
+		if (this.indexBuilt) return Promise.resolve();
 		this.buildPromise = (async () => {
 			for (const file of this.app.vault.getMarkdownFiles()) {
 				try {
@@ -148,13 +155,10 @@ export class ContentSearcher {
 					// than aborting the whole index.
 				}
 			}
-		})();
-		try {
-			return this.buildPromise;
-		} finally {
-			void this.buildPromise.finally(() => {
-				this.buildPromise = null;
-			});
-		}
+			this.indexBuilt = true;
+		})().finally(() => {
+			this.buildPromise = null;
+		});
+		return this.buildPromise;
 	}
 }

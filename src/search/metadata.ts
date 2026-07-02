@@ -1,8 +1,26 @@
 import { getAllTags, parseFrontMatterTags, type CachedMetadata } from "obsidian";
+import {
+	fileMatchesTags as coreFileMatchesTags,
+	frontmatterValueMatches as coreFrontmatterValueMatches,
+	getFrontmatterValue as coreGetFrontmatterValue,
+	normalizeTag as coreNormalizeTag,
+} from "../core/metadataCore.mjs";
 
-export function normalizeTag(tag: string): string {
-	return tag.replace(/^#/, "").toLowerCase();
-}
+// Pure matching logic lives in core/metadataCore.mjs so Node tests exercise
+// the real implementation; these wrappers only pin the TypeScript signatures.
+export const normalizeTag = coreNormalizeTag as (tag: string) => string;
+export const fileMatchesTags = coreFileMatchesTags as (
+	fileTags: Set<string>,
+	queryTags: string[]
+) => boolean;
+export const getFrontmatterValue = coreGetFrontmatterValue as (
+	frontmatter: Record<string, unknown>,
+	key: string
+) => unknown;
+export const frontmatterValueMatches = coreFrontmatterValueMatches as (
+	raw: unknown,
+	queryValue: string | null
+) => boolean;
 
 export function collectFileTags(cache: CachedMetadata): Set<string> {
 	const tags = new Set<string>();
@@ -20,53 +38,4 @@ export function collectFileTags(cache: CachedMetadata): Set<string> {
 	}
 
 	return tags;
-}
-
-export function fileMatchesTags(fileTags: Set<string>, queryTags: string[]): boolean {
-	for (const queryTag of queryTags) {
-		if (fileTags.has(queryTag)) continue;
-
-		const hasMatch = [...fileTags].some((tag) => {
-			if (tag === queryTag) return true;
-			if (tag.startsWith(`${queryTag}/`)) return true;
-			return tag.split("/").some((part) => part === queryTag || part.startsWith(queryTag));
-		});
-
-		if (!hasMatch) return false;
-	}
-
-	return true;
-}
-
-export function getFrontmatterValue(
-	frontmatter: Record<string, unknown>,
-	key: string
-): unknown {
-	if (Object.prototype.hasOwnProperty.call(frontmatter, key)) {
-		return frontmatter[key];
-	}
-
-	const lower = key.toLowerCase();
-	for (const entryKey of Object.keys(frontmatter)) {
-		if (entryKey.toLowerCase() === lower) {
-			return frontmatter[entryKey];
-		}
-	}
-
-	return undefined;
-}
-
-export function frontmatterValueMatches(raw: unknown, queryValue: string | null): boolean {
-	if (raw === undefined || raw === null) return false;
-	if (queryValue === null) return true;
-
-	if (Array.isArray(raw)) {
-		return raw.some((item) => String(item).toLowerCase().includes(queryValue));
-	}
-
-	if (typeof raw === "object") {
-		return JSON.stringify(raw).toLowerCase().includes(queryValue);
-	}
-
-	return String(raw).toLowerCase().includes(queryValue);
 }

@@ -19,13 +19,13 @@ Vault Spotlight is a fast command center for large vaults: type a few letters to
 - **Switch to last file** — a command that flips between your two most recent files, ready for a hotkey.
 - **Customizable triggers** — every mode prefix is configurable, and an escape character (`!`) searches trigger characters literally.
 - **Bookmarks in browse view** — core Bookmarks appear alongside recent files so important notes are available before typing.
-- **Keyboard-first navigation** — open with `Ctrl+Shift+O`, cycle modes with `Tab`, navigate with arrows, and open with Enter.
+- **Keyboard-first navigation** — open from the ribbon icon or bind a hotkey to *Open spotlight*, cycle modes with `Tab`, navigate with arrows, and open with Enter. A trigger cheatsheet inside the modal keeps every mode prefix discoverable.
 - **Accessible result list** — ARIA combobox/listbox attributes and visible modified-time labels keep the modal usable and readable.
 
 ## Pro features ($8 one-time)
 
 - **Content search** — prefix with `>` to search inside note bodies; multi-word queries require every word on the matching line.
-- **Ripgrep acceleration** — use `rg` when available for faster full-vault content search, with safe fallback to the built-in vault index.
+- **Ripgrep acceleration** — use `rg` when available for faster full-vault content search, with safe fallback to the built-in vault index. Common install locations (winget, scoop, chocolatey, Homebrew, VS Code's bundled rg) are auto-detected when `rg` isn't on your PATH.
 - **Heading jump** — search headings across the vault (`^` prefix) and open directly at the matching section; scope with `file#heading` and filter depth with `level:1-2`.
 - **Live preview pane** — show rendered Markdown beside results and auto-scroll to the matched heading or passage.
 - **Search history** — recently used content searches resurface so repeated research queries are one Enter away.
@@ -60,6 +60,16 @@ Purchase: [Buy Me a Coffee — Vault Spotlight Pro](https://buymeacoffee.com/vau
 
 License keys are verified **offline** (Ed25519). No account, server, or subscription.
 
+## Automation & API
+
+Other plugins, scripts, and external tools can build on Vault Spotlight:
+
+- **URL scheme** — `obsidian://vault-spotlight?vault=YourVault&query=launch%20plan&mode=content` opens the modal with a prefilled query and mode (`files`, `content`, `headings`, `symbols`, `commands`, `links`, `editors`, `folders`).
+- **Global API** — `globalThis.vaultSpotlight` exposes:
+  - `open(query?, mode?)` — open the modal programmatically.
+  - `search(query)` — Promise of content-search results (`{ path, basename, line, snippet, score, engine }`). Pro license required; resolves `[]` on the free tier.
+  - `isProActive()` — whether a Pro license is active.
+
 ## Privacy & data
 
 Vault Spotlight never phones home. All state lives in the plugin's local `data.json`, which stores your settings plus usage data used for ranking: recent file paths, starred paths, per-file open counts (frecency), and recent search queries. These contain note paths and query text, so if you commit or share your `.obsidian` folder, that folder history is included. To keep it out, add `.obsidian/plugins/vault-spotlight/data.json` to your `.gitignore`.
@@ -68,7 +78,7 @@ Vault Spotlight never phones home. All state lives in the plugin's local `data.j
 
 1. Copy `main.js`, `manifest.json`, and `styles.css` into `.obsidian/plugins/vault-spotlight/`
 2. Enable **Vault Spotlight** in Settings → Community plugins
-3. Open with `Ctrl+Shift+O` or the search ribbon icon
+3. Open with the search ribbon icon, or bind a hotkey to *Open spotlight* (no default hotkey is set, per Obsidian plugin guidelines)
 
 ## Install (community directory)
 

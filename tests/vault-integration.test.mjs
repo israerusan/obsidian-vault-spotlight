@@ -5,8 +5,9 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
-const defaultVaultRoot = "C:\\Users\\iavil\\OneDrive\\Documents\\Personal";
-const vaultRoot = process.env.VAULT_ROOT !== undefined ? process.env.VAULT_ROOT : defaultVaultRoot;
+// Opt-in only: set VAULT_ROOT to a real vault to run the filesystem checks.
+// No default — a hardcoded personal path is neither portable nor private.
+const vaultRoot = process.env.VAULT_ROOT ?? "";
 
 function listMarkdownFiles(dir, acc = []) {
 	for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

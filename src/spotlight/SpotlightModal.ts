@@ -24,7 +24,8 @@ import { fuzzyMatch, renderHighlightedText, tokenizeQuery } from "../search/fuzz
 import { SaveSearchPromptModal } from "./SaveSearchPromptModal";
 import { PromptModal } from "./PromptModal";
 import { getVaultFileKind, iconForFileKind, type VaultFileKind } from "../search/vaultFiles";
-import { applyTagToMarkdown, removeTagFromMarkdown, setFrontmatterProperty } from "../core/frontmatterTags.mjs";
+import { addTagToTags, normalizeTag, removeInlineTag, removeTagFromTags } from "../core/frontmatterTags.mjs";
+import { collectFileTags } from "../search/metadata";
 import { buildMocMarkdown, buildResultMarkdown } from "../core/resultMarkdown.mjs";
 import { activeProfile, createProfileFromSettings } from "../core/searchProfiles.mjs";
 import { detectSearchIntegrations } from "../core/integrations.mjs";
@@ -139,7 +140,7 @@ type SpotlightAction = {
 /** Where to open a result: null = current tab, or an Obsidian pane type. */
 type PaneTarget = "tab" | "split" | "window" | null;
 
-const MODE_ORDER: SpotlightMode[] = [
+export const MODE_ORDER: SpotlightMode[] = [
 	"files",
 	"content",
 	"headings",
@@ -164,6 +165,7 @@ export class SpotlightModal extends Modal {
 	private selectedIndex = 0;
 	private checkedPaths = new Set<string>();
 	private searchTimer: number | null = null;
+	private loadingTimer: number | null = null;
 	private searchGeneration = 0;
 	private isLoading = false;
 	private fileSearcher: FileSearcher;
@@ -278,8 +280,10 @@ export class SpotlightModal extends Modal {
 		this.inputEl.addEventListener("keydown", (evt) => {
 			if (!this.hasNavigated || evt.ctrlKey || evt.metaKey || evt.altKey) return;
 			const prefixes = this.plugin.settings.modePrefixes;
+			// Compare against the first character: prefixes may be up to 4 chars
+			// (e.g. "$$") but a keydown only ever delivers one.
 			const drillMode =
-				evt.key === prefixes.symbols ? "symbols" : evt.key === prefixes.links ? "links" : null;
+				evt.key === prefixes.symbols[0] ? "symbols" : evt.key === prefixes.links[0] ? "links" : null;
 			if (!drillMode) return;
 			const item = this.items[this.selectedIndex];
 			const file = item ? this.itemFile(item) : null;
@@ -310,6 +314,10 @@ export class SpotlightModal extends Modal {
 			window.clearTimeout(this.searchTimer);
 			this.searchTimer = null;
 		}
+		if (this.loadingTimer !== null) {
+			window.clearTimeout(this.loadingTimer);
+			this.loadingTimer = null;
+		}
 		if (this.previewTimer !== null) {
 			window.clearTimeout(this.previewTimer);
 			this.previewTimer = null;
@@ -335,25 +343,33 @@ export class SpotlightModal extends Modal {
 		return activeProfile(this.plugin.settings.searchProfiles, this.plugin.settings.activeProfileId);
 	}
 
+	/**
+	 * Trigger cheatsheet: every mode prefix stays visible in the modal so the
+	 * mode system is discoverable without reading docs (the top complaint
+	 * about comparable switcher plugins).
+	 */
 	private updateHint(): void {
 		const isPro = this.plugin.settings.isPro;
 		const prefixes = this.plugin.settings.modePrefixes;
 		this.hintEl.empty();
-		this.hintEl.createEl("span", { text: "Try " });
-		this.hintEl.createEl("code", { text: "#journal" });
-		this.hintEl.appendText(" · ");
-		this.hintEl.createEl("code", { text: "Tab" });
-		this.hintEl.appendText(" mode · ");
-		this.hintEl.createEl("code", { text: `${prefixes.commands} command` });
-		this.hintEl.appendText(" · ");
-		this.hintEl.createEl("code", { text: `${prefixes.symbols} outline` });
-		this.hintEl.appendText(" · ");
-		this.hintEl.createEl("code", { text: `${prefixes.editors} tabs` });
-		this.hintEl.appendText(" · ");
-		this.hintEl.createEl("code", { text: `${prefixes.folders} folders` });
+		const hints: Array<[string, string]> = [
+			["#journal", "tag"],
+			[prefixes.commands, "commands"],
+			[prefixes.symbols, "outline"],
+			[prefixes.editors, "tabs"],
+			[prefixes.folders, "folders"],
+			[prefixes.content, "content"],
+			[prefixes.headings, "headings"],
+			[prefixes.links, "links"],
+			["Tab", "cycle"],
+			[this.plugin.settings.escapeChar, "literal"],
+		];
+		hints.forEach(([code, label], index) => {
+			if (index > 0) this.hintEl.appendText(" · ");
+			this.hintEl.createEl("code", { text: code });
+			this.hintEl.appendText(` ${label}`);
+		});
 		if (isPro) {
-			this.hintEl.appendText(" · ");
-			this.hintEl.createEl("code", { text: `${prefixes.content} phrase` });
 			this.hintEl.appendText(" · ");
 			this.hintEl.createEl("code", { text: "Ctrl+D" });
 			this.hintEl.appendText(" star");
@@ -413,7 +429,13 @@ export class SpotlightModal extends Modal {
 		const includePdf = profile?.includePdf ?? this.plugin.settings.includePdf;
 
 		this.isLoading = true;
-		this.renderLoading();
+		// Only show the skeleton when a search is genuinely slow — instant
+		// results (the common case) render directly, without a flash.
+		if (this.loadingTimer !== null) window.clearTimeout(this.loadingTimer);
+		this.loadingTimer = window.setTimeout(() => {
+			this.loadingTimer = null;
+			if (this.isLoading) this.renderLoading();
+		}, 100);
 
 		if (this.actionContext) {
 			const actions = this.availableActions(this.actionContext);
@@ -498,7 +520,6 @@ export class SpotlightModal extends Modal {
 				}
 				const contentResults = await this.plugin.contentSearcher.search(text, {
 					useRipgrep: isPro,
-					ripgrepCommand: this.plugin.settings.ripgrepCommand,
 					includeCanvas: isPro && includeCanvas,
 					excludeFolders,
 				});
@@ -724,7 +745,7 @@ export class SpotlightModal extends Modal {
 		return null;
 	}
 
-	private fileToResult(file: TFile, score: number): ResultItem {
+	private fileToResult(file: TFile, score: number, bookmarkedPaths: Set<string>): ResultItem {
 		return {
 			kind: "file",
 			file,
@@ -734,7 +755,7 @@ export class SpotlightModal extends Modal {
 			fileKind: getVaultFileKind(file),
 			isRecent: this.plugin.settings.recentPaths.includes(file.path),
 			isStarred: this.plugin.isStarred(file.path),
-			isBookmarked: this.plugin.getBookmarkedPaths().includes(file.path),
+			isBookmarked: bookmarkedPaths.has(file.path),
 		};
 	}
 
@@ -742,18 +763,36 @@ export class SpotlightModal extends Modal {
 		const active = this.app.workspace.getActiveFile();
 		const files = this.app.vault.getMarkdownFiles();
 		const q = query.replace(/^(<-|->|\[\[)\s?/, "").trim().toLowerCase();
-		// Drilled-in file wins; otherwise a typed name, otherwise the active note.
-		const target =
-			this.drillFile ??
-			(q
-				? files.find((file) => file.basename.toLowerCase().includes(q) || file.path.toLowerCase().includes(q))
-				: active);
+		// Drilled-in file wins; otherwise the best-matching typed name,
+		// otherwise the active note.
+		const target = this.drillFile ?? (q ? this.bestFileMatch(files, q) : active);
 		if (!target) return [];
 		const resolvedLinks = this.app.metadataCache.resolvedLinks ?? {};
-		const linked = query.trim().startsWith("->")
+		let linked = query.trim().startsWith("->")
 			? findOutlinks(files, resolvedLinks, target.path)
 			: findBacklinks(files, resolvedLinks, target.path);
-		return linked.slice(0, 60).map((file, index) => this.fileToResult(file, 1000 - index));
+		// When drilled in, the query text filters the linked notes themselves
+		// (the target is already fixed) instead of being ignored.
+		if (this.drillFile && q) {
+			linked = linked.filter((file) => fuzzyMatch(q, file.basename) ?? fuzzyMatch(q, file.path));
+		}
+		// Walk the bookmark tree once for the whole result set, not per row.
+		const bookmarkedPaths = new Set(this.plugin.getBookmarkedPaths());
+		return linked.slice(0, 60).map((file, index) => this.fileToResult(file, 1000 - index, bookmarkedPaths));
+	}
+
+	/** The highest-scoring fuzzy match for `q`, not just the first substring hit. */
+	private bestFileMatch(files: TFile[], q: string): TFile | null {
+		let best: TFile | null = null;
+		let bestScore = -1;
+		for (const file of files) {
+			const match = fuzzyMatch(q, file.basename) ?? fuzzyMatch(q, file.path);
+			if (match && match.score > bestScore) {
+				best = file;
+				bestScore = match.score;
+			}
+		}
+		return best;
 	}
 
 	private folderItems(query: string): ResultItem[] {
@@ -793,6 +832,10 @@ export class SpotlightModal extends Modal {
 	}
 
 	private renderEmptyState(icon: string, title: string, desc: string): void {
+		if (this.loadingTimer !== null) {
+			window.clearTimeout(this.loadingTimer);
+			this.loadingTimer = null;
+		}
 		this.resultsEl.empty();
 		this.resultsEl.removeClass("vault-spotlight-loading");
 		const empty = this.resultsEl.createDiv({ cls: "vault-spotlight-empty" });
@@ -803,6 +846,10 @@ export class SpotlightModal extends Modal {
 	}
 
 	private renderResults(): void {
+		if (this.loadingTimer !== null) {
+			window.clearTimeout(this.loadingTimer);
+			this.loadingTimer = null;
+		}
 		this.resultsEl.empty();
 		this.resultsEl.removeClass("vault-spotlight-loading");
 
@@ -1590,10 +1637,21 @@ export class SpotlightModal extends Modal {
 			initial: "spotlight",
 			cta: "Add tag",
 			onSubmit: (raw) => {
-				const cleaned = raw.replace(/^#/, "").trim().replace(/\s+/g, "-");
+				const cleaned = normalizeTag(raw);
 				if (!cleaned) return;
-				void Promise.all(files.map((file) => this.modifyMarkdownFile(file, (content) => applyTagToMarkdown(content, cleaned))))
-					.then(() => new Notice(`Vault Spotlight: tag added to ${files.length} note${files.length === 1 ? "" : "s"}.`));
+				// processFrontMatter handles YAML serialization (inline AND
+				// block-style tag lists) — never edit frontmatter text by hand.
+				void Promise.all(
+					files.map(async (file) => {
+						const cache = this.app.metadataCache.getFileCache(file);
+						const existing = cache ? collectFileTags(cache) : new Set<string>();
+						// Already tagged (frontmatter or inline) — leave the note untouched.
+						if (existing.has(cleaned.toLowerCase())) return;
+						await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+							fm.tags = addTagToTags(fm.tags, cleaned);
+						});
+					})
+				).then(() => new Notice(`Vault Spotlight: tag added to ${files.length} note${files.length === 1 ? "" : "s"}.`));
 			},
 		}).open();
 	}
@@ -1609,10 +1667,20 @@ export class SpotlightModal extends Modal {
 			initial: "spotlight",
 			cta: "Remove tag",
 			onSubmit: (raw) => {
-				const cleaned = raw.replace(/^#/, "").trim().replace(/\s+/g, "-");
+				const cleaned = normalizeTag(raw);
 				if (!cleaned) return;
-				void Promise.all(files.map((file) => this.modifyMarkdownFile(file, (content) => removeTagFromMarkdown(content, cleaned))))
-					.then(() => new Notice(`Vault Spotlight: tag removed from ${files.length} note${files.length === 1 ? "" : "s"}.`));
+				void Promise.all(
+					files.map(async (file) => {
+						await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+							const next = removeTagFromTags(fm.tags, cleaned);
+							if (next === null) delete fm.tags;
+							else fm.tags = next;
+						});
+						// Inline #tag occurrences in the body are plain text, not
+						// frontmatter — strip them with an atomic read-modify-write.
+						await this.app.vault.process(file, (content) => removeInlineTag(content, cleaned));
+					})
+				).then(() => new Notice(`Vault Spotlight: tag removed from ${files.length} note${files.length === 1 ? "" : "s"}.`));
 			},
 		}).open();
 	}
@@ -1635,8 +1703,18 @@ export class SpotlightModal extends Modal {
 				}
 				const key = raw.slice(0, sep).trim();
 				const value = raw.slice(sep + 1).trim();
-				void Promise.all(files.map((file) => this.modifyMarkdownFile(file, (content) => setFrontmatterProperty(content, key, value))))
-					.then(() => new Notice(`Vault Spotlight: property set on ${files.length} note${files.length === 1 ? "" : "s"}.`));
+				if (!key) return;
+				void Promise.all(
+					files.map((file) =>
+						this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+							// Reuse an existing key that differs only in case rather
+							// than adding a near-duplicate property.
+							const existingKey =
+								Object.keys(fm).find((k) => k.toLowerCase() === key.toLowerCase()) ?? key;
+							fm[existingKey] = value;
+						})
+					)
+				).then(() => new Notice(`Vault Spotlight: property set on ${files.length} note${files.length === 1 ? "" : "s"}.`));
 			},
 		}).open();
 	}
@@ -1705,12 +1783,6 @@ export class SpotlightModal extends Modal {
 
 	private filesForBatch(): TFile[] {
 		return this.resultItemsForBatch().map((item) => this.itemFile(item)).filter((file): file is TFile => !!file);
-	}
-
-	private async modifyMarkdownFile(file: TFile, updater: (content: string) => string): Promise<void> {
-		const content = await this.app.vault.cachedRead(file);
-		const next = updater(content);
-		if (next !== content) await this.app.vault.modify(file, next);
 	}
 
 	private async createExportNote(filename: string, note: string, message: string): Promise<void> {
