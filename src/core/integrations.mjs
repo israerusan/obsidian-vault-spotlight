@@ -3,5 +3,6 @@ export function detectSearchIntegrations(pluginIds) {
 	return {
 		omnisearch: ids.has("omnisearch") || ids.has("obsidian-omnisearch"),
 		textExtractor: ids.has("text-extractor") || ids.has("obsidian-text-extractor"),
+		basesPowerPack: ids.has("bases-power-pack"),
 	};
 }

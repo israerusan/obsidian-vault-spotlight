@@ -41,7 +41,7 @@ export type ResultItem =
 			line: number;
 			snippet: string;
 			score: number;
-			engine: "ripgrep" | "vault" | "canvas";
+			engine: "ripgrep" | "vault" | "canvas" | "base";
 	  }
 	| {
 			kind: "heading";

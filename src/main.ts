@@ -40,6 +40,7 @@ export default class VaultSpotlightPlugin extends Plugin {
 	contentSearcher!: ContentSearcher;
 	private activeSpotlight: SpotlightModal | null = null;
 	private saveTimer: number | null = null;
+	private api: VaultSpotlightApi | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -66,8 +67,8 @@ export default class VaultSpotlightPlugin extends Plugin {
 			callback: () => this.openSpotlight("", "headings"),
 		});
 		this.addCommand({
-			id: "run-command",
-			name: "Run command",
+			id: "run-action",
+			name: "Run action",
 			callback: () => this.openSpotlight("", "commands"),
 		});
 		this.addCommand({
@@ -160,7 +161,8 @@ export default class VaultSpotlightPlugin extends Plugin {
 		});
 
 		// Public API for other plugins and scripts (Omnisearch-style global).
-		(globalThis as Record<string, unknown>).vaultSpotlight = this.createApi();
+		this.api = this.createApi();
+		(window as unknown as Record<string, unknown>).vaultSpotlight = this.api;
 
 		this.addSettingTab(new VaultSpotlightSettingTab(this.app, this));
 	}
@@ -171,8 +173,11 @@ export default class VaultSpotlightPlugin extends Plugin {
 		this.activeSpotlight?.close();
 		this.activeSpotlight = null;
 		this.contentSearcher?.dispose();
-		const globals = globalThis as Record<string, unknown>;
-		if (globals.vaultSpotlight) delete globals.vaultSpotlight;
+		// Identity check: only remove the global if it's still OUR object — a
+		// second instance (e.g. a BRAT beta copy) may have claimed it since.
+		const globals = window as unknown as Record<string, unknown>;
+		if (this.api && globals.vaultSpotlight === this.api) delete globals.vaultSpotlight;
+		this.api = null;
 		this.flushSave();
 	}
 
@@ -386,25 +391,33 @@ export default class VaultSpotlightPlugin extends Plugin {
 		this.scheduleSave();
 	}
 
-	async refreshLicense(): Promise<boolean> {
+	/**
+	 * Re-verify the license key (offline) and cache the result.
+	 *
+	 * `persistUnchanged` is for the settings tab, where the key TEXT was just
+	 * edited: it must be saved even when the Pro status didn't flip, or an
+	 * invalid/typo'd key silently vanishes on the next restart. Startup calls
+	 * leave it false so an unchanged verification never writes data.json.
+	 */
+	async refreshLicense(persistUnchanged = false): Promise<boolean> {
 		const before = this.settings.isPro;
+		const beforeEmail = this.settings.licenseEmail;
 		if (!this.settings.licenseKey) {
-			if (!this.settings.isPro && !this.settings.licenseEmail) return false;
+			if (!this.settings.isPro && !this.settings.licenseEmail) {
+				if (persistUnchanged) await this.saveSettings();
+				return false;
+			}
 			this.settings.isPro = false;
 			this.settings.licenseEmail = "";
 			await this.saveSettings();
 			return before !== this.settings.isPro;
 		}
 		const result = LicenseManager.verify(this.settings.licenseKey);
-		const isPro = result.valid;
-		const licenseEmail = result.email ?? "";
-		// Save even when Pro status is unchanged: the key text itself may have
-		// been edited (e.g. an invalid/typo'd key), and without a save it would
-		// silently vanish on the next restart.
-		this.settings.isPro = isPro;
-		this.settings.licenseEmail = licenseEmail;
-		await this.saveSettings();
-		return before !== isPro;
+		this.settings.isPro = result.valid;
+		this.settings.licenseEmail = result.email ?? "";
+		const changed = before !== this.settings.isPro || beforeEmail !== this.settings.licenseEmail;
+		if (changed || persistUnchanged) await this.saveSettings();
+		return changed;
 	}
 
 	async loadSettings(): Promise<void> {
@@ -484,12 +497,20 @@ export default class VaultSpotlightPlugin extends Plugin {
 		}
 	}
 
+	// Serialize writes: overlapping saveData calls (e.g. per-keystroke license
+	// verification) could otherwise finish out of order, letting a stale
+	// serialization win on disk.
+	private savePromise: Promise<void> = Promise.resolve();
+
 	async saveSettings(): Promise<void> {
-		try {
-			await this.saveData(this.settings);
-		} catch (err) {
-			console.error("[VaultSpotlight] failed to save settings", err);
-		}
+		this.savePromise = this.savePromise.then(async () => {
+			try {
+				await this.saveData(this.settings);
+			} catch (err) {
+				console.error("[VaultSpotlight] failed to save settings", err);
+			}
+		});
+		return this.savePromise;
 	}
 }
 

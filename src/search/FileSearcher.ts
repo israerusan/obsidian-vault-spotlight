@@ -55,7 +55,7 @@ export interface FileSearchOptions {
 export class FileSearcher {
 	constructor(private app: App) {}
 
-	async search(options: FileSearchOptions): Promise<FileSearchResult[]> {
+	search(options: FileSearchOptions): FileSearchResult[] {
 		const files = getSearchableFiles(this.app, {
 			includeCanvas: options.includeCanvas,
 			includePdf: options.includePdf,
@@ -79,7 +79,7 @@ export class FileSearcher {
 
 			const basename = file.basename;
 			let score = 0;
-			let indices: number[] = [];
+			const indices: number[] = [];
 
 			if (isBrowseMode) {
 				score = 1;

@@ -125,7 +125,9 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 						// Re-verify on each keystroke (cheap, offline) but only rebuild
 						// the whole tab when Pro status actually flips — otherwise
 						// display()'s containerEl.empty() destroys the input mid-type.
-						void this.plugin.refreshLicense().then((changed) => {
+						// persistUnchanged: the key text changed, so it must be saved
+						// even when the Pro status didn't flip.
+						void this.plugin.refreshLicense(true).then((changed) => {
 							if (changed) this.display();
 						});
 					})
@@ -259,7 +261,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 		proSearch(
 			"Ripgrep command",
 			"Faster content search when ripgrep (rg) is installed. Leave as rg — common install locations (winget, scoop, chocolatey, Homebrew, VS Code's bundled rg) are auto-detected when it isn't on your PATH.",
-			(setting) =>
+			(setting) => {
 				setting.addText((text) =>
 					text
 						.setPlaceholder("rg")
@@ -269,49 +271,52 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 							this.plugin.contentSearcher.setRipgrepCommand(this.plugin.settings.ripgrepCommand);
 							void this.plugin.saveSettings();
 						})
-				)
+				);
+			}
 		);
 
-		proSearch("Include Canvas files", "Search .canvas files by name and search text inside canvas nodes.", (setting) =>
+		proSearch("Include Canvas files", "Search .canvas files by name and search text inside canvas nodes.", (setting) => {
 			setting.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.includeCanvas).onChange((value) => {
 					this.plugin.settings.includeCanvas = value;
 					void this.plugin.saveSettings();
 				})
-			)
-		);
+			);
+		});
 
-		proSearch("Include PDF files", "Show PDFs in file search (filename). PDF body text search is not supported.", (setting) =>
+		proSearch("Include PDF files", "Show PDFs in file search (filename). PDF body text search is not supported.", (setting) => {
 			setting.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.includePdf).onChange((value) => {
 					this.plugin.settings.includePdf = value;
 					void this.plugin.saveSettings();
 				})
-			)
-		);
+			);
+		});
 
 		proSearch(
 			"Include Base files",
 			"Show Bases (.base) in file search and search text inside their view and filter definitions.",
-			(setting) =>
+			(setting) => {
 				setting.addToggle((toggle) =>
 					toggle.setValue(this.plugin.settings.includeBases).onChange((value) => {
 						this.plugin.settings.includeBases = value;
 						void this.plugin.saveSettings();
 					})
-				)
+				);
+			}
 		);
 
 		proSearch(
 			"Preview pane",
 			"Show a live preview of the highlighted note beside the results.",
-			(setting) =>
+			(setting) => {
 				setting.addToggle((toggle) =>
 					toggle.setValue(this.plugin.settings.showPreview).onChange((value) => {
 						this.plugin.settings.showPreview = value;
 						void this.plugin.saveSettings();
 					})
-				)
+				);
+			}
 		);
 
 		new Setting(containerEl).setName("Starred files (Pro)").setHeading();

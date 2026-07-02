@@ -14,19 +14,30 @@ export interface WorkerIndexRow {
  * worker. Callers must be ready for `search` to reject (worker died) and
  * fall back to an in-process index.
  */
+/** A worker scan should answer in well under a second; if nothing comes back
+ * in this window the worker is presumed dead (killed without an error event —
+ * e.g. OS memory pressure) and the caller falls back to the in-process index. */
+const SEARCH_TIMEOUT_MS = 15000;
+
 export class WorkerIndex {
 	private built = false;
 	private buildPromise: Promise<void> | null = null;
+	// Bumped by invalidate(); a build that started under an older epoch must
+	// not mark the index as complete (a mid-build "clear" wiped its early files).
+	private epoch = 0;
 	private nextId = 1;
 	private pending = new Map<number, { resolve: (rows: WorkerIndexRow[]) => void; reject: (err: Error) => void }>();
 
 	/** Returns null when Workers/Blob URLs aren't available in this environment. */
 	static create(app: App): WorkerIndex | null {
+		let url: string | null = null;
 		try {
-			const url = URL.createObjectURL(new Blob([WORKER_SOURCE], { type: "text/javascript" }));
+			url = URL.createObjectURL(new Blob([WORKER_SOURCE], { type: "text/javascript" }));
 			const worker = new Worker(url);
 			return new WorkerIndex(app, worker, url);
 		} catch {
+			// Don't leak the object URL when the Worker constructor itself throws.
+			if (url) URL.revokeObjectURL(url);
 			return null;
 		}
 	}
@@ -45,6 +56,7 @@ export class WorkerIndex {
 			entry.resolve(msg.results ?? []);
 		};
 		this.worker.onerror = () => this.failPending(new Error("content index worker error"));
+		this.worker.onmessageerror = () => this.failPending(new Error("content index worker message error"));
 	}
 
 	/**
@@ -55,6 +67,7 @@ export class WorkerIndex {
 	private ensureBuilt(): Promise<void> {
 		if (this.buildPromise) return this.buildPromise;
 		if (this.built) return Promise.resolve();
+		const epoch = this.epoch;
 		this.buildPromise = (async () => {
 			for (const file of this.app.vault.getMarkdownFiles()) {
 				try {
@@ -64,7 +77,9 @@ export class WorkerIndex {
 					// Skip a file that vanished or is unreadable mid-build.
 				}
 			}
-			this.built = true;
+			// invalidate() during the build wiped some of what was just posted;
+			// leave built=false so the next caller triggers a fresh full build.
+			if (epoch === this.epoch) this.built = true;
 		})().finally(() => {
 			this.buildPromise = null;
 		});
@@ -75,10 +90,26 @@ export class WorkerIndex {
 		await this.ensureBuilt();
 		return new Promise<WorkerIndexRow[]>((resolve, reject) => {
 			const id = this.nextId++;
-			this.pending.set(id, { resolve, reject });
+			// A worker killed by the OS fires no error event — without a timeout
+			// this promise would hang forever and content mode would be stuck on
+			// the loading skeleton with the fallback path unreachable.
+			const timer = window.setTimeout(() => {
+				if (this.pending.delete(id)) reject(new Error("content index worker timed out"));
+			}, SEARCH_TIMEOUT_MS);
+			this.pending.set(id, {
+				resolve: (rows) => {
+					window.clearTimeout(timer);
+					resolve(rows);
+				},
+				reject: (err) => {
+					window.clearTimeout(timer);
+					reject(err);
+				},
+			});
 			try {
 				this.worker.postMessage({ type: "search", id, tokens, limit, excluded });
 			} catch (err) {
+				window.clearTimeout(timer);
 				this.pending.delete(id);
 				reject(err instanceof Error ? err : new Error(String(err)));
 			}
@@ -105,6 +136,7 @@ export class WorkerIndex {
 	}
 
 	invalidate(): void {
+		this.epoch++;
 		this.built = false;
 		this.worker.postMessage({ type: "clear" });
 	}

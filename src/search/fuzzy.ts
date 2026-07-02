@@ -1,14 +1,9 @@
-export interface FuzzyMatch {
-	score: number;
-	indices: number[];
-}
+import { parseAdvancedQuery, type AdvancedQuery } from "../core/advancedQuery.mjs";
 
-import { fuzzyMatch as coreFuzzyMatch } from "../core/fuzzy.mjs";
-import { parseAdvancedQuery } from "../core/advancedQuery.mjs";
-
-// The matcher lives in core/fuzzy.mjs so Node tests exercise the real
-// implementation; this wrapper only pins the TypeScript signature.
-export const fuzzyMatch = coreFuzzyMatch as (query: string, text: string) => FuzzyMatch | null;
+// The matcher lives in core/fuzzy.mjs (typed by core/fuzzy.d.mts) so Node
+// tests exercise the real implementation.
+export { fuzzyMatch } from "../core/fuzzy.mjs";
+export type { FuzzyMatchResult as FuzzyMatch } from "../core/fuzzy.mjs";
 
 export function renderHighlightedText(parent: HTMLElement, text: string, indices: number[]): void {
 	parent.empty();
@@ -35,21 +30,7 @@ export function renderHighlightedText(parent: HTMLElement, text: string, indices
 	}
 }
 
-export function tokenizeQuery(raw: string): {
-	textTokens: string[];
-	phrases: string[];
-	exclusions: string[];
-	folderIncludes: string[];
-	pathTerms: string[];
-	nameTerms: string[];
-	tags: string[];
-	properties: Array<{ key: string; value: string | null }>;
-	extFilters: string[];
-	isStarred: boolean;
-	isBookmarked: boolean;
-	modifiedDays: number | null;
-	createdDays: number | null;
-} {
+export function tokenizeQuery(raw: string): AdvancedQuery {
 	// Mode prefixes (and the escape character) are already stripped by
 	// resolveQuery/detectModeFromPrefix before the query reaches here — do NOT
 	// strip again, or an escaped literal like "!>foo" loses its ">".

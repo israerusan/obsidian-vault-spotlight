@@ -40,5 +40,11 @@ assert.deepEqual(related.map((r) => r.path), ["c.md", "b.md"], "related notes sh
 const integrations = detectSearchIntegrations(["omnisearch", "text-extractor", "calendar"]);
 assert.equal(integrations.omnisearch, true, "should detect Omnisearch plugin id");
 assert.equal(integrations.textExtractor, true, "should detect Text Extractor plugin id");
+assert.equal(integrations.basesPowerPack, false, "should not report Bases Power Pack when absent");
+assert.equal(
+	detectSearchIntegrations(["Bases-Power-Pack"]).basesPowerPack,
+	true,
+	"should detect Bases Power Pack case-insensitively"
+);
 
 console.log("links/core tests passed");

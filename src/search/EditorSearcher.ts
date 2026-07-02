@@ -104,7 +104,7 @@ export class EditorSearcher {
 
 	activate(leaf: WorkspaceLeaf): void {
 		this.app.workspace.setActiveLeaf(leaf, { focus: true });
-		this.app.workspace.revealLeaf(leaf);
+		void this.app.workspace.revealLeaf(leaf);
 	}
 
 	private leafFile(leaf: WorkspaceLeaf): TFile | null {

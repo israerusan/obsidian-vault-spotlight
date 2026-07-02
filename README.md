@@ -36,6 +36,7 @@ Vault Spotlight is a fast command center for large vaults: type a few letters to
 - **Links mode** — browse backlinks to the active/matching note or prefix with `->` to inspect outlinks.
 - **Frontmatter alias matching** — note `alias`/`aliases` values participate in file search so alternate names work naturally.
 - **Omnisearch/Text Extractor handoff** — when those plugins are installed, Pro actions can hand off to their search/extraction commands.
+- **Bases Power Pack handoff** — with [Bases Power Pack](https://github.com/israerusan/bases-power-pack) 1.2.0+ installed, `Ctrl+K` on a `.base` result offers "Open in Kanban/Calendar/Gantt view".
 - **Smart collections** — saved searches become reusable vault views in the browse screen; pin the ones you use daily.
 - **Starred pins** — press `Ctrl+D` to keep high-value files at the top of browse and search results.
 - **Canvas & PDF discovery** — include Canvas files and PDFs in file search, plus text search inside Canvas nodes.

@@ -30,6 +30,7 @@ export class ContentSearcher {
 	private bases: BaseSearcher;
 	// undefined = not tried yet; null = unavailable or died → in-process fallback.
 	private workerIndex: WorkerIndex | null | undefined = undefined;
+	private disposed = false;
 
 	constructor(private app: App, ripgrepCommand = "rg") {
 		this.ripgrep = new RipgrepSearcher(app, ripgrepCommand);
@@ -110,6 +111,10 @@ export class ContentSearcher {
 				}
 				return results;
 			} catch (err) {
+				// Plugin unload rejects pending searches too — that's shutdown,
+				// not a worker failure; don't kick off a full-vault index build
+				// for a result nobody will see.
+				if (this.disposed) return [];
 				console.warn("[VaultSpotlight] content index worker failed, falling back in-process", err);
 				this.retireWorker();
 			}
@@ -198,6 +203,7 @@ export class ContentSearcher {
 
 	/** Release the worker when the plugin unloads. */
 	dispose(): void {
+		this.disposed = true;
 		this.workerIndex?.dispose();
 		this.workerIndex = null;
 	}

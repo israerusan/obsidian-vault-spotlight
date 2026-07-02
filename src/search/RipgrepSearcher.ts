@@ -12,7 +12,9 @@ interface ChildProcessModule {
 
 function getChildProcess(): ChildProcessModule | null {
 	try {
-		const req = (globalThis as { require?: (id: string) => unknown }).require;
+		// Desktop only: Electron exposes require on the window; on mobile this
+		// is undefined and the caller falls back to the in-memory index.
+		const req = (window as unknown as { require?: (id: string) => unknown }).require;
 		if (!req) return null;
 		return req("child_process") as ChildProcessModule;
 	} catch {
@@ -22,7 +24,8 @@ function getChildProcess(): ChildProcessModule | null {
 
 function getEnv(name: string): string {
 	try {
-		const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
+		const proc = (window as unknown as { process?: { env?: Record<string, string | undefined> } })
+			.process;
 		return proc?.env?.[name] ?? "";
 	} catch {
 		return "";

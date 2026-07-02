@@ -2445,7 +2445,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
     new import_obsidian.Setting(containerEl).setName("License key").setDesc("Enter your Pro license key. Verified offline \u2014 no account or server required.").addText(
       (text) => text.setPlaceholder("payload.signature").setValue(this.plugin.settings.licenseKey).onChange((value) => {
         this.plugin.settings.licenseKey = value;
-        void this.plugin.refreshLicense().then((changed) => {
+        void this.plugin.refreshLicense(true).then((changed) => {
           if (changed) this.display();
         });
       })
@@ -2540,53 +2540,55 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
     proSearch(
       "Ripgrep command",
       "Faster content search when ripgrep (rg) is installed. Leave as rg \u2014 common install locations (winget, scoop, chocolatey, Homebrew, VS Code's bundled rg) are auto-detected when it isn't on your PATH.",
-      (setting) => setting.addText(
-        (text) => text.setPlaceholder("rg").setValue(this.plugin.settings.ripgrepCommand).onChange((value) => {
-          this.plugin.settings.ripgrepCommand = value.trim() || "rg";
-          this.plugin.contentSearcher.setRipgrepCommand(this.plugin.settings.ripgrepCommand);
-          void this.plugin.saveSettings();
-        })
-      )
+      (setting) => {
+        setting.addText(
+          (text) => text.setPlaceholder("rg").setValue(this.plugin.settings.ripgrepCommand).onChange((value) => {
+            this.plugin.settings.ripgrepCommand = value.trim() || "rg";
+            this.plugin.contentSearcher.setRipgrepCommand(this.plugin.settings.ripgrepCommand);
+            void this.plugin.saveSettings();
+          })
+        );
+      }
     );
-    proSearch(
-      "Include Canvas files",
-      "Search .canvas files by name and search text inside canvas nodes.",
-      (setting) => setting.addToggle(
+    proSearch("Include Canvas files", "Search .canvas files by name and search text inside canvas nodes.", (setting) => {
+      setting.addToggle(
         (toggle) => toggle.setValue(this.plugin.settings.includeCanvas).onChange((value) => {
           this.plugin.settings.includeCanvas = value;
           void this.plugin.saveSettings();
         })
-      )
-    );
-    proSearch(
-      "Include PDF files",
-      "Show PDFs in file search (filename). PDF body text search is not supported.",
-      (setting) => setting.addToggle(
+      );
+    });
+    proSearch("Include PDF files", "Show PDFs in file search (filename). PDF body text search is not supported.", (setting) => {
+      setting.addToggle(
         (toggle) => toggle.setValue(this.plugin.settings.includePdf).onChange((value) => {
           this.plugin.settings.includePdf = value;
           void this.plugin.saveSettings();
         })
-      )
-    );
+      );
+    });
     proSearch(
       "Include Base files",
       "Show Bases (.base) in file search and search text inside their view and filter definitions.",
-      (setting) => setting.addToggle(
-        (toggle) => toggle.setValue(this.plugin.settings.includeBases).onChange((value) => {
-          this.plugin.settings.includeBases = value;
-          void this.plugin.saveSettings();
-        })
-      )
+      (setting) => {
+        setting.addToggle(
+          (toggle) => toggle.setValue(this.plugin.settings.includeBases).onChange((value) => {
+            this.plugin.settings.includeBases = value;
+            void this.plugin.saveSettings();
+          })
+        );
+      }
     );
     proSearch(
       "Preview pane",
       "Show a live preview of the highlighted note beside the results.",
-      (setting) => setting.addToggle(
-        (toggle) => toggle.setValue(this.plugin.settings.showPreview).onChange((value) => {
-          this.plugin.settings.showPreview = value;
-          void this.plugin.saveSettings();
-        })
-      )
+      (setting) => {
+        setting.addToggle(
+          (toggle) => toggle.setValue(this.plugin.settings.showPreview).onChange((value) => {
+            this.plugin.settings.showPreview = value;
+            void this.plugin.saveSettings();
+          })
+        );
+      }
     );
     new import_obsidian.Setting(containerEl).setName("Starred files (Pro)").setHeading();
     const starredList = containerEl.createDiv();
@@ -2676,75 +2678,6 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
 
 // src/spotlight/SpotlightModal.ts
 var import_obsidian9 = require("obsidian");
-
-// src/core/fuzzy.mjs
-function fuzzyMatch(query, text) {
-  var _a;
-  if (!query) {
-    return { score: 0, indices: [] };
-  }
-  const q = query.toLowerCase();
-  const t = text.toLowerCase();
-  let qi = 0;
-  let lastMatch = -1;
-  let score = 0;
-  const indices = [];
-  for (let ti = 0; ti < t.length && qi < q.length; ti++) {
-    if (t[ti] === q[qi]) {
-      indices.push(ti);
-      if (lastMatch === ti - 1) {
-        score += 8;
-      } else if (ti === 0 || /[\s\-_/]/.test((_a = text[ti - 1]) != null ? _a : "")) {
-        score += 12;
-      } else {
-        score += 4;
-      }
-      if (ti < 6) score += 2;
-      lastMatch = ti;
-      qi++;
-    }
-  }
-  if (qi < q.length) {
-    return typoFallback(q, text);
-  }
-  if (t.includes(q)) score += 20;
-  if (t.startsWith(q)) score += 30;
-  return { score, indices };
-}
-function typoFallback(q, text) {
-  if (q.length < 4) return null;
-  const tolerance = q.length <= 5 ? 1 : q.length <= 9 ? 2 : 3;
-  let best = Infinity;
-  for (const word of text.toLowerCase().split(/[\s\-_/]+/)) {
-    if (!word) continue;
-    if (Math.abs(word.length - q.length) > tolerance) continue;
-    const d = boundedLevenshtein(q, word, tolerance);
-    if (d < best) best = d;
-    if (best === 0) break;
-  }
-  if (best > tolerance) return null;
-  return { score: Math.max(1, 8 - best * 2), indices: [] };
-}
-function boundedLevenshtein(a, b, max) {
-  const al = a.length;
-  const bl = b.length;
-  if (Math.abs(al - bl) > max) return max + 1;
-  let prev = new Array(bl + 1);
-  let curr = new Array(bl + 1);
-  for (let j = 0; j <= bl; j++) prev[j] = j;
-  for (let i = 1; i <= al; i++) {
-    curr[0] = i;
-    let rowMin = curr[0];
-    for (let j = 1; j <= bl; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
-      if (curr[j] < rowMin) rowMin = curr[j];
-    }
-    if (rowMin > max) return max + 1;
-    [prev, curr] = [curr, prev];
-  }
-  return prev[bl];
-}
 
 // src/core/advancedQuery.mjs
 function parseAdvancedQuery(raw) {
@@ -2837,8 +2770,76 @@ function tokenizeAdvanced(raw) {
   return tokens;
 }
 
+// src/core/fuzzy.mjs
+function fuzzyMatch(query, text) {
+  var _a;
+  if (!query) {
+    return { score: 0, indices: [] };
+  }
+  const q = query.toLowerCase();
+  const t = text.toLowerCase();
+  let qi = 0;
+  let lastMatch = -1;
+  let score = 0;
+  const indices = [];
+  for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+    if (t[ti] === q[qi]) {
+      indices.push(ti);
+      if (lastMatch === ti - 1) {
+        score += 8;
+      } else if (ti === 0 || /[\s\-_/]/.test((_a = text[ti - 1]) != null ? _a : "")) {
+        score += 12;
+      } else {
+        score += 4;
+      }
+      if (ti < 6) score += 2;
+      lastMatch = ti;
+      qi++;
+    }
+  }
+  if (qi < q.length) {
+    return typoFallback(q, text);
+  }
+  if (t.includes(q)) score += 20;
+  if (t.startsWith(q)) score += 30;
+  return { score, indices };
+}
+function typoFallback(q, text) {
+  if (q.length < 4) return null;
+  const tolerance = q.length <= 5 ? 1 : q.length <= 9 ? 2 : 3;
+  let best = Infinity;
+  for (const word of text.toLowerCase().split(/[\s\-_/]+/)) {
+    if (!word) continue;
+    if (Math.abs(word.length - q.length) > tolerance) continue;
+    const d = boundedLevenshtein(q, word, tolerance);
+    if (d < best) best = d;
+    if (best === 0) break;
+  }
+  if (best > tolerance) return null;
+  return { score: Math.max(1, 8 - best * 2), indices: [] };
+}
+function boundedLevenshtein(a, b, max) {
+  const al = a.length;
+  const bl = b.length;
+  if (Math.abs(al - bl) > max) return max + 1;
+  let prev = new Array(bl + 1);
+  let curr = new Array(bl + 1);
+  for (let j = 0; j <= bl; j++) prev[j] = j;
+  for (let i = 1; i <= al; i++) {
+    curr[0] = i;
+    let rowMin = curr[0];
+    for (let j = 1; j <= bl; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+      if (curr[j] < rowMin) rowMin = curr[j];
+    }
+    if (rowMin > max) return max + 1;
+    [prev, curr] = [curr, prev];
+  }
+  return prev[bl];
+}
+
 // src/search/fuzzy.ts
-var fuzzyMatch2 = fuzzyMatch;
 function renderHighlightedText(parent, text, indices) {
   parent.empty();
   if (indices.length === 0) {
@@ -2910,21 +2911,17 @@ function frontmatterValueMatches(raw, queryValue) {
 }
 
 // src/search/metadata.ts
-var normalizeTag2 = normalizeTag;
-var fileMatchesTags2 = fileMatchesTags;
-var getFrontmatterValue2 = getFrontmatterValue;
-var frontmatterValueMatches2 = frontmatterValueMatches;
 function collectFileTags(cache) {
   var _a, _b, _c, _d;
   const tags = /* @__PURE__ */ new Set();
   for (const tag of (_a = (0, import_obsidian2.getAllTags)(cache)) != null ? _a : []) {
-    tags.add(normalizeTag2(tag));
+    tags.add(normalizeTag(tag));
   }
   for (const entry of (_b = cache.tags) != null ? _b : []) {
-    tags.add(normalizeTag2(entry.tag));
+    tags.add(normalizeTag(entry.tag));
   }
   for (const tag of (_d = (0, import_obsidian2.parseFrontMatterTags)((_c = cache.frontmatter) != null ? _c : null)) != null ? _d : []) {
-    tags.add(normalizeTag2(tag));
+    tags.add(normalizeTag(tag));
   }
   return tags;
 }
@@ -2997,7 +2994,7 @@ var FileSearcher = class {
   constructor(app) {
     this.app = app;
   }
-  async search(options) {
+  search(options) {
     var _a, _b, _c, _d, _e, _f;
     const files = getSearchableFiles(this.app, {
       includeCanvas: options.includeCanvas,
@@ -3019,7 +3016,7 @@ var FileSearcher = class {
       if (!this.matchesFilters(file, options)) continue;
       const basename = file.basename;
       let score = 0;
-      let indices = [];
+      const indices = [];
       if (isBrowseMode) {
         score = 1;
       } else if (isFilterOnly) {
@@ -3027,13 +3024,13 @@ var FileSearcher = class {
       } else {
         let matched = true;
         for (const token of [...(_d = options.nameTerms) != null ? _d : [], ...options.textTokens]) {
-          const basenameMatch = fuzzyMatch2(token, basename);
+          const basenameMatch = fuzzyMatch(token, basename);
           if (basenameMatch) {
             score += basenameMatch.score;
             indices.push(...basenameMatch.indices);
             continue;
           }
-          const pathMatch = fuzzyMatch2(token, file.path);
+          const pathMatch = fuzzyMatch(token, file.path);
           if (!pathMatch && !this.aliasMatches(file, token)) {
             matched = false;
             break;
@@ -3096,13 +3093,13 @@ var FileSearcher = class {
     if (!cache) return options.tags.length === 0 && options.properties.length === 0;
     if (options.tags.length > 0) {
       const tags = collectFileTags(cache);
-      if (!fileMatchesTags2(tags, options.tags)) return false;
+      if (!fileMatchesTags(tags, options.tags)) return false;
     }
     for (const prop of options.properties) {
       const fm = cache.frontmatter;
       if (!fm) return false;
-      const raw = getFrontmatterValue2(fm, prop.key);
-      if (!frontmatterValueMatches2(raw, prop.value)) return false;
+      const raw = getFrontmatterValue(fm, prop.key);
+      if (!frontmatterValueMatches(raw, prop.value)) return false;
     }
     return true;
   }
@@ -3120,7 +3117,7 @@ var FileSearcher = class {
       if (!lowerPath.includes(term.toLowerCase())) return false;
     }
     for (const term of (_c = options.nameTerms) != null ? _c : []) {
-      if (!lowerName.includes(term.toLowerCase()) && !fuzzyMatch2(term, lowerName)) return false;
+      if (!lowerName.includes(term.toLowerCase()) && !fuzzyMatch(term, lowerName)) return false;
     }
     for (const phrase of (_d = options.phrases) != null ? _d : []) {
       if (!lowerPath.includes(phrase.toLowerCase())) return false;
@@ -3163,7 +3160,7 @@ var HeadingSearcher = class {
     const results = [];
     for (const file of this.app.vault.getMarkdownFiles()) {
       if (isPathExcluded(file.path, excluded)) continue;
-      if (fileQuery && !fuzzyMatch2(fileQuery, file.basename) && !fuzzyMatch2(fileQuery, file.path)) continue;
+      if (fileQuery && !fuzzyMatch(fileQuery, file.basename) && !fuzzyMatch(fileQuery, file.path)) continue;
       const cache = this.app.metadataCache.getFileCache(file);
       const headings = cache == null ? void 0 : cache.headings;
       if (!headings || headings.length === 0) continue;
@@ -3173,7 +3170,7 @@ var HeadingSearcher = class {
         let score = 1;
         let matchIndices = [];
         if (q.length > 0) {
-          const match = fuzzyMatch2(q, h.heading);
+          const match = fuzzyMatch(q, h.heading);
           if (!match) continue;
           score = match.score;
           matchIndices = match.indices;
@@ -3225,7 +3222,7 @@ var CommandSearcher = class {
         results.push({ id: cmd.id, name: cmd.name, score: 1, matchIndices: [] });
         continue;
       }
-      const match = fuzzyMatch2(q, cmd.name);
+      const match = fuzzyMatch(q, cmd.name);
       if (!match) continue;
       results.push({ id: cmd.id, name: cmd.name, score: match.score, matchIndices: match.indices });
     }
@@ -3290,7 +3287,7 @@ var SymbolSearcher = class {
       let score = 1;
       let matchIndices = [];
       if (q.length > 0) {
-        const match = fuzzyMatch2(q, symbol.text);
+        const match = fuzzyMatch(q, symbol.text);
         if (!match) continue;
         score = match.score;
         matchIndices = match.indices;
@@ -3344,8 +3341,8 @@ var EditorSearcher = class {
       let score = 1;
       let matchIndices = [];
       if (q.length > 0) {
-        const titleMatch = fuzzyMatch2(q, title);
-        const match = titleMatch != null ? titleMatch : file ? fuzzyMatch2(q, file.path) : null;
+        const titleMatch = fuzzyMatch(q, title);
+        const match = titleMatch != null ? titleMatch : file ? fuzzyMatch(q, file.path) : null;
         if (!match) return;
         score = match.score;
         matchIndices = titleMatch ? match.indices : [];
@@ -3380,7 +3377,7 @@ var EditorSearcher = class {
   }
   activate(leaf) {
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
-    this.app.workspace.revealLeaf(leaf);
+    void this.app.workspace.revealLeaf(leaf);
   }
   leafFile(leaf) {
     var _a;
@@ -3474,7 +3471,8 @@ function detectSearchIntegrations(pluginIds) {
   const ids = new Set((pluginIds || []).map((id) => String(id).toLowerCase()));
   return {
     omnisearch: ids.has("omnisearch") || ids.has("obsidian-omnisearch"),
-    textExtractor: ids.has("text-extractor") || ids.has("obsidian-text-extractor")
+    textExtractor: ids.has("text-extractor") || ids.has("obsidian-text-extractor"),
+    basesPowerPack: ids.has("bases-power-pack")
   };
 }
 
@@ -3586,7 +3584,8 @@ function highlightFirstMatch(root, terms) {
   var _a;
   const needles = terms.map((t) => t.toLowerCase()).filter((t) => t.length > 0);
   if (needles.length === 0) return null;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const doc = root.ownerDocument;
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let node;
   while (node = walker.nextNode()) {
     const text = (_a = node.nodeValue) != null ? _a : "";
@@ -3602,10 +3601,10 @@ function highlightFirstMatch(root, terms) {
       }
     }
     if (idx === -1) continue;
-    const range = document.createRange();
+    const range = doc.createRange();
     range.setStart(node, idx);
     range.setEnd(node, idx + len);
-    const mark = document.createElement("mark");
+    const mark = doc.createElement("mark");
     mark.className = "vault-spotlight-preview-hit";
     try {
       range.surroundContents(mark);
@@ -3729,27 +3728,27 @@ function renderResultRow(row, item, options) {
 var import_obsidian8 = require("obsidian");
 
 // src/core/frontmatterTags.mjs
-function normalizeTag3(raw) {
+function normalizeTag2(raw) {
   return String(raw != null ? raw : "").replace(/^#/, "").trim().replace(/\s+/g, "-");
 }
 function tagsValueToList(value) {
   if (value === null || value === void 0) return [];
   const entries = Array.isArray(value) ? value : String(value).split(",");
-  return entries.map((entry) => normalizeTag3(entry)).filter(Boolean);
+  return entries.map((entry) => normalizeTag2(entry)).filter(Boolean);
 }
 function addTagToTags(value, rawTag) {
-  const tag = normalizeTag3(rawTag);
+  const tag = normalizeTag2(rawTag);
   const list = tagsValueToList(value);
   if (!tag || list.some((entry) => entry.toLowerCase() === tag.toLowerCase())) return list;
   return [...list, tag];
 }
 function removeTagFromTags(value, rawTag) {
-  const tag = normalizeTag3(rawTag).toLowerCase();
+  const tag = normalizeTag2(rawTag).toLowerCase();
   const list = tagsValueToList(value).filter((entry) => entry.toLowerCase() !== tag);
   return list.length > 0 ? list : null;
 }
 function removeInlineTag(markdown, rawTag) {
-  const tag = normalizeTag3(rawTag);
+  const tag = normalizeTag2(rawTag);
   if (!tag) return markdown;
   return String(markdown != null ? markdown : "").replace(new RegExp(`(^|\\s)#${escapeRegExp(tag)}(?=\\s|$)`, "g"), (m, lead) => lead || "").replace(/[ \t]+\n/g, "\n");
 }
@@ -3845,7 +3844,7 @@ function batchAddTag(ctx) {
     initial: "spotlight",
     cta: "Add tag",
     onSubmit: (raw) => {
-      const cleaned = normalizeTag3(raw);
+      const cleaned = normalizeTag2(raw);
       if (!cleaned) return;
       void Promise.all(
         files.map(async (file) => {
@@ -3871,7 +3870,7 @@ function batchRemoveTag(ctx) {
     initial: "spotlight",
     cta: "Remove tag",
     onSubmit: (raw) => {
-      const cleaned = normalizeTag3(raw);
+      const cleaned = normalizeTag2(raw);
       if (!cleaned) return;
       void Promise.all(
         files.map(async (file) => {
@@ -4416,7 +4415,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       } else {
         this.setBadge(isEmptyQuery ? "Browse" : "Files", null);
         const parsed = tokenizeQuery(body);
-        const fileResults = await this.fileSearcher.search({
+        const fileResults = this.fileSearcher.search({
           textTokens: parsed.textTokens,
           phrases: isPro ? parsed.phrases : [],
           exclusions: isPro ? parsed.exclusions : [],
@@ -4536,7 +4535,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     if (this.drillFile && q) {
       linked = linked.filter((file) => {
         var _a2;
-        return (_a2 = fuzzyMatch2(q, file.basename)) != null ? _a2 : fuzzyMatch2(q, file.path);
+        return (_a2 = fuzzyMatch(q, file.basename)) != null ? _a2 : fuzzyMatch(q, file.path);
       });
     }
     const bookmarkedPaths = new Set(this.plugin.getBookmarkedPaths());
@@ -4548,7 +4547,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     let best = null;
     let bestScore = -1;
     for (const file of files) {
-      const match = (_a = fuzzyMatch2(q, file.basename)) != null ? _a : fuzzyMatch2(q, file.path);
+      const match = (_a = fuzzyMatch(q, file.basename)) != null ? _a : fuzzyMatch(q, file.path);
       if (match && match.score > bestScore) {
         best = file;
         bestScore = match.score;
@@ -4565,8 +4564,8 @@ var SpotlightModal = class extends import_obsidian9.Modal {
         rows.push({ folder: abstract, score: 1, indices: [] });
         continue;
       }
-      const nameMatch = fuzzyMatch2(q, abstract.name);
-      const match = nameMatch != null ? nameMatch : fuzzyMatch2(q, abstract.path);
+      const nameMatch = fuzzyMatch(q, abstract.name);
+      const match = nameMatch != null ? nameMatch : fuzzyMatch(q, abstract.path);
       if (!match) continue;
       rows.push({
         folder: abstract,
@@ -4976,7 +4975,26 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     }
     this.close();
   }
+  basesPowerPackApi() {
+    const api = window.basesPowerPack;
+    return api != null ? api : null;
+  }
+  /** Open a .base result in a Bases Power Pack view via its public API. */
+  async handoffBaseToPowerPack(view, basePath) {
+    const api = this.basesPowerPackApi();
+    if (!(api == null ? void 0 : api.openView)) {
+      new import_obsidian9.Notice("Vault Spotlight: update Bases Power Pack to 1.2.0+ to use this action.");
+      return;
+    }
+    try {
+      if (await api.openView(view, basePath)) this.close();
+    } catch (err) {
+      console.error("[VaultSpotlight] Bases Power Pack handoff failed", err);
+      new import_obsidian9.Notice("Vault Spotlight: could not open the base in Bases Power Pack.");
+    }
+  }
   availableActions(context) {
+    var _a;
     if (context.kind === "profile") {
       return [
         {
@@ -5070,6 +5088,25 @@ var SpotlightModal = class extends import_obsidian9.Modal {
         }
       );
     }
+    const integrations = this.installedSearchIntegrations();
+    if (file && file.extension === "base" && integrations.basesPowerPack) {
+      const api = this.basesPowerPackApi();
+      if ((api == null ? void 0 : api.openView) && ((_a = api.isPremiumActive) == null ? void 0 : _a.call(api)) === true) {
+        const views = [
+          ["kanban", "Kanban"],
+          ["calendar", "Calendar"],
+          ["gantt", "Gantt"]
+        ];
+        for (const [view, label] of views) {
+          actions.push({
+            id: `open-base-${view}`,
+            name: `Open in ${label} view`,
+            description: `Open this base in Bases Power Pack's ${label} view.`,
+            run: () => this.handoffBaseToPowerPack(view, file.path)
+          });
+        }
+      }
+    }
     actions.push(
       {
         id: "save-profile",
@@ -5149,7 +5186,6 @@ var SpotlightModal = class extends import_obsidian9.Modal {
         run: () => appendLinksToActiveNote(this.batchContext())
       }
     );
-    const integrations = this.installedSearchIntegrations();
     if (integrations.omnisearch) {
       actions.push({
         id: "open-omnisearch",
@@ -5234,7 +5270,9 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     const showInFolder = this.app.showInFolder;
     if (typeof showInFolder === "function") {
       menu.addItem(
-        (i) => i.setTitle("Show in system explorer").setIcon("folder-open").onClick(() => showInFolder.call(this.app, file.path))
+        (i) => i.setTitle("Show in system explorer").setIcon("folder-open").onClick(() => {
+          showInFolder.call(this.app, file.path);
+        })
       );
     }
     if (evt) {
@@ -5363,7 +5401,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     const applyFocus = () => {
       var _a;
       if (!((_a = this.inputEl) == null ? void 0 : _a.isConnected)) return;
-      if (document.activeElement === this.inputEl) return;
+      if (this.inputEl.ownerDocument.activeElement === this.inputEl) return;
       this.inputEl.focus({ preventScroll: true });
       const end = this.inputEl.value.length;
       this.inputEl.setSelectionRange(end, end);
@@ -5375,42 +5413,33 @@ var SpotlightModal = class extends import_obsidian9.Modal {
   }
 };
 
-// src/license/LicenseManager.ts
+// src/shared/verifyLicense.mjs
 var import_tweetnacl = __toESM(require_nacl_fast(), 1);
-
-// src/license/publicKey.ts
-var LICENSE_PUBLIC_KEY = "8ybB+nBmz0Tiz5RYCYJsOgEW5+YmROAumf3HHPeC1E0=";
-
-// src/license/LicenseManager.ts
-var _LicenseManager = class _LicenseManager {
-  static verify(licenseKey) {
-    const trimmed = licenseKey.trim();
-    if (!trimmed) {
-      return { valid: false, error: "No license key provided." };
-    }
-    const parts = trimmed.split(".");
-    if (parts.length !== 2) {
-      return { valid: false, error: "Invalid license format." };
-    }
-    try {
-      const payloadBytes = base64ToBytes(parts[0]);
-      const signature = base64ToBytes(parts[1]);
-      const publicKey = base64ToBytes(LICENSE_PUBLIC_KEY);
-      if (!import_tweetnacl.default.sign.detached.verify(payloadBytes, signature, publicKey)) {
-        return { valid: false, error: "Invalid license signature." };
-      }
-      const payload = JSON.parse(new TextDecoder().decode(payloadBytes));
-      if (payload.product !== _LicenseManager.PRODUCT) {
-        return { valid: false, error: "License is for a different product." };
-      }
-      return { valid: true, email: payload.email };
-    } catch (e) {
-      return { valid: false, error: "Could not parse license key." };
-    }
+function verifyLicense(licenseKey, product, publicKeyB64) {
+  const trimmed = String(licenseKey != null ? licenseKey : "").trim();
+  if (!trimmed) {
+    return { valid: false, error: "No license key provided." };
   }
-};
-_LicenseManager.PRODUCT = "vault-spotlight";
-var LicenseManager = _LicenseManager;
+  const parts = trimmed.split(".");
+  if (parts.length !== 2) {
+    return { valid: false, error: "Invalid license format." };
+  }
+  try {
+    const payloadBytes = base64ToBytes(parts[0]);
+    const signature = base64ToBytes(parts[1]);
+    const publicKey = base64ToBytes(publicKeyB64);
+    if (!import_tweetnacl.default.sign.detached.verify(payloadBytes, signature, publicKey)) {
+      return { valid: false, error: "Invalid license signature." };
+    }
+    const payload = JSON.parse(new TextDecoder().decode(payloadBytes));
+    if (payload.product !== product) {
+      return { valid: false, error: "License is for a different product." };
+    }
+    return { valid: true, email: payload.email };
+  } catch (e) {
+    return { valid: false, error: "Could not parse license key." };
+  }
+}
 function base64ToBytes(value) {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
   const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
@@ -5422,6 +5451,18 @@ function base64ToBytes(value) {
   return bytes;
 }
 
+// src/license/publicKey.ts
+var LICENSE_PUBLIC_KEY = "8ybB+nBmz0Tiz5RYCYJsOgEW5+YmROAumf3HHPeC1E0=";
+
+// src/license/LicenseManager.ts
+var _LicenseManager = class _LicenseManager {
+  static verify(licenseKey) {
+    return verifyLicense(licenseKey, _LicenseManager.PRODUCT, LICENSE_PUBLIC_KEY);
+  }
+};
+_LicenseManager.PRODUCT = "vault-spotlight";
+var LicenseManager = _LicenseManager;
+
 // src/search/ContentSearcher.ts
 var import_obsidian11 = require("obsidian");
 
@@ -5429,7 +5470,7 @@ var import_obsidian11 = require("obsidian");
 var import_obsidian10 = require("obsidian");
 function getChildProcess() {
   try {
-    const req = globalThis.require;
+    const req = window.require;
     if (!req) return null;
     return req("child_process");
   } catch (e) {
@@ -5439,7 +5480,7 @@ function getChildProcess() {
 function getEnv(name) {
   var _a, _b;
   try {
-    const proc = globalThis.process;
+    const proc = window.process;
     return (_b = (_a = proc == null ? void 0 : proc.env) == null ? void 0 : _a[name]) != null ? _b : "";
   } catch (e) {
     return "";
@@ -5701,7 +5742,9 @@ var CanvasSearcher = class {
       const nodes = Array.isArray(data.nodes) ? data.nodes : [];
       nodes.forEach((node, index) => {
         var _a, _b;
-        const text = String((_b = (_a = node == null ? void 0 : node.text) != null ? _a : node == null ? void 0 : node.label) != null ? _b : "").trim();
+        const value = (_b = (_a = node == null ? void 0 : node.text) != null ? _a : node == null ? void 0 : node.label) != null ? _b : "";
+        const raw2 = typeof value === "string" ? value : typeof value === "number" || typeof value === "boolean" ? String(value) : "";
+        const text = raw2.trim();
         if (text) {
           lines.push({ line: index + 1, text });
         }
@@ -5801,6 +5844,7 @@ self.onmessage = (evt) => {
 `;
 
 // src/search/WorkerIndex.ts
+var SEARCH_TIMEOUT_MS = 15e3;
 var WorkerIndex = class _WorkerIndex {
   constructor(app, worker, blobUrl) {
     this.app = app;
@@ -5808,6 +5852,9 @@ var WorkerIndex = class _WorkerIndex {
     this.blobUrl = blobUrl;
     this.built = false;
     this.buildPromise = null;
+    // Bumped by invalidate(); a build that started under an older epoch must
+    // not mark the index as complete (a mid-build "clear" wiped its early files).
+    this.epoch = 0;
     this.nextId = 1;
     this.pending = /* @__PURE__ */ new Map();
     this.worker.onmessage = (evt) => {
@@ -5820,14 +5867,17 @@ var WorkerIndex = class _WorkerIndex {
       entry.resolve((_a = msg.results) != null ? _a : []);
     };
     this.worker.onerror = () => this.failPending(new Error("content index worker error"));
+    this.worker.onmessageerror = () => this.failPending(new Error("content index worker message error"));
   }
   /** Returns null when Workers/Blob URLs aren't available in this environment. */
   static create(app) {
+    let url = null;
     try {
-      const url = URL.createObjectURL(new Blob([WORKER_SOURCE], { type: "text/javascript" }));
+      url = URL.createObjectURL(new Blob([WORKER_SOURCE], { type: "text/javascript" }));
       const worker = new Worker(url);
       return new _WorkerIndex(app, worker, url);
     } catch (e) {
+      if (url) URL.revokeObjectURL(url);
       return null;
     }
   }
@@ -5839,6 +5889,7 @@ var WorkerIndex = class _WorkerIndex {
   ensureBuilt() {
     if (this.buildPromise) return this.buildPromise;
     if (this.built) return Promise.resolve();
+    const epoch = this.epoch;
     this.buildPromise = (async () => {
       for (const file of this.app.vault.getMarkdownFiles()) {
         try {
@@ -5847,7 +5898,7 @@ var WorkerIndex = class _WorkerIndex {
         } catch (e) {
         }
       }
-      this.built = true;
+      if (epoch === this.epoch) this.built = true;
     })().finally(() => {
       this.buildPromise = null;
     });
@@ -5857,10 +5908,23 @@ var WorkerIndex = class _WorkerIndex {
     await this.ensureBuilt();
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
-      this.pending.set(id, { resolve, reject });
+      const timer = window.setTimeout(() => {
+        if (this.pending.delete(id)) reject(new Error("content index worker timed out"));
+      }, SEARCH_TIMEOUT_MS);
+      this.pending.set(id, {
+        resolve: (rows) => {
+          window.clearTimeout(timer);
+          resolve(rows);
+        },
+        reject: (err) => {
+          window.clearTimeout(timer);
+          reject(err);
+        }
+      });
       try {
         this.worker.postMessage({ type: "search", id, tokens, limit, excluded });
       } catch (err) {
+        window.clearTimeout(timer);
         this.pending.delete(id);
         reject(err instanceof Error ? err : new Error(String(err)));
       }
@@ -5882,6 +5946,7 @@ var WorkerIndex = class _WorkerIndex {
     this.worker.postMessage({ type: "remove", path });
   }
   invalidate() {
+    this.epoch++;
     this.built = false;
     this.worker.postMessage({ type: "clear" });
   }
@@ -5905,6 +5970,7 @@ var ContentSearcher = class {
     this.buildPromise = null;
     // undefined = not tried yet; null = unavailable or died → in-process fallback.
     this.workerIndex = void 0;
+    this.disposed = false;
     this.ripgrep = new RipgrepSearcher(app, ripgrepCommand);
     this.canvas = new CanvasSearcher(app);
     this.bases = new BaseSearcher(app);
@@ -5970,6 +6036,7 @@ var ContentSearcher = class {
         }
         return results2;
       } catch (err) {
+        if (this.disposed) return [];
         console.warn("[VaultSpotlight] content index worker failed, falling back in-process", err);
         this.retireWorker();
       }
@@ -6041,6 +6108,7 @@ var ContentSearcher = class {
   /** Release the worker when the plugin unloads. */
   dispose() {
     var _a;
+    this.disposed = true;
     (_a = this.workerIndex) == null ? void 0 : _a.dispose();
     this.workerIndex = null;
   }
@@ -6074,6 +6142,11 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
     this.settings = DEFAULT_SETTINGS;
     this.activeSpotlight = null;
     this.saveTimer = null;
+    this.api = null;
+    // Serialize writes: overlapping saveData calls (e.g. per-keystroke license
+    // verification) could otherwise finish out of order, letting a stale
+    // serialization win on disk.
+    this.savePromise = Promise.resolve();
   }
   async onload() {
     await this.loadSettings();
@@ -6096,8 +6169,8 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
       callback: () => this.openSpotlight("", "headings")
     });
     this.addCommand({
-      id: "run-command",
-      name: "Run command",
+      id: "run-action",
+      name: "Run action",
       callback: () => this.openSpotlight("", "commands")
     });
     this.addCommand({
@@ -6176,7 +6249,8 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
       const mode = isSpotlightMode(params.mode) ? params.mode : "files";
       this.openSpotlight((_a = params.query) != null ? _a : "", mode);
     });
-    globalThis.vaultSpotlight = this.createApi();
+    this.api = this.createApi();
+    window.vaultSpotlight = this.api;
     this.addSettingTab(new VaultSpotlightSettingTab(this.app, this));
   }
   onunload() {
@@ -6184,8 +6258,9 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
     (_a = this.activeSpotlight) == null ? void 0 : _a.close();
     this.activeSpotlight = null;
     (_b = this.contentSearcher) == null ? void 0 : _b.dispose();
-    const globals = globalThis;
-    if (globals.vaultSpotlight) delete globals.vaultSpotlight;
+    const globals = window;
+    if (this.api && globals.vaultSpotlight === this.api) delete globals.vaultSpotlight;
+    this.api = null;
     this.flushSave();
   }
   /**
@@ -6376,23 +6451,34 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
     }
     this.scheduleSave();
   }
-  async refreshLicense() {
+  /**
+   * Re-verify the license key (offline) and cache the result.
+   *
+   * `persistUnchanged` is for the settings tab, where the key TEXT was just
+   * edited: it must be saved even when the Pro status didn't flip, or an
+   * invalid/typo'd key silently vanishes on the next restart. Startup calls
+   * leave it false so an unchanged verification never writes data.json.
+   */
+  async refreshLicense(persistUnchanged = false) {
     var _a;
     const before = this.settings.isPro;
+    const beforeEmail = this.settings.licenseEmail;
     if (!this.settings.licenseKey) {
-      if (!this.settings.isPro && !this.settings.licenseEmail) return false;
+      if (!this.settings.isPro && !this.settings.licenseEmail) {
+        if (persistUnchanged) await this.saveSettings();
+        return false;
+      }
       this.settings.isPro = false;
       this.settings.licenseEmail = "";
       await this.saveSettings();
       return before !== this.settings.isPro;
     }
     const result = LicenseManager.verify(this.settings.licenseKey);
-    const isPro = result.valid;
-    const licenseEmail = (_a = result.email) != null ? _a : "";
-    this.settings.isPro = isPro;
-    this.settings.licenseEmail = licenseEmail;
-    await this.saveSettings();
-    return before !== isPro;
+    this.settings.isPro = result.valid;
+    this.settings.licenseEmail = (_a = result.email) != null ? _a : "";
+    const changed = before !== this.settings.isPro || beforeEmail !== this.settings.licenseEmail;
+    if (changed || persistUnchanged) await this.saveSettings();
+    return changed;
   }
   async loadSettings() {
     const data = await this.loadData();
@@ -6448,11 +6534,14 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
     }
   }
   async saveSettings() {
-    try {
-      await this.saveData(this.settings);
-    } catch (err) {
-      console.error("[VaultSpotlight] failed to save settings", err);
-    }
+    this.savePromise = this.savePromise.then(async () => {
+      try {
+        await this.saveData(this.settings);
+      } catch (err) {
+        console.error("[VaultSpotlight] failed to save settings", err);
+      }
+    });
+    return this.savePromise;
   }
 };
 function coercePositiveInt(value, fallback) {

@@ -51,7 +51,17 @@ export class CanvasSearcher {
 			const data = JSON.parse(raw) as { nodes?: unknown };
 			const nodes = Array.isArray(data.nodes) ? (data.nodes as CanvasNode[]) : [];
 			nodes.forEach((node, index) => {
-				const text = String(node?.text ?? node?.label ?? "").trim();
+				// Strings, numbers, and booleans are searchable (third-party tools
+				// emit numeric labels); objects would stringify uselessly as
+				// "[object Object]" and are skipped.
+				const value = node?.text ?? node?.label ?? "";
+				const raw =
+					typeof value === "string"
+						? value
+						: typeof value === "number" || typeof value === "boolean"
+							? String(value)
+							: "";
+				const text = raw.trim();
 				if (text) {
 					lines.push({ line: index + 1, text });
 				}

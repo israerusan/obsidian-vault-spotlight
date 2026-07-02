@@ -21,8 +21,8 @@ import { fuzzyMatch, tokenizeQuery } from "../search/fuzzy";
 import { SaveSearchPromptModal } from "./SaveSearchPromptModal";
 import { PromptModal } from "./PromptModal";
 import { getVaultFileKind } from "../search/vaultFiles";
-import { activeProfile, createProfileFromSettings } from "../core/searchProfiles.mjs";
-import { detectSearchIntegrations } from "../core/integrations.mjs";
+import { activeProfile, createProfileFromSettings, type CoreSearchProfile } from "../core/searchProfiles.mjs";
+import { detectSearchIntegrations, type SearchIntegrations } from "../core/integrations.mjs";
 import { findBacklinks, findOutlinks } from "../core/linkGraph.mjs";
 import {
 	MODE_ORDER,
@@ -217,7 +217,7 @@ export class SpotlightModal extends Modal {
 		return this.plugin.settings.isPro && (profile?.showPreview ?? this.plugin.settings.showPreview);
 	}
 
-	private currentProfile(): any | null {
+	private currentProfile(): CoreSearchProfile | null {
 		if (!this.plugin.settings.isPro) return null;
 		return activeProfile(this.plugin.settings.searchProfiles, this.plugin.settings.activeProfileId);
 	}
@@ -291,7 +291,7 @@ export class SpotlightModal extends Modal {
 			this.plugin.settings.escapeChar
 		);
 		if (detected.escaped) return { mode: "files", body: detected.body };
-		if (detected.mode) return { mode: detected.mode as SpotlightMode, body: detected.body };
+		if (detected.mode) return { mode: detected.mode, body: detected.body };
 		return { mode: this.mode, body: raw.trim() };
 	}
 
@@ -501,7 +501,7 @@ export class SpotlightModal extends Modal {
 			} else {
 				this.setBadge(isEmptyQuery ? "Browse" : "Files", null);
 				const parsed = tokenizeQuery(body);
-				const fileResults = await this.fileSearcher.search({
+				const fileResults = this.fileSearcher.search({
 					textTokens: parsed.textTokens,
 					phrases: isPro ? parsed.phrases : [],
 					exclusions: isPro ? parsed.exclusions : [],
@@ -1137,7 +1137,7 @@ export class SpotlightModal extends Modal {
 		}).open();
 	}
 
-	private installedSearchIntegrations(): { omnisearch: boolean; textExtractor: boolean } {
+	private installedSearchIntegrations(): SearchIntegrations {
 		const plugins = (this.app as unknown as { plugins?: { plugins?: Record<string, unknown> } }).plugins?.plugins ?? {};
 		return detectSearchIntegrations(Object.keys(plugins));
 	}
@@ -1149,6 +1149,41 @@ export class SpotlightModal extends Modal {
 			return;
 		}
 		this.close();
+	}
+
+	private basesPowerPackApi(): {
+		openView?: (view: string, basePath?: string) => Promise<boolean>;
+		isPremiumActive?: () => boolean;
+	} | null {
+		const api = (
+			window as unknown as {
+				basesPowerPack?: {
+					openView?: (view: string, basePath?: string) => Promise<boolean>;
+					isPremiumActive?: () => boolean;
+				};
+			}
+		).basesPowerPack;
+		return api ?? null;
+	}
+
+	/** Open a .base result in a Bases Power Pack view via its public API. */
+	private async handoffBaseToPowerPack(
+		view: "kanban" | "calendar" | "gantt",
+		basePath: string
+	): Promise<void> {
+		const api = this.basesPowerPackApi();
+		if (!api?.openView) {
+			new Notice("Vault Spotlight: update Bases Power Pack to 1.2.0+ to use this action.");
+			return;
+		}
+		try {
+			// Power Pack does its own premium gating and shows its own notices;
+			// only close Spotlight when the view actually opened.
+			if (await api.openView(view, basePath)) this.close();
+		} catch (err) {
+			console.error("[VaultSpotlight] Bases Power Pack handoff failed", err);
+			new Notice("Vault Spotlight: could not open the base in Bases Power Pack.");
+		}
 	}
 
 	private availableActions(context: ResultItem): SpotlightAction[] {
@@ -1248,6 +1283,31 @@ export class SpotlightModal extends Modal {
 			);
 		}
 
+		const integrations = this.installedSearchIntegrations();
+
+		// Handoff: open a .base result in a Bases Power Pack view. Using a base
+		// as the data source is a Power Pack PREMIUM feature — only offer the
+		// actions when its API reports premium, so Lite users never see menu
+		// items that can only fail.
+		if (file && file.extension === "base" && integrations.basesPowerPack) {
+			const api = this.basesPowerPackApi();
+			if (api?.openView && api.isPremiumActive?.() === true) {
+				const views = [
+					["kanban", "Kanban"],
+					["calendar", "Calendar"],
+					["gantt", "Gantt"],
+				] as const;
+				for (const [view, label] of views) {
+					actions.push({
+						id: `open-base-${view}`,
+						name: `Open in ${label} view`,
+						description: `Open this base in Bases Power Pack's ${label} view.`,
+						run: () => this.handoffBaseToPowerPack(view, file.path),
+					});
+				}
+			}
+		}
+
 		actions.push(
 			{
 				id: "save-profile",
@@ -1327,7 +1387,6 @@ export class SpotlightModal extends Modal {
 				run: () => batchOps.appendLinksToActiveNote(this.batchContext()),
 			}
 		);
-		const integrations = this.installedSearchIntegrations();
 		if (integrations.omnisearch) {
 			actions.push({
 				id: "open-omnisearch",
@@ -1429,7 +1488,9 @@ export class SpotlightModal extends Modal {
 				i
 					.setTitle("Show in system explorer")
 					.setIcon("folder-open")
-					.onClick(() => showInFolder.call(this.app, file.path))
+					.onClick(() => {
+						showInFolder.call(this.app, file.path);
+					})
 			);
 		}
 
@@ -1574,7 +1635,8 @@ export class SpotlightModal extends Modal {
 	private focusInput(): void {
 		const applyFocus = () => {
 			if (!this.inputEl?.isConnected) return;
-			if (document.activeElement === this.inputEl) return;
+			// ownerDocument, not the global document — popout-window safe.
+			if (this.inputEl.ownerDocument.activeElement === this.inputEl) return;
 			this.inputEl.focus({ preventScroll: true });
 			const end = this.inputEl.value.length;
 			this.inputEl.setSelectionRange(end, end);

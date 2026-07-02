@@ -86,7 +86,10 @@ function highlightFirstMatch(root: HTMLElement, terms: string[]): HTMLElement | 
 	const needles = terms.map((t) => t.toLowerCase()).filter((t) => t.length > 0);
 	if (needles.length === 0) return null;
 
-	const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+	// Use the element's own document, not the global one — the modal may live
+	// in a popout window.
+	const doc = root.ownerDocument;
+	const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
 	let node: Node | null;
 	while ((node = walker.nextNode())) {
 		const text = node.nodeValue ?? "";
@@ -103,10 +106,10 @@ function highlightFirstMatch(root: HTMLElement, terms: string[]): HTMLElement | 
 		}
 		if (idx === -1) continue;
 
-		const range = document.createRange();
+		const range = doc.createRange();
 		range.setStart(node, idx);
 		range.setEnd(node, idx + len);
-		const mark = document.createElement("mark");
+		const mark = doc.createElement("mark");
 		mark.className = "vault-spotlight-preview-hit";
 		try {
 			range.surroundContents(mark);
