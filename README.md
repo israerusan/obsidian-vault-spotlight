@@ -8,9 +8,16 @@ Vault Spotlight is a fast command center for large vaults: type a few letters to
 
 ## Free features
 
-- **Fast fuzzy file launcher** — find notes by partial names, initials, or light typos, with recent files boosted automatically.
+- **Fast fuzzy file launcher** — find notes by partial names, initials, or light typos, with recent files and open editors boosted automatically.
 - **Tag and property filters** — narrow results with queries like `#work`, `@status:done`, or a filename plus metadata filters.
-- **Command palette mode** — prefix with `:` or press `Tab` to search and run commands without leaving Spotlight.
+- **Command palette mode** — prefix with `:` or press `Tab` to search and run commands; recently run commands resurface on an empty query.
+- **Symbol outline mode** — prefix with `$` to jump to headings, links, tags, embeds, and block ids in the active note.
+- **Open editors mode** — prefix with `=` to switch between open tabs and panes, most-recently-used first.
+- **Folder mode** — prefix with `/` to find a folder, then press Enter to browse its files (folders with spaces work via `in:"My Folder"`).
+- **Drill into results** — arrow onto any file result, then press `$` for its outline or `~` for its links without opening it; Escape returns.
+- **Open shortcuts** — `Ctrl+Enter` new tab, `Ctrl+Alt+Enter` split, `Shift+Enter` create note from the query, `Alt+Enter` context menu; optional open-in-new-tab default.
+- **Switch to last file** — a command that flips between your two most recent files, ready for a hotkey.
+- **Customizable triggers** — every mode prefix is configurable, and an escape character (`!`) searches trigger characters literally.
 - **Bookmarks in browse view** — core Bookmarks appear alongside recent files so important notes are available before typing.
 - **Keyboard-first navigation** — open with `Ctrl+Shift+O`, cycle modes with `Tab`, navigate with arrows, and open with Enter.
 - **Accessible result list** — ARIA combobox/listbox attributes and visible modified-time labels keep the modal usable and readable.
@@ -19,7 +26,7 @@ Vault Spotlight is a fast command center for large vaults: type a few letters to
 
 - **Content search** — prefix with `>` to search inside note bodies; multi-word queries require every word on the matching line.
 - **Ripgrep acceleration** — use `rg` when available for faster full-vault content search, with safe fallback to the built-in vault index.
-- **Heading jump** — search headings across the vault and open directly at the matching section.
+- **Heading jump** — search headings across the vault (`^` prefix) and open directly at the matching section; scope with `file#heading` and filter depth with `level:1-2`.
 - **Live preview pane** — show rendered Markdown beside results and auto-scroll to the matched heading or passage.
 - **Search history** — recently used content searches resurface so repeated research queries are one Enter away.
 - **Keyboard action palette** — press `Ctrl+K` on a result to search actions like open, copy link/path, rename, star, export, or batch tag.

@@ -552,3 +552,16 @@
 	padding: 32px 12px;
 	font-size: 13px;
 }
+/* Symbol-mode outline indentation (heading level 2-6) */
+.vault-spotlight-item.vault-spotlight-indent-2 { padding-left: 26px; }
+.vault-spotlight-item.vault-spotlight-indent-3 { padding-left: 40px; }
+.vault-spotlight-item.vault-spotlight-indent-4 { padding-left: 54px; }
+.vault-spotlight-item.vault-spotlight-indent-5 { padding-left: 68px; }
+.vault-spotlight-item.vault-spotlight-indent-6 { padding-left: 82px; }
+
+/* Short single-character inputs for mode trigger settings */
+input.vault-spotlight-prefix-input {
+	width: 64px;
+	text-align: center;
+	font-family: var(--font-monospace);
+}

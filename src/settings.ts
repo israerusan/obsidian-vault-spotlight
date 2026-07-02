@@ -1,6 +1,17 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type VaultSpotlightPlugin from "./main";
 import { createProfileFromSettings } from "./core/searchProfiles.mjs";
+import {
+	DEFAULT_ESCAPE_CHAR,
+	DEFAULT_MODE_PREFIXES,
+	normalizeEscapeChar,
+	normalizeModePrefixes,
+} from "./core/modeTriggers.mjs";
+
+export type ModePrefixes = Record<
+	"content" | "commands" | "headings" | "symbols" | "links" | "editors" | "folders",
+	string
+>;
 
 export interface CustomSearch {
 	id: string;
@@ -11,7 +22,7 @@ export interface CustomSearch {
 export interface SearchProfile {
 	id: string;
 	name: string;
-	defaultMode: "files" | "content" | "headings" | "commands" | "links";
+	defaultMode: "files" | "content" | "headings" | "symbols" | "commands" | "links" | "editors" | "folders";
 	defaultQuery: string;
 	includeCanvas: boolean;
 	includePdf: boolean;
@@ -47,6 +58,10 @@ export interface VaultSpotlightSettings {
 	useFrecency: boolean;
 	showPreview: boolean;
 	recentSearches: string[];
+	modePrefixes: ModePrefixes;
+	escapeChar: string;
+	defaultNewTab: boolean;
+	recentCommandIds: string[];
 }
 
 export const MAX_CUSTOM_SEARCHES = 50;
@@ -75,7 +90,13 @@ export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	useFrecency: true,
 	showPreview: false,
 	recentSearches: [],
+	modePrefixes: { ...DEFAULT_MODE_PREFIXES },
+	escapeChar: DEFAULT_ESCAPE_CHAR,
+	defaultNewTab: false,
+	recentCommandIds: [],
 };
+
+export const MAX_RECENT_COMMANDS = 25;
 
 export class VaultSpotlightSettingTab extends PluginSettingTab {
 	plugin: VaultSpotlightPlugin;
@@ -166,6 +187,56 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 						.split("\n")
 						.map((line) => line.trim())
 						.filter((line) => line.length > 0);
+					void this.plugin.saveSettings();
+				});
+			});
+
+		new Setting(containerEl).setName("Opening & mode triggers").setHeading();
+
+		new Setting(containerEl)
+			.setName("Open in new tab by default")
+			.setDesc("Enter opens results in a new tab. Ctrl+Enter then opens in the current tab instead.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.defaultNewTab).onChange((value) => {
+					this.plugin.settings.defaultNewTab = value;
+					void this.plugin.saveSettings();
+				})
+			);
+
+		const prefixLabels: Array<{ key: keyof ModePrefixes; name: string; desc: string }> = [
+			{ key: "content", name: "Content search trigger", desc: "Search inside note bodies (Pro)." },
+			{ key: "commands", name: "Command trigger", desc: "Search and run commands." },
+			{ key: "headings", name: "Headings trigger", desc: "Jump to headings across the vault (Pro)." },
+			{ key: "symbols", name: "Symbols trigger", desc: "Outline of the active note: headings, links, tags, blocks." },
+			{ key: "links", name: "Links trigger", desc: "Backlinks and outlinks (Pro)." },
+			{ key: "editors", name: "Open editors trigger", desc: "Jump between open tabs and panes." },
+			{ key: "folders", name: "Folders trigger", desc: "Find a folder and browse its files." },
+		];
+		for (const { key, name, desc } of prefixLabels) {
+			new Setting(containerEl)
+				.setName(name)
+				.setDesc(`${desc} Default: ${DEFAULT_MODE_PREFIXES[key]}`)
+				.addText((text) => {
+					text.inputEl.maxLength = 4;
+					text.inputEl.addClass("vault-spotlight-prefix-input");
+					text.setValue(this.plugin.settings.modePrefixes[key]).onChange((value) => {
+						this.plugin.settings.modePrefixes = normalizeModePrefixes({
+							...this.plugin.settings.modePrefixes,
+							[key]: value,
+						});
+						void this.plugin.saveSettings();
+					});
+				});
+		}
+
+		new Setting(containerEl)
+			.setName("Escape character")
+			.setDesc(`Start a query with this character to search trigger characters literally. Default: ${DEFAULT_ESCAPE_CHAR}`)
+			.addText((text) => {
+				text.inputEl.maxLength = 1;
+				text.inputEl.addClass("vault-spotlight-prefix-input");
+				text.setValue(this.plugin.settings.escapeChar).onChange((value) => {
+					this.plugin.settings.escapeChar = normalizeEscapeChar(value);
 					void this.plugin.saveSettings();
 				});
 			});

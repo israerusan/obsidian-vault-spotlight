@@ -14,19 +14,33 @@ export interface HeadingResult {
 export class HeadingSearcher {
 	constructor(private app: App) {}
 
-	search(query: string, options: { excludeFolders?: string[]; limit?: number } = {}): HeadingResult[] {
+	search(
+		query: string,
+		options: {
+			excludeFolders?: string[];
+			limit?: number;
+			/** Restrict to files whose name fuzzy-matches (the `file#heading` syntax). */
+			fileQuery?: string;
+			levelMin?: number | null;
+			levelMax?: number | null;
+		} = {}
+	): HeadingResult[] {
 		const limit = options.limit ?? 50;
 		const excluded = normalizeExcludeFolders(options.excludeFolders);
 		const q = query.trim();
+		const fileQuery = options.fileQuery?.trim() ?? "";
 		const results: HeadingResult[] = [];
 
 		for (const file of this.app.vault.getMarkdownFiles()) {
 			if (isPathExcluded(file.path, excluded)) continue;
+			if (fileQuery && !fuzzyMatch(fileQuery, file.basename) && !fuzzyMatch(fileQuery, file.path)) continue;
 			const cache = this.app.metadataCache.getFileCache(file);
 			const headings = cache?.headings;
 			if (!headings || headings.length === 0) continue;
 
 			for (const h of headings) {
+				if (options.levelMin != null && h.level < options.levelMin) continue;
+				if (options.levelMax != null && h.level > options.levelMax) continue;
 				let score = 1;
 				let matchIndices: number[] = [];
 				if (q.length > 0) {

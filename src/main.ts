@@ -1,7 +1,8 @@
-import { Plugin, TFile } from "obsidian";
+import { Notice, Plugin, TFile } from "obsidian";
 import {
 	DEFAULT_SETTINGS,
 	MAX_CUSTOM_SEARCHES,
+	MAX_RECENT_COMMANDS,
 	MAX_RECENT_SEARCHES,
 	VaultSpotlightSettingTab,
 	type CustomSearch,
@@ -11,6 +12,12 @@ import { SpotlightModal, type SpotlightMode } from "./spotlight/SpotlightModal";
 import { LicenseManager } from "./license/LicenseManager";
 import { ContentSearcher } from "./search/ContentSearcher";
 import { normalizeProfiles } from "./core/searchProfiles.mjs";
+import {
+	normalizeEscapeChar,
+	normalizeModePrefixes,
+	previousFilePath,
+	pushRecentCommand,
+} from "./core/modeTriggers.mjs";
 
 const MAX_FRECENCY_ENTRIES = 500;
 
@@ -47,6 +54,31 @@ export default class VaultSpotlightPlugin extends Plugin {
 			id: "run-command",
 			name: "Run command",
 			callback: () => this.openSpotlight("", "commands"),
+		});
+		this.addCommand({
+			id: "go-to-symbol",
+			name: "Go to symbol in active note",
+			callback: () => this.openSpotlight("", "symbols"),
+		});
+		this.addCommand({
+			id: "open-editors",
+			name: "Switch between open editors",
+			callback: () => this.openSpotlight("", "editors"),
+		});
+		this.addCommand({
+			id: "browse-folders",
+			name: "Browse folders",
+			callback: () => this.openSpotlight("", "folders"),
+		});
+		this.addCommand({
+			id: "browse-links",
+			name: "Browse backlinks and outlinks",
+			callback: () => this.openSpotlight("", "links"),
+		});
+		this.addCommand({
+			id: "switch-to-last-file",
+			name: "Switch to last file",
+			callback: () => void this.switchToLastFile(),
 		});
 
 		this.addCommand({
@@ -160,6 +192,25 @@ export default class VaultSpotlightPlugin extends Plugin {
 			this.settings.recentPaths = recent.slice(0, this.settings.maxRecent);
 		}
 		this.bumpFrecency(path);
+		this.scheduleSave();
+	}
+
+	/** Open the most recent file that isn't the active one (quick file toggle). */
+	async switchToLastFile(): Promise<void> {
+		const active = this.app.workspace.getActiveFile();
+		const path = previousFilePath(this.settings.recentPaths, active?.path ?? "");
+		const file = path ? this.app.vault.getAbstractFileByPath(path) : null;
+		if (!(file instanceof TFile)) {
+			new Notice("Vault Spotlight: no previous file yet.");
+			return;
+		}
+		await this.app.workspace.getLeaf(false).openFile(file);
+		this.trackRecent(file.path);
+	}
+
+	/** Record an executed command so it resurfaces on an empty command query. */
+	trackCommand(id: string): void {
+		this.settings.recentCommandIds = pushRecentCommand(this.settings.recentCommandIds, id, MAX_RECENT_COMMANDS);
 		this.scheduleSave();
 	}
 
@@ -312,6 +363,12 @@ export default class VaultSpotlightPlugin extends Plugin {
 		if (this.settings.fileFrecency === null || typeof this.settings.fileFrecency !== "object") {
 			this.settings.fileFrecency = {};
 		}
+		this.settings.modePrefixes = normalizeModePrefixes(this.settings.modePrefixes);
+		this.settings.escapeChar = normalizeEscapeChar(this.settings.escapeChar);
+		this.settings.defaultNewTab = this.settings.defaultNewTab === true;
+		this.settings.recentCommandIds = (Array.isArray(this.settings.recentCommandIds) ? this.settings.recentCommandIds : [])
+			.filter((id): id is string => typeof id === "string" && id.length > 0)
+			.slice(0, MAX_RECENT_COMMANDS);
 
 		// Coerce the caps so a corrupt data.json (NaN/0/negative) can't make
 		// slice(0, cap) silently wipe recents/stars.

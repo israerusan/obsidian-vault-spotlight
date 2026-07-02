@@ -8,6 +8,8 @@ import {
 	Notice,
 	Modal,
 	TFile,
+	TFolder,
+	type WorkspaceLeaf,
 	normalizePath,
 	setIcon,
 } from "obsidian";
@@ -15,7 +17,10 @@ import type VaultSpotlightPlugin from "../main";
 import { FileSearcher } from "../search/FileSearcher";
 import { HeadingSearcher } from "../search/HeadingSearcher";
 import { CommandSearcher } from "../search/CommandSearcher";
-import { renderHighlightedText, tokenizeQuery } from "../search/fuzzy";
+import { SymbolSearcher, iconForSymbolType, type SymbolType } from "../search/SymbolSearcher";
+import { EditorSearcher } from "../search/EditorSearcher";
+import { detectModeFromPrefix, parseHeadingQuery } from "../core/modeTriggers.mjs";
+import { fuzzyMatch, renderHighlightedText, tokenizeQuery } from "../search/fuzzy";
 import { SaveSearchPromptModal } from "./SaveSearchPromptModal";
 import { PromptModal } from "./PromptModal";
 import { getVaultFileKind, iconForFileKind, type VaultFileKind } from "../search/vaultFiles";
@@ -25,7 +30,15 @@ import { activeProfile, createProfileFromSettings } from "../core/searchProfiles
 import { detectSearchIntegrations } from "../core/integrations.mjs";
 import { findBacklinks, findOutlinks } from "../core/linkGraph.mjs";
 
-export type SpotlightMode = "files" | "content" | "headings" | "commands" | "links";
+export type SpotlightMode =
+	| "files"
+	| "content"
+	| "headings"
+	| "symbols"
+	| "commands"
+	| "links"
+	| "editors"
+	| "folders";
 
 type ResultItem =
 	| {
@@ -60,6 +73,31 @@ type ResultItem =
 			kind: "command";
 			id: string;
 			name: string;
+			matchIndices: number[];
+			isRecent?: boolean;
+	  }
+	| {
+			kind: "symbol";
+			file: TFile;
+			line: number;
+			text: string;
+			symbolType: SymbolType;
+			level: number;
+			matchIndices: number[];
+	  }
+	| {
+			kind: "editor";
+			leaf: WorkspaceLeaf;
+			file: TFile | null;
+			title: string;
+			viewType: string;
+			isActive: boolean;
+			isPinned: boolean;
+			matchIndices: number[];
+	  }
+	| {
+			kind: "folder";
+			folder: TFolder;
 			matchIndices: number[];
 	  }
 	| {
@@ -98,7 +136,19 @@ type SpotlightAction = {
 	run: () => void | Promise<void>;
 };
 
-const MODE_ORDER: SpotlightMode[] = ["files", "content", "headings", "commands", "links"];
+/** Where to open a result: null = current tab, or an Obsidian pane type. */
+type PaneTarget = "tab" | "split" | "window" | null;
+
+const MODE_ORDER: SpotlightMode[] = [
+	"files",
+	"content",
+	"headings",
+	"symbols",
+	"commands",
+	"links",
+	"editors",
+	"folders",
+];
 
 export class SpotlightModal extends Modal {
 	private inputEl!: HTMLInputElement;
@@ -119,6 +169,8 @@ export class SpotlightModal extends Modal {
 	private fileSearcher: FileSearcher;
 	private headingSearcher: HeadingSearcher;
 	private commandSearcher: CommandSearcher;
+	private symbolSearcher: SymbolSearcher;
+	private editorSearcher: EditorSearcher;
 	private initialQuery: string;
 	private mode: SpotlightMode;
 	private metadataRef: EventRef | null = null;
@@ -126,6 +178,12 @@ export class SpotlightModal extends Modal {
 	private actionReturnQuery = "";
 	private actionReturnMode: SpotlightMode = "files";
 	private resultSnapshot: ResultItem[] = [];
+	// Drill-in: arrow onto a result, then type the symbols/links trigger to
+	// explore that file without opening it. Escape restores the outer search.
+	private drillFile: TFile | null = null;
+	private drillReturnQuery = "";
+	private drillReturnMode: SpotlightMode = "files";
+	private hasNavigated = false;
 
 	constructor(
 		app: App,
@@ -138,6 +196,8 @@ export class SpotlightModal extends Modal {
 		this.fileSearcher = new FileSearcher(app);
 		this.headingSearcher = new HeadingSearcher(app);
 		this.commandSearcher = new CommandSearcher(app);
+		this.symbolSearcher = new SymbolSearcher(app);
+		this.editorSearcher = new EditorSearcher(app);
 		this.initialQuery = initialQuery;
 		this.mode = initialMode;
 	}
@@ -208,7 +268,25 @@ export class SpotlightModal extends Modal {
 			link.setAttr("target", "_blank");
 		}
 
-		this.inputEl.addEventListener("input", () => this.scheduleSearch());
+		this.inputEl.addEventListener("input", () => {
+			this.hasNavigated = false;
+			this.scheduleSearch();
+		});
+
+		// Drill-in: after arrowing onto a result, the symbols/links trigger key
+		// explores that result (QS++-style) instead of typing into the query.
+		this.inputEl.addEventListener("keydown", (evt) => {
+			if (!this.hasNavigated || evt.ctrlKey || evt.metaKey || evt.altKey) return;
+			const prefixes = this.plugin.settings.modePrefixes;
+			const drillMode =
+				evt.key === prefixes.symbols ? "symbols" : evt.key === prefixes.links ? "links" : null;
+			if (!drillMode) return;
+			const item = this.items[this.selectedIndex];
+			const file = item ? this.itemFile(item) : null;
+			if (!file || file.extension !== "md") return;
+			evt.preventDefault();
+			this.drillInto(file, drillMode);
+		});
 
 		this.registerScopeShortcuts();
 
@@ -259,18 +337,23 @@ export class SpotlightModal extends Modal {
 
 	private updateHint(): void {
 		const isPro = this.plugin.settings.isPro;
+		const prefixes = this.plugin.settings.modePrefixes;
 		this.hintEl.empty();
 		this.hintEl.createEl("span", { text: "Try " });
 		this.hintEl.createEl("code", { text: "#journal" });
-		this.hintEl.appendText(" ");
-		this.hintEl.createEl("code", { text: "@tags:journal" });
 		this.hintEl.appendText(" · ");
 		this.hintEl.createEl("code", { text: "Tab" });
 		this.hintEl.appendText(" mode · ");
-		this.hintEl.createEl("code", { text: ": command" });
+		this.hintEl.createEl("code", { text: `${prefixes.commands} command` });
+		this.hintEl.appendText(" · ");
+		this.hintEl.createEl("code", { text: `${prefixes.symbols} outline` });
+		this.hintEl.appendText(" · ");
+		this.hintEl.createEl("code", { text: `${prefixes.editors} tabs` });
+		this.hintEl.appendText(" · ");
+		this.hintEl.createEl("code", { text: `${prefixes.folders} folders` });
 		if (isPro) {
 			this.hintEl.appendText(" · ");
-			this.hintEl.createEl("code", { text: "> phrase" });
+			this.hintEl.createEl("code", { text: `${prefixes.content} phrase` });
 			this.hintEl.appendText(" · ");
 			this.hintEl.createEl("code", { text: "Ctrl+D" });
 			this.hintEl.appendText(" star");
@@ -300,20 +383,29 @@ export class SpotlightModal extends Modal {
 		this.searchTimer = window.setTimeout(() => void this.runSearch(), 60);
 	}
 
-	private effectiveMode(trimmed: string): SpotlightMode {
-		// Leading prefixes always win over the Tab-toggled mode, so they stay
-		// discoverable: ">" → content search, ":" → command palette.
-		if (trimmed.startsWith(">")) return "content";
-		if (trimmed.startsWith(":")) return "commands";
-		return this.mode;
+	/**
+	 * Leading prefixes always win over the Tab-toggled mode, so they stay
+	 * discoverable (all customizable): ">" content, ":" commands, "^" headings,
+	 * "$" symbols, "~" links, "=" editors, "/" folders. The escape character
+	 * ("!") forces a literal files search.
+	 */
+	private resolveQuery(raw: string): { mode: SpotlightMode; body: string } {
+		const detected = detectModeFromPrefix(
+			raw,
+			this.plugin.settings.modePrefixes,
+			this.plugin.settings.escapeChar
+		);
+		if (detected.escaped) return { mode: "files", body: detected.body };
+		if (detected.mode) return { mode: detected.mode as SpotlightMode, body: detected.body };
+		return { mode: this.mode, body: raw.trim() };
 	}
 
 	private async runSearch(): Promise<void> {
 		const generation = ++this.searchGeneration;
 		const raw = this.expandAliases(this.inputEl.value);
 		const trimmed = raw.trim();
-		const mode = this.effectiveMode(trimmed);
-		const isEmptyQuery = trimmed.length === 0;
+		const { mode, body } = this.resolveQuery(raw);
+		const isEmptyQuery = body.length === 0;
 		const isPro = this.plugin.settings.isPro;
 		const profile = this.currentProfile();
 		const excludeFolders = profile?.excludeFolders ?? this.plugin.settings.excludeFolders;
@@ -356,18 +448,31 @@ export class SpotlightModal extends Modal {
 			}
 
 			if (mode === "commands") {
-				const cmdQuery = trimmed.startsWith(":") ? trimmed.replace(/^:\s?/, "").trim() : trimmed;
+				const cmdQuery = body;
 				this.setBadge("Commands", "is-content");
-				const commandResults = this.commandSearcher.search(cmdQuery, 60);
+				// Empty query: resurface recently-run commands first, then the rest.
+				const commandResults = this.commandSearcher.search(cmdQuery, cmdQuery ? 60 : 1000);
 				if (generation !== this.searchGeneration) return;
-				this.items = commandResults.map((r) => ({
+				let ordered = commandResults;
+				const recentIds = this.plugin.settings.recentCommandIds;
+				if (cmdQuery.length === 0 && recentIds.length > 0) {
+					const byId = new Map(commandResults.map((r) => [r.id, r]));
+					const recent = recentIds
+						.map((id) => byId.get(id))
+						.filter((r): r is (typeof commandResults)[number] => !!r);
+					const recentSet = new Set(recent.map((r) => r.id));
+					ordered = [...recent, ...commandResults.filter((r) => !recentSet.has(r.id))];
+				}
+				const recentSet = new Set(cmdQuery.length === 0 ? recentIds : []);
+				this.items = ordered.slice(0, 60).map((r) => ({
 					kind: "command" as const,
 					id: r.id,
 					name: r.name,
 					matchIndices: r.matchIndices,
+					isRecent: recentSet.has(r.id),
 				}));
 			} else if (mode === "content") {
-				const text = trimmed.startsWith(">") ? trimmed.replace(/^>\s?/, "").trim() : trimmed;
+				const text = body;
 				this.setBadge("Content", "is-content");
 				// On an empty content query, surface recent searches to re-run
 				// instead of an empty pane (mirrors the Recent files browse view).
@@ -408,7 +513,15 @@ export class SpotlightModal extends Modal {
 				}));
 			} else if (mode === "headings") {
 				this.setBadge("Headings", "is-content");
-				const headingResults = this.headingSearcher.search(trimmed, { excludeFolders, limit: 60 });
+				// Supports `file#heading` scoping and `level:1-2` depth filters.
+				const parsed = parseHeadingQuery(body);
+				const headingResults = this.headingSearcher.search(parsed.headingQuery, {
+					excludeFolders,
+					limit: 60,
+					fileQuery: parsed.fileQuery,
+					levelMin: parsed.levelMin,
+					levelMax: parsed.levelMax,
+				});
 				if (generation !== this.searchGeneration) return;
 				this.items = headingResults.map((r) => ({
 					kind: "heading" as const,
@@ -419,9 +532,64 @@ export class SpotlightModal extends Modal {
 					score: r.score,
 					matchIndices: r.matchIndices,
 				}));
+			} else if (mode === "symbols") {
+				const target = this.drillFile ?? this.app.workspace.getActiveFile();
+				this.setBadge(target ? `Symbols · ${target.basename}` : "Symbols", "is-content");
+				if (!target || target.extension !== "md") {
+					this.items = [];
+					this.isLoading = false;
+					this.renderEmptyState(
+						"heading",
+						"No note to outline",
+						"Open a Markdown note, or arrow onto a file result and press the symbols trigger."
+					);
+					this.updateStatus(0);
+					return;
+				}
+				const symbolResults = this.symbolSearcher.search(target, body, 100);
+				if (generation !== this.searchGeneration) return;
+				this.items = symbolResults.map((r) => ({
+					kind: "symbol" as const,
+					file: r.file,
+					line: r.line,
+					text: r.text,
+					symbolType: r.symbolType,
+					level: r.level,
+					matchIndices: r.matchIndices,
+				}));
+			} else if (mode === "editors") {
+				this.setBadge("Editors", "is-content");
+				const editorResults = this.editorSearcher.search(body, 60);
+				if (generation !== this.searchGeneration) return;
+				this.items = editorResults.map((r) => ({
+					kind: "editor" as const,
+					leaf: r.leaf,
+					file: r.file,
+					title: r.title,
+					viewType: r.viewType,
+					isActive: r.isActive,
+					isPinned: r.isPinned,
+					matchIndices: r.matchIndices,
+				}));
+				if (this.items.length === 0) {
+					this.isLoading = false;
+					this.renderEmptyState("layout", "No open editors", "Open a few notes, then jump between their tabs from here.");
+					this.updateStatus(0);
+					return;
+				}
+			} else if (mode === "folders") {
+				this.setBadge("Folders", "is-content");
+				this.items = this.folderItems(body);
+				if (this.items.length === 0) {
+					this.isLoading = false;
+					this.renderEmptyState("folder", "No matching folders", "Press Enter on a folder to browse its files.");
+					this.updateStatus(0);
+					return;
+				}
 			} else if (mode === "links") {
-				this.setBadge("Links", "is-content");
-				this.items = this.linkModeItems(trimmed);
+				const linkTarget = this.drillFile ?? this.app.workspace.getActiveFile();
+				this.setBadge(linkTarget && !body ? `Links · ${linkTarget.basename}` : "Links", "is-content");
+				this.items = this.linkModeItems(body);
 				if (this.items.length === 0) {
 					this.isLoading = false;
 					this.renderEmptyState("link", "No linked notes found", "Use Links mode on an active note, or type a note name to inspect backlinks.");
@@ -430,12 +598,13 @@ export class SpotlightModal extends Modal {
 				}
 			} else {
 				this.setBadge(isEmptyQuery ? "Browse" : "Files", null);
-				const parsed = tokenizeQuery(raw);
+				const parsed = tokenizeQuery(body);
 				const fileResults = await this.fileSearcher.search({
 					textTokens: parsed.textTokens,
 					phrases: isPro ? parsed.phrases : [],
 					exclusions: isPro ? parsed.exclusions : [],
-					folderIncludes: isPro ? parsed.folderIncludes : [],
+					// in: stays free — folder mode's Enter-to-browse depends on it.
+					folderIncludes: parsed.folderIncludes,
 					pathTerms: isPro ? parsed.pathTerms : [],
 					nameTerms: isPro ? parsed.nameTerms : [],
 					tags: parsed.tags,
@@ -448,6 +617,7 @@ export class SpotlightModal extends Modal {
 					recentPaths: this.plugin.settings.recentPaths,
 					starredPaths: isPro ? this.plugin.settings.starredPaths : [],
 					bookmarkedPaths: this.plugin.getBookmarkedPaths(),
+					openPaths: this.editorSearcher.openFilePaths(),
 					includeCanvas: isPro && includeCanvas,
 					includePdf: isPro && includePdf,
 					excludeFolders,
@@ -509,7 +679,7 @@ export class SpotlightModal extends Modal {
 					parsed.modifiedDays === null &&
 					parsed.createdDays === null;
 				if (this.items.length === 0 && !isEmptyQuery && noFilters) {
-					this.items = [{ kind: "create", name: trimmed }];
+					this.items = [{ kind: "create", name: body }];
 				}
 			}
 		} catch (err) {
@@ -547,11 +717,11 @@ export class SpotlightModal extends Modal {
 	}
 
 	private itemFile(item: ResultItem): TFile | null {
-		return item.kind === "file" ||
-			item.kind === "content" ||
-			item.kind === "heading"
-			? item.file
-			: null;
+		if (item.kind === "file" || item.kind === "content" || item.kind === "heading" || item.kind === "symbol") {
+			return item.file;
+		}
+		if (item.kind === "editor") return item.file;
+		return null;
 	}
 
 	private fileToResult(file: TFile, score: number): ResultItem {
@@ -572,15 +742,46 @@ export class SpotlightModal extends Modal {
 		const active = this.app.workspace.getActiveFile();
 		const files = this.app.vault.getMarkdownFiles();
 		const q = query.replace(/^(<-|->|\[\[)\s?/, "").trim().toLowerCase();
-		const target = q
-			? files.find((file) => file.basename.toLowerCase().includes(q) || file.path.toLowerCase().includes(q))
-			: active;
+		// Drilled-in file wins; otherwise a typed name, otherwise the active note.
+		const target =
+			this.drillFile ??
+			(q
+				? files.find((file) => file.basename.toLowerCase().includes(q) || file.path.toLowerCase().includes(q))
+				: active);
 		if (!target) return [];
 		const resolvedLinks = this.app.metadataCache.resolvedLinks ?? {};
 		const linked = query.trim().startsWith("->")
 			? findOutlinks(files, resolvedLinks, target.path)
 			: findBacklinks(files, resolvedLinks, target.path);
 		return linked.slice(0, 60).map((file, index) => this.fileToResult(file, 1000 - index));
+	}
+
+	private folderItems(query: string): ResultItem[] {
+		const q = query.trim();
+		const rows: Array<{ folder: TFolder; score: number; indices: number[] }> = [];
+		for (const abstract of this.app.vault.getAllLoadedFiles()) {
+			if (!(abstract instanceof TFolder) || abstract.isRoot()) continue;
+			if (q.length === 0) {
+				rows.push({ folder: abstract, score: 1, indices: [] });
+				continue;
+			}
+			const nameMatch = fuzzyMatch(q, abstract.name);
+			const match = nameMatch ?? fuzzyMatch(q, abstract.path);
+			if (!match) continue;
+			rows.push({
+				folder: abstract,
+				// Prefer name hits; path-only hits rank at a discount and get no
+				// highlight (indices would point into the path, not the name).
+				score: nameMatch ? match.score + 10 : Math.floor(match.score / 2),
+				indices: nameMatch ? match.indices : [],
+			});
+		}
+		rows.sort((a, b) => b.score - a.score || a.folder.path.localeCompare(b.folder.path));
+		return rows.slice(0, 60).map((row) => ({
+			kind: "folder" as const,
+			folder: row.folder,
+			matchIndices: row.indices,
+		}));
 	}
 
 	private renderLoading(): void {
@@ -690,8 +891,39 @@ export class SpotlightModal extends Modal {
 			} else if (item.kind === "command") {
 				setIcon(iconWrap, "terminal-square");
 				renderHighlightedText(title, item.name, item.matchIndices);
-				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Command" });
+				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isRecent ? "Recent" : "Command" });
 				body.createDiv({ cls: "vault-spotlight-item-meta", text: "Run command" });
+			} else if (item.kind === "symbol") {
+				setIcon(iconWrap, iconForSymbolType(item.symbolType));
+				if (item.symbolType === "heading" && item.level > 1) {
+					row.addClass(`vault-spotlight-indent-${Math.min(item.level, 6)}`);
+				}
+				renderHighlightedText(title, item.text, item.matchIndices);
+				titleRow.createSpan({
+					cls: "vault-spotlight-item-badge",
+					text: item.symbolType === "heading" ? `H${item.level}` : capitalize(item.symbolType),
+				});
+				body.createDiv({ cls: "vault-spotlight-item-meta", text: `L${item.line}` });
+			} else if (item.kind === "editor") {
+				setIcon(iconWrap, item.file ? iconForFileKind(getVaultFileKind(item.file)) : "layout");
+				renderHighlightedText(title, item.title, item.matchIndices);
+				if (item.isActive) {
+					titleRow.createSpan({ cls: "vault-spotlight-item-badge is-star", text: "Active" });
+				} else if (item.isPinned) {
+					titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Pinned" });
+				}
+				if (item.viewType && item.viewType !== "markdown") {
+					titleRow.createSpan({ cls: "vault-spotlight-item-badge is-type", text: item.viewType.toUpperCase() });
+				}
+				body.createDiv({ cls: "vault-spotlight-item-meta", text: item.file ? item.file.path : "Open editor" });
+			} else if (item.kind === "folder") {
+				setIcon(iconWrap, "folder");
+				renderHighlightedText(title, item.folder.name, item.matchIndices);
+				titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Folder" });
+				body.createDiv({
+					cls: "vault-spotlight-item-meta",
+					text: `${item.folder.path} · ${item.folder.children.length} item${item.folder.children.length === 1 ? "" : "s"}`,
+				});
 			} else if (item.kind === "history") {
 				setIcon(iconWrap, "history");
 				title.setText(item.query);
@@ -783,9 +1015,11 @@ export class SpotlightModal extends Modal {
 
 		this.addShortcut(shortcuts, ["↑", "↓"], "navigate");
 		this.addShortcut(shortcuts, ["↵"], "open");
+		this.addShortcut(shortcuts, ["Ctrl", "↵"], this.plugin.settings.defaultNewTab ? "same tab" : "new tab");
+		this.addShortcut(shortcuts, ["Shift", "↵"], "new note");
+		this.addShortcut(shortcuts, ["Alt", "↵"], "menu");
 		this.addShortcut(shortcuts, ["Tab"], "mode");
 		this.addShortcut(shortcuts, ["Ctrl", "K"], "actions");
-		this.addShortcut(shortcuts, ["Ctrl", "↵"], "menu");
 
 		if (this.plugin.settings.isPro) {
 			this.addShortcut(shortcuts, ["Ctrl", "D"], "star");
@@ -819,7 +1053,40 @@ export class SpotlightModal extends Modal {
 	private moveSelection(delta: number): void {
 		if (this.items.length === 0 || this.isLoading) return;
 		this.selectedIndex = (this.selectedIndex + delta + this.items.length) % this.items.length;
+		// Arrowing onto a result arms drill-in: the next symbols/links trigger
+		// keypress explores that result instead of typing into the query.
+		this.hasNavigated = true;
 		this.updateSelectionHighlight();
+	}
+
+	/** Shift+Enter: create a note named after the current query text. */
+	private async createFromQuery(): Promise<void> {
+		const { body } = this.resolveQuery(this.inputEl.value);
+		if (!body) return;
+		this.recordSearch();
+		this.close();
+		await this.createAndOpen(body);
+	}
+
+	private drillInto(file: TFile, mode: SpotlightMode): void {
+		this.drillReturnQuery = this.inputEl.value;
+		this.drillReturnMode = this.mode;
+		this.drillFile = file;
+		this.mode = mode;
+		this.inputEl.value = "";
+		this.hasNavigated = false;
+		this.focusInput();
+		void this.runSearch();
+	}
+
+	private exitDrill(): void {
+		if (!this.drillFile) return;
+		this.drillFile = null;
+		this.mode = this.drillReturnMode;
+		this.inputEl.value = this.drillReturnQuery;
+		this.hasNavigated = false;
+		this.focusInput();
+		void this.runSearch();
 	}
 
 	private toggleCheck(): void {
@@ -846,14 +1113,37 @@ export class SpotlightModal extends Modal {
 		const idx = MODE_ORDER.indexOf(this.mode);
 		this.mode = MODE_ORDER[(idx + 1) % MODE_ORDER.length];
 		// Drop a leading mode prefix so the toggled mode isn't overridden by it.
-		this.inputEl.value = this.inputEl.value.replace(/^\s*[>:]\s?/, "");
+		const detected = detectModeFromPrefix(
+			this.inputEl.value,
+			this.plugin.settings.modePrefixes,
+			this.plugin.settings.escapeChar
+		);
+		if (detected.mode) this.inputEl.value = detected.body;
 		this.focusInput();
 		void this.runSearch();
 	}
 
-	private async activateSelection(): Promise<void> {
+	private async activateSelection(paneOverride: PaneTarget = null): Promise<void> {
 		const selected = this.items[this.selectedIndex];
 		if (!selected) return;
+
+		if (selected.kind === "editor") {
+			this.recordSearch();
+			this.close();
+			this.editorSearcher.activate(selected.leaf);
+			if (selected.file) this.plugin.trackRecent(selected.file.path);
+			return;
+		}
+
+		if (selected.kind === "folder") {
+			// Browse the folder's files without leaving Spotlight.
+			this.drillFile = null;
+			this.mode = "files";
+			this.inputEl.value = `in:"${selected.folder.path}" `;
+			this.focusInput();
+			void this.runSearch();
+			return;
+		}
 
 		if (selected.kind === "history") {
 			// Re-run a past search without leaving the modal.
@@ -888,7 +1178,7 @@ export class SpotlightModal extends Modal {
 
 		if (selected.kind === "command") {
 			this.close();
-			this.commandSearcher.execute(selected.id);
+			if (this.commandSearcher.execute(selected.id)) this.plugin.trackCommand(selected.id);
 			return;
 		}
 
@@ -915,11 +1205,16 @@ export class SpotlightModal extends Modal {
 		this.checkedPaths.clear();
 		this.close();
 
+		// Batch-open always uses tabs; a single open honors the override, then
+		// the "open in new tab by default" setting.
+		const defaultTarget: PaneTarget = this.plugin.settings.defaultNewTab ? "tab" : null;
+		const target: PaneTarget = targets.length > 1 ? "tab" : paneOverride ?? defaultTarget;
+
 		for (const item of targets) {
 			const file = this.itemFile(item);
 			if (!file) continue;
 			try {
-				await this.openItem(item, targets.length > 1);
+				await this.openItem(item, target);
 				this.plugin.trackRecent(file.path);
 			} catch (err) {
 				console.error("[VaultSpotlight] failed to open", file.path, err);
@@ -927,12 +1222,12 @@ export class SpotlightModal extends Modal {
 		}
 	}
 
-	private async openItem(item: ResultItem, newTab: boolean): Promise<void> {
+	private async openItem(item: ResultItem, target: PaneTarget): Promise<void> {
 		const file = this.itemFile(item);
 		if (!file) return;
-		const leaf = this.app.workspace.getLeaf(newTab);
+		const leaf = target === null ? this.app.workspace.getLeaf(false) : this.app.workspace.getLeaf(target);
 		await leaf.openFile(file);
-		const line = item.kind === "content" || item.kind === "heading" ? item.line : null;
+		const line = item.kind === "content" || item.kind === "heading" || item.kind === "symbol" ? item.line : null;
 		if (line !== null && file.extension === "md" && leaf.view instanceof MarkdownView) {
 			const editor = leaf.view.editor;
 			editor.setCursor({ line: line - 1, ch: 0 });
@@ -1093,7 +1388,7 @@ export class SpotlightModal extends Modal {
 					description: "Open the selected result.",
 					run: async () => {
 						this.close();
-						await this.openItem(context, false);
+						await this.openItem(context, null);
 						this.plugin.trackRecent(file.path);
 					},
 				},
@@ -1557,8 +1852,8 @@ export class SpotlightModal extends Modal {
 		const raw = this.inputEl.value.trim();
 		if (!raw) return;
 		// Strip mode prefixes so history stores the plain query text.
-		const q = raw.replace(/^[>:]\s?/, "").trim();
-		if (q.length > 0) this.plugin.trackSearch(q);
+		const { body } = this.resolveQuery(raw);
+		if (body.length > 0) this.plugin.trackSearch(body);
 	}
 
 	private updatePreview(): void {
@@ -1610,9 +1905,10 @@ export class SpotlightModal extends Modal {
 	private previewHighlightTerms(item: ResultItem | undefined): string[] {
 		if (!item) return [];
 		if (item.kind === "heading") return [item.heading];
+		if (item.kind === "symbol" && item.symbolType === "heading") return [item.text];
 		if (item.kind === "content") {
-			const q = this.inputEl.value.trim().replace(/^>\s?/, "").trim();
-			return q.split(/\s+/).filter(Boolean);
+			const { body } = this.resolveQuery(this.inputEl.value);
+			return body.split(/\s+/).filter(Boolean);
 		}
 		return [];
 	}
@@ -1637,10 +1933,27 @@ export class SpotlightModal extends Modal {
 			void this.activateSelection();
 			return false;
 		});
+		// Ctrl+Enter flips the default open target: new tab normally, current
+		// tab when "open in new tab by default" is on.
 		this.scope.register(["Mod"], "Enter", (evt) => {
+			evt.preventDefault();
+			void this.activateSelection(this.plugin.settings.defaultNewTab ? null : "tab");
+			return false;
+		});
+		this.scope.register(["Mod", "Alt"], "Enter", (evt) => {
+			evt.preventDefault();
+			void this.activateSelection("split");
+			return false;
+		});
+		this.scope.register(["Alt"], "Enter", (evt) => {
 			evt.preventDefault();
 			const item = this.items[this.selectedIndex];
 			if (item) this.openActionsMenu(item);
+			return false;
+		});
+		this.scope.register(["Shift"], "Enter", (evt) => {
+			evt.preventDefault();
+			void this.createFromQuery();
 			return false;
 		});
 		this.scope.register(["Mod"], "k", (evt) => {
@@ -1651,6 +1964,7 @@ export class SpotlightModal extends Modal {
 		this.scope.register([], "Escape", (evt) => {
 			evt.preventDefault();
 			if (this.actionContext) this.closeActionPalette();
+			else if (this.drillFile) this.exitDrill();
 			else this.close();
 			return false;
 		});
@@ -1700,6 +2014,10 @@ export class SpotlightModal extends Modal {
  * <mark> and returns it, or null if no term is found. Walks text nodes so it
  * marks rendered text without disturbing the surrounding markdown structure.
  */
+function capitalize(text: string): string {
+	return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 function highlightFirstMatch(root: HTMLElement, terms: string[]): HTMLElement | null {
 	const needles = terms.map((t) => t.toLowerCase()).filter((t) => t.length > 0);
 	if (needles.length === 0) return null;

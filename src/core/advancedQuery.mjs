@@ -62,21 +62,26 @@ function tokenizeAdvanced(raw) {
 	const input = String(raw || "").trim();
 	let current = "";
 	let quoted = false;
+	let inlineQuote = false; // e.g. in:"My Folder" — quote glued to a filter token
 	for (let i = 0; i < input.length; i++) {
 		const ch = input[i];
 		if (ch === '"') {
-			if (quoted) {
+			if (inlineQuote) {
+				inlineQuote = false;
+			} else if (quoted) {
 				tokens.push({ value: current, quoted: true });
 				current = "";
 				quoted = false;
+			} else if (current.length > 0) {
+				// Opening quote in the middle of a token: keep accumulating so
+				// filters like in:"Client Projects" survive their inner spaces.
+				inlineQuote = true;
 			} else {
-				if (current.trim()) tokens.push({ value: current.trim(), quoted: false });
-				current = "";
 				quoted = true;
 			}
 			continue;
 		}
-		if (!quoted && /\s/.test(ch)) {
+		if (!quoted && !inlineQuote && /\s/.test(ch)) {
 			if (current.trim()) tokens.push({ value: current.trim(), quoted: false });
 			current = "";
 			continue;

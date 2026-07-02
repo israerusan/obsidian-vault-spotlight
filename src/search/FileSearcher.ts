@@ -42,6 +42,8 @@ export interface FileSearchOptions {
 	recentPaths: string[];
 	starredPaths: string[];
 	bookmarkedPaths?: string[];
+	/** Files currently open in an editor — boosted so open work ranks first. */
+	openPaths?: Set<string>;
 	includeCanvas: boolean;
 	includePdf: boolean;
 	excludeFolders?: string[];
@@ -121,6 +123,10 @@ export class FileSearcher {
 			} else {
 				score += Math.max(0, 10 - Math.floor((Date.now() - file.stat.mtime) / 86400000));
 			}
+
+			// Already-open editors rank ahead of equally-relevant closed files,
+			// without jumping the Starred/Bookmarks/Recent browse tiers.
+			if (options.openPaths?.has(file.path)) score += 400;
 
 			// Frecency: reward files opened often and recently. Strongest in
 			// browse/filter modes where there is no query relevance to rank by.
