@@ -18,12 +18,14 @@ import { CommandSearcher } from "../search/CommandSearcher";
 import { renderHighlightedText, tokenizeQuery } from "../search/fuzzy";
 import { SaveSearchPromptModal } from "./SaveSearchPromptModal";
 import { PromptModal } from "./PromptModal";
-import { iconForFileKind, type VaultFileKind } from "../search/vaultFiles";
+import { getVaultFileKind, iconForFileKind, type VaultFileKind } from "../search/vaultFiles";
 import { applyTagToMarkdown, removeTagFromMarkdown, setFrontmatterProperty } from "../core/frontmatterTags.mjs";
 import { buildMocMarkdown, buildResultMarkdown } from "../core/resultMarkdown.mjs";
 import { activeProfile, createProfileFromSettings } from "../core/searchProfiles.mjs";
+import { detectSearchIntegrations } from "../core/integrations.mjs";
+import { findBacklinks, findOutlinks } from "../core/linkGraph.mjs";
 
-export type SpotlightMode = "files" | "content" | "headings" | "commands";
+export type SpotlightMode = "files" | "content" | "headings" | "commands" | "links";
 
 type ResultItem =
 	| {
@@ -96,7 +98,7 @@ type SpotlightAction = {
 	run: () => void | Promise<void>;
 };
 
-const MODE_ORDER: SpotlightMode[] = ["files", "content", "headings", "commands"];
+const MODE_ORDER: SpotlightMode[] = ["files", "content", "headings", "commands", "links"];
 
 export class SpotlightModal extends Modal {
 	private inputEl!: HTMLInputElement;
@@ -336,16 +338,18 @@ export class SpotlightModal extends Modal {
 		}
 
 		try {
-			if ((mode === "content" || mode === "headings") && !isPro) {
+			if ((mode === "content" || mode === "headings" || mode === "links") && !isPro) {
 				this.setBadge("Pro", "is-pro");
 				this.items = [];
 				this.isLoading = false;
 				this.renderEmptyState(
 					"lock",
-					mode === "content" ? "Content search is a Pro feature" : "Heading jump is a Pro feature",
+					mode === "content" ? "Content search is a Pro feature" : mode === "headings" ? "Heading jump is a Pro feature" : "Links mode is a Pro feature",
 					mode === "content"
 						? "Search inside note bodies with queries like > meeting notes."
-						: "Jump straight to any heading across your vault."
+						: mode === "headings"
+							? "Jump straight to any heading across your vault."
+							: "Browse backlinks and outlinks for the active note or a matching note."
 				);
 				this.updateStatus(0);
 				return;
@@ -415,6 +419,15 @@ export class SpotlightModal extends Modal {
 					score: r.score,
 					matchIndices: r.matchIndices,
 				}));
+			} else if (mode === "links") {
+				this.setBadge("Links", "is-content");
+				this.items = this.linkModeItems(trimmed);
+				if (this.items.length === 0) {
+					this.isLoading = false;
+					this.renderEmptyState("link", "No linked notes found", "Use Links mode on an active note, or type a note name to inspect backlinks.");
+					this.updateStatus(0);
+					return;
+				}
 			} else {
 				this.setBadge(isEmptyQuery ? "Browse" : "Files", null);
 				const parsed = tokenizeQuery(raw);
@@ -539,6 +552,35 @@ export class SpotlightModal extends Modal {
 			item.kind === "heading"
 			? item.file
 			: null;
+	}
+
+	private fileToResult(file: TFile, score: number): ResultItem {
+		return {
+			kind: "file",
+			file,
+			score,
+			matchIndices: [],
+			modifiedLabel: "",
+			fileKind: getVaultFileKind(file),
+			isRecent: this.plugin.settings.recentPaths.includes(file.path),
+			isStarred: this.plugin.isStarred(file.path),
+			isBookmarked: this.plugin.getBookmarkedPaths().includes(file.path),
+		};
+	}
+
+	private linkModeItems(query: string): ResultItem[] {
+		const active = this.app.workspace.getActiveFile();
+		const files = this.app.vault.getMarkdownFiles();
+		const q = query.replace(/^(<-|->|\[\[)\s?/, "").trim().toLowerCase();
+		const target = q
+			? files.find((file) => file.basename.toLowerCase().includes(q) || file.path.toLowerCase().includes(q))
+			: active;
+		if (!target) return [];
+		const resolvedLinks = this.app.metadataCache.resolvedLinks ?? {};
+		const linked = query.trim().startsWith("->")
+			? findOutlinks(files, resolvedLinks, target.path)
+			: findBacklinks(files, resolvedLinks, target.path);
+		return linked.slice(0, 60).map((file, index) => this.fileToResult(file, 1000 - index));
 	}
 
 	private renderLoading(): void {
@@ -976,6 +1018,20 @@ export class SpotlightModal extends Modal {
 		}).open();
 	}
 
+	private installedSearchIntegrations(): { omnisearch: boolean; textExtractor: boolean } {
+		const plugins = (this.app as unknown as { plugins?: { plugins?: Record<string, unknown> } }).plugins?.plugins ?? {};
+		return detectSearchIntegrations(Object.keys(plugins));
+	}
+
+	private runIntegrationCommand(name: "omnisearch" | "text extractor"): void {
+		const command = this.commandSearcher.search(name, 20).find((cmd) => cmd.id.toLowerCase().includes(name.replace(" ", "-")) || cmd.name.toLowerCase().includes(name));
+		if (!command || !this.commandSearcher.execute(command.id)) {
+			new Notice(`Vault Spotlight: ${name} command not found.`);
+			return;
+		}
+		this.close();
+	}
+
 	private availableActions(context: ResultItem): SpotlightAction[] {
 		if (context.kind === "profile") {
 			return [
@@ -1152,6 +1208,25 @@ export class SpotlightModal extends Modal {
 				run: () => this.appendLinksToActiveNote(),
 			}
 		);
+		const integrations = this.installedSearchIntegrations();
+		if (integrations.omnisearch) {
+			actions.push({
+				id: "open-omnisearch",
+				name: "Search in Omnisearch",
+				description: "Hand off to the installed Omnisearch plugin.",
+				requiresPro: true,
+				run: () => this.runIntegrationCommand("omnisearch"),
+			});
+		}
+		if (integrations.textExtractor) {
+			actions.push({
+				id: "open-text-extractor",
+				name: "Run Text Extractor",
+				description: "Use the installed Text Extractor plugin for document/PDF text support.",
+				requiresPro: true,
+				run: () => this.runIntegrationCommand("text extractor"),
+			});
+		}
 		return actions;
 	}
 

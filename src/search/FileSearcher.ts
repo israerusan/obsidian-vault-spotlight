@@ -7,6 +7,7 @@ import {
 	getFrontmatterValue,
 } from "./metadata";
 import { getSearchableFiles, getVaultFileKind, type VaultFileKind } from "./vaultFiles";
+import { aliasMatches as frontmatterAliasMatches } from "../core/fileAliases.mjs";
 
 export interface FileSearchResult {
 	file: TFile;
@@ -92,13 +93,13 @@ export class FileSearcher {
 						continue;
 					}
 					const pathMatch = fuzzyMatch(token, file.path);
-					if (!pathMatch) {
+					if (!pathMatch && !this.aliasMatches(file, token)) {
 						matched = false;
 						break;
 					}
-					// Matched on the folder path, not the name; count it at a
-					// discount and add no indices (they don't map onto basename).
-					score += Math.floor(pathMatch.score / 2);
+					// Matched on the folder path or frontmatter alias, not the name;
+					// count it at a discount and add no indices.
+					score += pathMatch ? Math.floor(pathMatch.score / 2) : 18;
 				}
 				if (!matched) score = 0;
 			}
@@ -150,6 +151,12 @@ export class FileSearcher {
 	private matchesExtFilter(file: TFile, extFilters: string[]): boolean {
 		if (extFilters.length === 0) return true;
 		return extFilters.includes(file.extension.toLowerCase());
+	}
+
+	private aliasMatches(file: TFile, token: string): boolean {
+		if (file.extension !== "md") return false;
+		const cache = this.app.metadataCache.getFileCache(file);
+		return frontmatterAliasMatches(cache?.frontmatter ?? null, token);
 	}
 
 	private matchesFilters(file: TFile, options: FileSearchOptions): boolean {

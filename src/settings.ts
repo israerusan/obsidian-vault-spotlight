@@ -11,7 +11,7 @@ export interface CustomSearch {
 export interface SearchProfile {
 	id: string;
 	name: string;
-	defaultMode: "files" | "content" | "headings" | "commands";
+	defaultMode: "files" | "content" | "headings" | "commands" | "links";
 	defaultQuery: string;
 	includeCanvas: boolean;
 	includePdf: boolean;

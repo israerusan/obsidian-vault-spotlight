@@ -1,4 +1,4 @@
-export const PROFILE_MODES = new Set(["files", "content", "headings", "commands"]);
+export const PROFILE_MODES = new Set(["files", "content", "headings", "commands", "links"]);
 
 export function normalizeProfiles(rawProfiles) {
 	if (!Array.isArray(rawProfiles)) return [];

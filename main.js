@@ -2276,7 +2276,7 @@ var import_obsidian6 = require("obsidian");
 var import_obsidian = require("obsidian");
 
 // src/core/searchProfiles.mjs
-var PROFILE_MODES = /* @__PURE__ */ new Set(["files", "content", "headings", "commands"]);
+var PROFILE_MODES = /* @__PURE__ */ new Set(["files", "content", "headings", "commands", "links"]);
 function normalizeProfiles(rawProfiles) {
   if (!Array.isArray(rawProfiles)) return [];
   return rawProfiles.filter((profile) => profile && typeof profile === "object").map((profile) => ({
@@ -2814,6 +2814,23 @@ function iconForFileKind(kind) {
   }
 }
 
+// src/core/fileAliases.mjs
+function extractAliases(frontmatter) {
+  if (!frontmatter || typeof frontmatter !== "object") return [];
+  const raw = [];
+  for (const key of ["aliases", "alias"]) {
+    const value = frontmatter[key];
+    if (Array.isArray(value)) raw.push(...value);
+    else if (value !== void 0 && value !== null) raw.push(value);
+  }
+  return raw.map((value) => String(value).trim()).filter(Boolean);
+}
+function aliasMatches(frontmatter, query) {
+  const q = String(query || "").toLowerCase().trim();
+  if (!q) return false;
+  return extractAliases(frontmatter).some((alias) => alias.toLowerCase().includes(q));
+}
+
 // src/search/FileSearcher.ts
 var FileSearcher = class {
   constructor(app) {
@@ -2855,11 +2872,11 @@ var FileSearcher = class {
             continue;
           }
           const pathMatch = fuzzyMatch(token, file.path);
-          if (!pathMatch) {
+          if (!pathMatch && !this.aliasMatches(file, token)) {
             matched = false;
             break;
           }
-          score += Math.floor(pathMatch.score / 2);
+          score += pathMatch ? Math.floor(pathMatch.score / 2) : 18;
         }
         if (!matched) score = 0;
       }
@@ -2901,6 +2918,12 @@ var FileSearcher = class {
   matchesExtFilter(file, extFilters) {
     if (extFilters.length === 0) return true;
     return extFilters.includes(file.extension.toLowerCase());
+  }
+  aliasMatches(file, token) {
+    var _a;
+    if (file.extension !== "md") return false;
+    const cache = this.app.metadataCache.getFileCache(file);
+    return aliasMatches((_a = cache == null ? void 0 : cache.frontmatter) != null ? _a : null, token);
   }
   matchesFilters(file, options) {
     if (file.extension !== "md") {
@@ -3256,8 +3279,35 @@ function groupKey(row, groupBy) {
   return "Results";
 }
 
+// src/core/integrations.mjs
+function detectSearchIntegrations(pluginIds) {
+  const ids = new Set((pluginIds || []).map((id) => String(id).toLowerCase()));
+  return {
+    omnisearch: ids.has("omnisearch") || ids.has("obsidian-omnisearch"),
+    textExtractor: ids.has("text-extractor") || ids.has("obsidian-text-extractor")
+  };
+}
+
+// src/core/linkGraph.mjs
+function findBacklinks(files, resolvedLinks, targetPath) {
+  const byPath = fileMap(files);
+  const rows = [];
+  for (const [source, links] of Object.entries(resolvedLinks || {})) {
+    const count = Number((links == null ? void 0 : links[targetPath]) || 0);
+    if (count > 0 && byPath.has(source)) rows.push({ file: byPath.get(source), count });
+  }
+  return rows.sort((a, b) => b.count - a.count || a.file.path.localeCompare(b.file.path)).map((row) => row.file);
+}
+function findOutlinks(files, resolvedLinks, sourcePath) {
+  const byPath = fileMap(files);
+  return Object.keys((resolvedLinks == null ? void 0 : resolvedLinks[sourcePath]) || {}).filter((path) => byPath.has(path)).sort((a, b) => a.localeCompare(b)).map((path) => byPath.get(path));
+}
+function fileMap(files) {
+  return new Map((files || []).map((file) => [file.path, file]));
+}
+
 // src/spotlight/SpotlightModal.ts
-var MODE_ORDER = ["files", "content", "headings", "commands"];
+var MODE_ORDER = ["files", "content", "headings", "commands", "links"];
 var SpotlightModal = class extends import_obsidian5.Modal {
   constructor(app, plugin, initialQuery = "", initialMode = "files") {
     super(app);
@@ -3452,14 +3502,14 @@ var SpotlightModal = class extends import_obsidian5.Modal {
       return;
     }
     try {
-      if ((mode === "content" || mode === "headings") && !isPro) {
+      if ((mode === "content" || mode === "headings" || mode === "links") && !isPro) {
         this.setBadge("Pro", "is-pro");
         this.items = [];
         this.isLoading = false;
         this.renderEmptyState(
           "lock",
-          mode === "content" ? "Content search is a Pro feature" : "Heading jump is a Pro feature",
-          mode === "content" ? "Search inside note bodies with queries like > meeting notes." : "Jump straight to any heading across your vault."
+          mode === "content" ? "Content search is a Pro feature" : mode === "headings" ? "Heading jump is a Pro feature" : "Links mode is a Pro feature",
+          mode === "content" ? "Search inside note bodies with queries like > meeting notes." : mode === "headings" ? "Jump straight to any heading across your vault." : "Browse backlinks and outlinks for the active note or a matching note."
         );
         this.updateStatus(0);
         return;
@@ -3526,6 +3576,15 @@ var SpotlightModal = class extends import_obsidian5.Modal {
           score: r.score,
           matchIndices: r.matchIndices
         }));
+      } else if (mode === "links") {
+        this.setBadge("Links", "is-content");
+        this.items = this.linkModeItems(trimmed);
+        if (this.items.length === 0) {
+          this.isLoading = false;
+          this.renderEmptyState("link", "No linked notes found", "Use Links mode on an active note, or type a note name to inspect backlinks.");
+          this.updateStatus(0);
+          return;
+        }
       } else {
         this.setBadge(isEmptyQuery ? "Browse" : "Files", null);
         const parsed = tokenizeQuery(raw);
@@ -3623,6 +3682,30 @@ var SpotlightModal = class extends import_obsidian5.Modal {
   }
   itemFile(item) {
     return item.kind === "file" || item.kind === "content" || item.kind === "heading" ? item.file : null;
+  }
+  fileToResult(file, score) {
+    return {
+      kind: "file",
+      file,
+      score,
+      matchIndices: [],
+      modifiedLabel: "",
+      fileKind: getVaultFileKind(file),
+      isRecent: this.plugin.settings.recentPaths.includes(file.path),
+      isStarred: this.plugin.isStarred(file.path),
+      isBookmarked: this.plugin.getBookmarkedPaths().includes(file.path)
+    };
+  }
+  linkModeItems(query) {
+    var _a;
+    const active = this.app.workspace.getActiveFile();
+    const files = this.app.vault.getMarkdownFiles();
+    const q = query.replace(/^(<-|->|\[\[)\s?/, "").trim().toLowerCase();
+    const target = q ? files.find((file) => file.basename.toLowerCase().includes(q) || file.path.toLowerCase().includes(q)) : active;
+    if (!target) return [];
+    const resolvedLinks = (_a = this.app.metadataCache.resolvedLinks) != null ? _a : {};
+    const linked = query.trim().startsWith("->") ? findOutlinks(files, resolvedLinks, target.path) : findBacklinks(files, resolvedLinks, target.path);
+    return linked.slice(0, 60).map((file, index) => this.fileToResult(file, 1e3 - index));
   }
   renderLoading() {
     this.resultsEl.empty();
@@ -4009,6 +4092,19 @@ var SpotlightModal = class extends import_obsidian5.Modal {
       }
     }).open();
   }
+  installedSearchIntegrations() {
+    var _a, _b;
+    const plugins = (_b = (_a = this.app.plugins) == null ? void 0 : _a.plugins) != null ? _b : {};
+    return detectSearchIntegrations(Object.keys(plugins));
+  }
+  runIntegrationCommand(name) {
+    const command = this.commandSearcher.search(name, 20).find((cmd) => cmd.id.toLowerCase().includes(name.replace(" ", "-")) || cmd.name.toLowerCase().includes(name));
+    if (!command || !this.commandSearcher.execute(command.id)) {
+      new import_obsidian5.Notice(`Vault Spotlight: ${name} command not found.`);
+      return;
+    }
+    this.close();
+  }
   availableActions(context) {
     if (context.kind === "profile") {
       return [
@@ -4182,6 +4278,25 @@ var SpotlightModal = class extends import_obsidian5.Modal {
         run: () => this.appendLinksToActiveNote()
       }
     );
+    const integrations = this.installedSearchIntegrations();
+    if (integrations.omnisearch) {
+      actions.push({
+        id: "open-omnisearch",
+        name: "Search in Omnisearch",
+        description: "Hand off to the installed Omnisearch plugin.",
+        requiresPro: true,
+        run: () => this.runIntegrationCommand("omnisearch")
+      });
+    }
+    if (integrations.textExtractor) {
+      actions.push({
+        id: "open-text-extractor",
+        name: "Run Text Extractor",
+        description: "Use the installed Text Extractor plugin for document/PDF text support.",
+        requiresPro: true,
+        run: () => this.runIntegrationCommand("text extractor")
+      });
+    }
     return actions;
   }
   resultItemsForBatch() {
@@ -4782,7 +4897,7 @@ var RipgrepSearcher = class {
   }
   parseOutput(output, limit, needAll) {
     var _a, _b;
-    const fileMap = this.app.vault.getFiles().reduce((map, file) => {
+    const fileMap2 = this.app.vault.getFiles().reduce((map, file) => {
       map.set(file.path, file);
       map.set(file.path.replace(/\\/g, "/"), file);
       return map;
@@ -4798,7 +4913,7 @@ var RipgrepSearcher = class {
         if (!needAll.every((tk) => low.includes(tk))) continue;
       }
       const normalized = rawPath.replace(/\\/g, "/").replace(/^\.\//, "");
-      const file = (_b = (_a = fileMap.get(normalized)) != null ? _a : fileMap.get(normalized.split("/").slice(-3).join("/"))) != null ? _b : this.findFileBySuffix(fileMap, normalized);
+      const file = (_b = (_a = fileMap2.get(normalized)) != null ? _a : fileMap2.get(normalized.split("/").slice(-3).join("/"))) != null ? _b : this.findFileBySuffix(fileMap2, normalized);
       if (!file) continue;
       results.push({
         file,
@@ -4810,9 +4925,9 @@ var RipgrepSearcher = class {
     }
     return results.sort((a, b) => b.score - a.score).slice(0, limit);
   }
-  findFileBySuffix(fileMap, path) {
+  findFileBySuffix(fileMap2, path) {
     const suffix = path.replace(/\\/g, "/");
-    for (const [key, file] of fileMap.entries()) {
+    for (const [key, file] of fileMap2.entries()) {
       if (key.endsWith(suffix) || suffix.endsWith(key)) return file;
     }
     return void 0;

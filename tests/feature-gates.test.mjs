@@ -30,6 +30,9 @@ assert.ok(spotlight.includes("batchMoveFiles"), "spotlight should support a Pro 
 assert.ok(spotlight.includes("createMocFromResults"), "spotlight should support MOC generation from results");
 assert.ok(spotlight.includes("appendLinksToActiveNote"), "spotlight should append result links to the active note");
 assert.ok(settings.includes("searchAliases"), "settings should persist Pro query aliases");
+assert.ok(spotlight.includes('"links"'), "spotlight should include Pro links mode");
+assert.ok(spotlight.includes("linkModeItems"), "spotlight should resolve backlinks/outlinks in links mode");
+assert.ok(spotlight.includes("Search in Omnisearch"), "spotlight should expose Omnisearch handoff when installed");
 assert.ok(readme.includes("Keyboard action palette"), "README should document the action palette");
 assert.ok(readme.includes("Smart collections"), "README should document smart collections");
 assert.ok(readme.includes("Export results"), "README should document result export");

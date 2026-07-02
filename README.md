@@ -26,6 +26,9 @@ Vault Spotlight is a fast command center for large vaults: type a few letters to
 - **Search profiles** — save workspace-style modes for writing, research, clients, PDFs, or any repeated vault context.
 - **Advanced query language** — combine quoted phrases, exclusions, `in:folder`, `name:`, `path:`, `modified:7d`, `created:30d`, and `is:starred` filters.
 - **Search aliases** — define personal shortcuts such as `crm = in:Clients @type:client` for repeated vault queries.
+- **Links mode** — browse backlinks to the active/matching note or prefix with `->` to inspect outlinks.
+- **Frontmatter alias matching** — note `alias`/`aliases` values participate in file search so alternate names work naturally.
+- **Omnisearch/Text Extractor handoff** — when those plugins are installed, Pro actions can hand off to their search/extraction commands.
 - **Smart collections** — saved searches become reusable vault views in the browse screen; pin the ones you use daily.
 - **Starred pins** — press `Ctrl+D` to keep high-value files at the top of browse and search results.
 - **Canvas & PDF discovery** — include Canvas files and PDFs in file search, plus text search inside Canvas nodes.
@@ -42,6 +45,7 @@ Vault Spotlight is a fast command center for large vaults: type a few letters to
 "launch plan" -archive in:Projects modified:7d
 name:roadmap tag:client prop:status=active
 is:starred ext:md
+-> roadmap
 crm waiting
 ```
 
