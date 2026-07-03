@@ -4,7 +4,17 @@ Spotlight-style vault launcher for [Obsidian](https://obsidian.md). Open notes, 
 
 ## What it does
 
-Vault Spotlight is a fast command center for large vaults: type a few letters to jump to notes, search by tags/properties, run commands, reopen recent work, and use Pro tools for content search, saved collections, result export, and batch actions.
+Vault Spotlight is a fast command center for large vaults: type a few letters to jump to notes, search by tags/properties, run commands, reopen recent work, and use Pro tools for content search, saved collections, workflow presets, ranking controls, result export, and batch actions.
+
+## Phase 1 highlights
+
+This release rounds out the first paid-workflow layer:
+
+- Browse mode can surface reusable workflow presets before you type.
+- Search profiles and workflow presets can work together, so a workflow can reopen a saved context and query in one step.
+- Ranking is now configurable, with optional match-reason badges so users can understand why a result surfaced.
+- Result rows carry richer metadata such as alias/tag signals and decorated badges.
+- Settings now make the free vs Pro packaging more explicit for workflows, ranking, and reusable search tools.
 
 ## Free features
 
@@ -21,6 +31,7 @@ Vault Spotlight is a fast command center for large vaults: type a few letters to
 - **Bookmarks in browse view** — core Bookmarks appear alongside recent files so important notes are available before typing.
 - **Keyboard-first navigation** — open from the ribbon icon or bind a hotkey to *Open spotlight*, cycle modes with `Tab`, navigate with arrows, and open with Enter. A trigger cheatsheet inside the modal keeps every mode prefix discoverable.
 - **Accessible result list** — ARIA combobox/listbox attributes and visible modified-time labels keep the modal usable and readable.
+- **Free starter experience** — browse hints and settings copy explain how to discover triggers, profiles, and paid workflow upgrades without leaving the modal.
 
 ## Pro features ($8 one-time)
 
@@ -31,6 +42,10 @@ Vault Spotlight is a fast command center for large vaults: type a few letters to
 - **Search history** — recently used content searches resurface so repeated research queries are one Enter away.
 - **Keyboard action palette** — press `Ctrl+K` on a result to search actions like open, copy link/path, rename, star, export, or batch tag.
 - **Search profiles** — save workspace-style modes for writing, research, clients, PDFs, or any repeated vault context.
+- **Workflow presets** — save a mode + query + optional profile combination and reopen it directly from Browse.
+- **Starter workflows** — seed the workflow list with reusable defaults like recent work, follow-ups, and meetings.
+- **Ranking controls** — choose balanced, filename-first, recency-first, metadata-first, or alias-aware ranking from settings.
+- **Match-reason badges** — show why a result ranked well, including alias hits, starred boosts, and metadata signals.
 - **Advanced query language** — combine quoted phrases, exclusions, `in:folder`, `name:`, `path:`, `modified:7d`, `created:30d`, and `is:starred` filters.
 - **Search aliases** — define personal shortcuts such as `crm = in:Clients @type:client` for repeated vault queries.
 - **Links mode** — browse backlinks to the active/matching note or prefix with `->` to inspect outlinks.
@@ -62,6 +77,23 @@ Purchase: [Buy Me a Coffee — Vault Spotlight Pro](https://buymeacoffee.com/vau
 
 License keys are verified **offline** (Ed25519). No account, server, or subscription.
 
+## Free vs Pro at a glance
+
+| Area | Free | Pro |
+| --- | --- | --- |
+| File launcher, commands, symbols, editors, folders | Yes | Yes |
+| Metadata filters in file search | Yes | Yes |
+| Browse hints and trigger discoverability | Yes | Yes |
+| Body content search (`>`) | No | Yes |
+| Heading search across the vault (`^`) | No | Yes |
+| Search profiles | No | Yes |
+| Workflow presets and starter workflows | No | Yes |
+| Ranking controls and match-reason badges | No | Yes |
+| Smart collections / saved searches | No | Yes |
+| Batch open / export / organizer actions | No | Yes |
+| Canvas / PDF / Bases expansion | Limited | Yes |
+| Offline license verification | n/a | Yes |
+
 ## Automation & API
 
 Other plugins, scripts, and external tools can build on Vault Spotlight:
@@ -92,6 +124,7 @@ Search **Vault Spotlight** in Obsidian Settings → Community plugins after subm
 2. You will receive a license key by email (usually within 24 hours)
 3. Open Obsidian → Settings → Vault Spotlight
 4. Paste your license key — Pro unlocks immediately (offline verification)
+5. Use the new Workflow presets and Ranking sections in settings to configure your paid workflow layer
 
 ## Development
 
