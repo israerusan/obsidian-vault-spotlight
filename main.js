@@ -2275,6 +2275,48 @@ var import_obsidian12 = require("obsidian");
 // src/settings.ts
 var import_obsidian = require("obsidian");
 
+// src/core/ranking.mjs
+var RANKING_MODES = /* @__PURE__ */ new Set(["balanced", "filename", "recency", "metadata", "alias"]);
+var DEFAULT_RANKING_SETTINGS = {
+  mode: "balanced",
+  preferOpenFiles: true,
+  preferStarredFiles: true,
+  preferBookmarkedFiles: true,
+  preferRecentFiles: true,
+  ignoreDiacritics: false,
+  showMatchReasons: true
+};
+function normalizeRankingSettings(raw) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  return {
+    mode: RANKING_MODES.has(source.mode) ? source.mode : DEFAULT_RANKING_SETTINGS.mode,
+    preferOpenFiles: source.preferOpenFiles !== false,
+    preferStarredFiles: source.preferStarredFiles !== false,
+    preferBookmarkedFiles: source.preferBookmarkedFiles !== false,
+    preferRecentFiles: source.preferRecentFiles !== false,
+    ignoreDiacritics: source.ignoreDiacritics === true,
+    showMatchReasons: source.showMatchReasons !== false
+  };
+}
+function resolveRankingMode(ranking, overrideMode) {
+  if (RANKING_MODES.has(overrideMode)) return overrideMode;
+  return normalizeRankingSettings(ranking).mode;
+}
+function rankingBoosts(mode) {
+  switch (mode) {
+    case "filename":
+      return { basename: 26, path: 8, alias: 14, browseMtimeHours: 36, queryMtimeDays: 6, frecencyWeight: 0.2 };
+    case "recency":
+      return { basename: 18, path: 10, alias: 14, browseMtimeHours: 180, queryMtimeDays: 18, frecencyWeight: 0.85 };
+    case "metadata":
+      return { basename: 16, path: 10, alias: 16, browseMtimeHours: 72, queryMtimeDays: 10, frecencyWeight: 0.45 };
+    case "alias":
+      return { basename: 15, path: 9, alias: 26, browseMtimeHours: 60, queryMtimeDays: 8, frecencyWeight: 0.35 };
+    default:
+      return { basename: 20, path: 9, alias: 18, browseMtimeHours: 100, queryMtimeDays: 10, frecencyWeight: 0.25 };
+  }
+}
+
 // src/core/searchProfiles.mjs
 var PROFILE_MODES = /* @__PURE__ */ new Set([
   "files",
@@ -2297,7 +2339,8 @@ function normalizeProfiles(rawProfiles) {
     includePdf: profile.includePdf !== false,
     includeBases: profile.includeBases !== false,
     excludeFolders: Array.isArray(profile.excludeFolders) ? profile.excludeFolders.map((f) => String(f).trim()).filter(Boolean) : [],
-    showPreview: profile.showPreview === true
+    showPreview: profile.showPreview === true,
+    rankingMode: RANKING_MODES.has(profile.rankingMode) ? profile.rankingMode : void 0
   })).slice(0, 20);
 }
 function activeProfile(profiles, activeProfileId) {
@@ -2305,6 +2348,7 @@ function activeProfile(profiles, activeProfileId) {
   return (_a = profiles.find((profile) => profile.id === activeProfileId)) != null ? _a : null;
 }
 function createProfileFromSettings(name, settings, mode = "files", query = "") {
+  var _a;
   return {
     id: cleanId(name) || `profile-${Date.now()}`,
     name: String(name || "New profile").trim() || "New profile",
@@ -2314,11 +2358,59 @@ function createProfileFromSettings(name, settings, mode = "files", query = "") {
     includePdf: (settings == null ? void 0 : settings.includePdf) !== false,
     includeBases: (settings == null ? void 0 : settings.includeBases) !== false,
     excludeFolders: Array.isArray(settings == null ? void 0 : settings.excludeFolders) ? [...settings.excludeFolders] : [],
-    showPreview: (settings == null ? void 0 : settings.showPreview) === true
+    showPreview: (settings == null ? void 0 : settings.showPreview) === true,
+    rankingMode: RANKING_MODES.has((_a = settings == null ? void 0 : settings.ranking) == null ? void 0 : _a.mode) ? settings.ranking.mode : void 0
   };
 }
 function cleanId(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+// src/core/workflowPresets.mjs
+var FREE_WORKFLOW_LIMIT = 2;
+var MAX_WORKFLOW_PRESETS = 25;
+var STARTER_WORKFLOWS = [
+  { id: "starter-recent-work", name: "Recent work", mode: "files", query: "modified:7", pinned: true, starter: true },
+  { id: "starter-follow-ups", name: "Follow-ups", mode: "files", query: "#waiting OR #followup", pinned: true, starter: true },
+  { id: "starter-meetings", name: "Meeting notes", mode: "content", query: '"action item" OR "next step"', pinned: false, starter: true },
+  { id: "starter-clients", name: "Client folder", mode: "files", query: "in:Clients", pinned: false, starter: true }
+];
+function normalizeWorkflowPresets(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((workflow) => workflow && typeof workflow === "object").map((workflow, index) => ({
+    id: cleanId2(workflow.id) || `workflow-${Date.now()}-${index}`,
+    name: String(workflow.name || "Untitled workflow").trim() || "Untitled workflow",
+    query: typeof workflow.query === "string" ? workflow.query : String(workflow.query || ""),
+    mode: PROFILE_MODES.has(workflow.mode) ? workflow.mode : "files",
+    profileId: cleanId2(workflow.profileId),
+    pinned: workflow.pinned === true,
+    starter: workflow.starter === true,
+    rankingMode: RANKING_MODES.has(workflow.rankingMode) ? workflow.rankingMode : void 0
+  })).slice(0, MAX_WORKFLOW_PRESETS);
+}
+function ensureStarterWorkflows(workflows) {
+  const normalized = normalizeWorkflowPresets(workflows);
+  return normalized.length > 0 ? normalized : STARTER_WORKFLOWS.map((workflow) => ({ ...workflow }));
+}
+function canSaveWorkflowPreset(workflows, isPro) {
+  if (isPro) return true;
+  return normalizeWorkflowPresets(workflows).length < FREE_WORKFLOW_LIMIT;
+}
+function createWorkflowPreset(name, mode, query, options = {}) {
+  return {
+    id: cleanId2(name) || `workflow-${Date.now()}`,
+    name: String(name || "New workflow").trim() || "New workflow",
+    mode: PROFILE_MODES.has(mode) ? mode : "files",
+    query: String(query || ""),
+    profileId: cleanId2(options.profileId),
+    pinned: options.pinned === true,
+    starter: options.starter === true,
+    rankingMode: RANKING_MODES.has(options.rankingMode) ? options.rankingMode : void 0
+  };
+}
+function cleanId2(value) {
+  const id = String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return id || "";
 }
 
 // src/core/modeTriggers.mjs
@@ -2415,8 +2507,10 @@ var DEFAULT_SETTINGS = {
   maxStarred: 50,
   customSearches: [],
   pinnedCustomSearchIds: [],
+  workflowPresets: [],
   searchProfiles: [],
   activeProfileId: "",
+  ranking: { ...DEFAULT_RANKING_SETTINGS },
   searchAliases: "",
   showModifiedTime: true,
   ripgrepCommand: "rg",
@@ -2478,6 +2572,39 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
     new import_obsidian.Setting(containerEl).setName("Smart ranking (frecency)").setDesc("Rank browse/recent results by how often and how recently you open each note.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.useFrecency).onChange((value) => {
         this.plugin.settings.useFrecency = value;
+        void this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Ranking & match reasons").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Default ranking mode").setDesc("Choose what file search should prioritize when several notes match.").addDropdown((dropdown) => {
+      dropdown.addOption("balanced", "Balanced").addOption("filename", "Filename first").addOption("recency", "Recency first").addOption("metadata", "Metadata first").addOption("alias", "Alias aware").setValue(this.plugin.settings.ranking.mode).onChange((value) => {
+        this.plugin.settings.ranking.mode = value;
+        void this.plugin.saveSettings();
+      });
+    });
+    new import_obsidian.Setting(containerEl).setName("Prefer open files").setDesc("Boost notes that are already open in an editor.").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.ranking.preferOpenFiles).onChange((value) => {
+        this.plugin.settings.ranking.preferOpenFiles = value;
+        void this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Prefer starred, bookmarked, and recent files").setDesc("Keep pinned work and recently touched notes near the top of browse results.").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.ranking.preferStarredFiles && this.plugin.settings.ranking.preferBookmarkedFiles && this.plugin.settings.ranking.preferRecentFiles).onChange((value) => {
+        this.plugin.settings.ranking.preferStarredFiles = value;
+        this.plugin.settings.ranking.preferBookmarkedFiles = value;
+        this.plugin.settings.ranking.preferRecentFiles = value;
+        void this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Ignore diacritics").setDesc("Treat caf\xE9 like cafe when matching filenames and aliases.").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.ranking.ignoreDiacritics).onChange((value) => {
+        this.plugin.settings.ranking.ignoreDiacritics = value;
+        void this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Show match reasons").setDesc("Display why a result ranked well, such as Alias match or Starred.").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.ranking.showMatchReasons).onChange((value) => {
+        this.plugin.settings.ranking.showMatchReasons = value;
         void this.plugin.saveSettings();
       })
     );
@@ -2616,6 +2743,40 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
         void this.plugin.saveSettings();
       });
     });
+    new import_obsidian.Setting(containerEl).setName("Workflow presets (Pro)").setHeading();
+    const workflowList = containerEl.createDiv();
+    if (!this.plugin.settings.isPro) {
+      workflowList.createEl("p", { text: "Unlock Pro to save and run reusable workflows from Browse." });
+    } else {
+      new import_obsidian.Setting(workflowList).setName("Starter workflows").setDesc("Seed Browse mode with a few high-signal workflow presets.").addButton(
+        (button) => button.setButtonText("Load starters").onClick(() => {
+          this.plugin.settings.workflowPresets = ensureStarterWorkflows(this.plugin.settings.workflowPresets);
+          void this.plugin.saveSettings().then(() => this.display());
+        })
+      );
+      if (this.plugin.settings.workflowPresets.length === 0) {
+        workflowList.createEl("p", { text: "No workflows yet. Save one from Spotlight with Ctrl+S, or load the starter workflows." });
+      } else {
+        for (const workflow of this.plugin.settings.workflowPresets) {
+          const row = workflowList.createDiv({ cls: "vault-spotlight-starred-row" });
+          row.createSpan({
+            text: `${workflow.pinned ? "\u2605 " : ""}${workflow.name}: ${workflow.mode}${workflow.query ? ` \xB7 ${workflow.query}` : ""}${workflow.rankingMode ? ` \xB7 ${workflow.rankingMode}` : ""}`
+          });
+          const pinBtn = row.createEl("button", { text: workflow.pinned ? "Unpin" : "Pin" });
+          pinBtn.addEventListener("click", () => {
+            this.plugin.settings.workflowPresets = this.plugin.settings.workflowPresets.map(
+              (entry) => entry.id === workflow.id ? { ...entry, pinned: !entry.pinned } : entry
+            );
+            void this.plugin.saveSettings().then(() => this.display());
+          });
+          const remove = row.createEl("button", { text: workflow.starter ? "Hide" : "Remove" });
+          remove.addEventListener("click", () => {
+            this.plugin.settings.workflowPresets = this.plugin.settings.workflowPresets.filter((entry) => entry.id !== workflow.id);
+            void this.plugin.saveSettings().then(() => this.display());
+          });
+        }
+      }
+    }
     new import_obsidian.Setting(containerEl).setName("Search profiles (Pro)").setHeading();
     const profileList = containerEl.createDiv();
     if (!this.plugin.settings.isPro) {
@@ -2771,13 +2932,15 @@ function tokenizeAdvanced(raw) {
 }
 
 // src/core/fuzzy.mjs
-function fuzzyMatch(query, text) {
+function fuzzyMatch(query, text, options = {}) {
   var _a;
   if (!query) {
     return { score: 0, indices: [] };
   }
-  const q = query.toLowerCase();
-  const t = text.toLowerCase();
+  const fold = options.ignoreDiacritics === true ? stripDiacritics : identity;
+  const q = fold(query).toLowerCase();
+  const foldedText = fold(text);
+  const t = foldedText.toLowerCase();
   let qi = 0;
   let lastMatch = -1;
   let score = 0;
@@ -2787,7 +2950,7 @@ function fuzzyMatch(query, text) {
       indices.push(ti);
       if (lastMatch === ti - 1) {
         score += 8;
-      } else if (ti === 0 || /[\s\-_/]/.test((_a = text[ti - 1]) != null ? _a : "")) {
+      } else if (ti === 0 || /[\s\-_/]/.test((_a = foldedText[ti - 1]) != null ? _a : "")) {
         score += 12;
       } else {
         score += 4;
@@ -2798,7 +2961,7 @@ function fuzzyMatch(query, text) {
     }
   }
   if (qi < q.length) {
-    return typoFallback(q, text);
+    return typoFallback(q, foldedText);
   }
   if (t.includes(q)) score += 20;
   if (t.startsWith(q)) score += 30;
@@ -2837,6 +3000,12 @@ function boundedLevenshtein(a, b, max) {
     [prev, curr] = [curr, prev];
   }
   return prev[bl];
+}
+function stripDiacritics(value) {
+  return String(value).normalize("NFD").replace(/\p{Diacritic}+/gu, "");
+}
+function identity(value) {
+  return String(value);
 }
 
 // src/search/fuzzy.ts
@@ -2995,7 +3164,7 @@ var FileSearcher = class {
     this.app = app;
   }
   search(options) {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g;
     const files = getSearchableFiles(this.app, {
       includeCanvas: options.includeCanvas,
       includePdf: options.includePdf,
@@ -3004,6 +3173,8 @@ var FileSearcher = class {
     });
     const limit = (_b = options.limit) != null ? _b : 50;
     const results = [];
+    const ranking = normalizeRankingSettings(options.ranking);
+    const boosts = rankingBoosts(resolveRankingMode(ranking, options.rankingMode));
     const recentSet = new Map(options.recentPaths.map((p, i) => [p, i]));
     const starredSet = new Map(options.starredPaths.map((p, i) => [p, i]));
     const bookmarkedSet = new Set((_c = options.bookmarkedPaths) != null ? _c : []);
@@ -3015,51 +3186,66 @@ var FileSearcher = class {
       if (!this.matchesAdvancedFileFilters(file, options, starredSet.has(file.path), bookmarkedSet.has(file.path))) continue;
       if (!this.matchesFilters(file, options)) continue;
       const basename = file.basename;
+      const cache = file.extension === "md" ? this.app.metadataCache.getFileCache(file) : null;
+      const tags = cache ? Array.from(collectFileTags(cache)).slice(0, 3) : [];
+      const aliases = extractAliases((_d = cache == null ? void 0 : cache.frontmatter) != null ? _d : null).slice(0, 3);
       let score = 0;
+      let primaryMatch = isBrowseMode ? "browse" : isFilterOnly ? "filters" : "filename";
+      let aliasMatched = false;
       const indices = [];
       if (isBrowseMode) {
         score = 1;
       } else if (isFilterOnly) {
         score = 100;
+        primaryMatch = "filters";
       } else {
         let matched = true;
-        for (const token of [...(_d = options.nameTerms) != null ? _d : [], ...options.textTokens]) {
-          const basenameMatch = fuzzyMatch(token, basename);
+        for (const token of [...(_e = options.nameTerms) != null ? _e : [], ...options.textTokens]) {
+          const basenameMatch = fuzzyMatch(token, basename, { ignoreDiacritics: ranking.ignoreDiacritics });
           if (basenameMatch) {
-            score += basenameMatch.score;
+            score += basenameMatch.score + boosts.basename;
+            primaryMatch = "filename";
             indices.push(...basenameMatch.indices);
             continue;
           }
-          const pathMatch = fuzzyMatch(token, file.path);
-          if (!pathMatch && !this.aliasMatches(file, token)) {
+          const pathMatch = fuzzyMatch(token, file.path, { ignoreDiacritics: ranking.ignoreDiacritics });
+          const aliasHit = this.aliasMatches(file, token);
+          if (!pathMatch && !aliasHit) {
             matched = false;
             break;
           }
-          score += pathMatch ? Math.floor(pathMatch.score / 2) : 18;
+          if (aliasHit) {
+            aliasMatched = true;
+            primaryMatch = "alias";
+            score += boosts.alias;
+          } else if (pathMatch) {
+            if (primaryMatch !== "filename") primaryMatch = "path";
+            score += Math.floor(pathMatch.score / 2) + boosts.path;
+          }
         }
         if (!matched) score = 0;
       }
       if (score <= 0) continue;
       const starredRank = starredSet.get(file.path);
       const recentRank = recentSet.get(file.path);
-      if (starredRank !== void 0) {
+      if (ranking.preferStarredFiles && starredRank !== void 0) {
         score += 3e3 - starredRank * 10;
-      } else if (bookmarkedSet.has(file.path)) {
+      } else if (ranking.preferBookmarkedFiles && bookmarkedSet.has(file.path)) {
         score += 2e3;
-      } else if (recentRank !== void 0) {
+      } else if (ranking.preferRecentFiles && recentRank !== void 0) {
         score += 1e3 - recentRank * 10;
       } else if (isBrowseMode) {
-        score += Math.max(0, 100 - Math.floor((Date.now() - file.stat.mtime) / 36e5));
+        score += Math.max(0, boosts.browseMtimeHours - Math.floor((Date.now() - file.stat.mtime) / 36e5));
       } else {
-        score += Math.max(0, 10 - Math.floor((Date.now() - file.stat.mtime) / 864e5));
+        score += Math.max(0, boosts.queryMtimeDays - Math.floor((Date.now() - file.stat.mtime) / 864e5));
       }
-      if ((_e = options.openPaths) == null ? void 0 : _e.has(file.path)) score += 400;
-      const fr = (_f = options.frecency) == null ? void 0 : _f[file.path];
+      if (ranking.preferOpenFiles && ((_f = options.openPaths) == null ? void 0 : _f.has(file.path))) score += 400;
+      const fr = (_g = options.frecency) == null ? void 0 : _g[file.path];
       if (fr) {
         const freqBoost = Math.min(300, fr.count * 15);
         const ageDays = (Date.now() - fr.last) / 864e5;
         const recencyBoost = Math.max(0, 60 - Math.floor(ageDays) * 2);
-        const weight = isBrowseMode || isFilterOnly ? 1 : 0.25;
+        const weight = isBrowseMode || isFilterOnly ? 1 : boosts.frecencyWeight;
         score += Math.floor((freqBoost + recencyBoost) * weight);
       }
       results.push({
@@ -3068,6 +3254,10 @@ var FileSearcher = class {
         matchIndices: indices,
         modifiedLabel: formatRelativeTime(file.stat.mtime),
         fileKind: getVaultFileKind(file),
+        primaryMatch,
+        aliasMatched,
+        tags,
+        aliases,
         isRecent: recentSet.has(file.path),
         isStarred: starredSet.has(file.path),
         isBookmarked: bookmarkedSet.has(file.path)
@@ -3104,7 +3294,7 @@ var FileSearcher = class {
     return true;
   }
   matchesAdvancedFileFilters(file, options, isStarred, isBookmarked) {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f;
     const lowerPath = file.path.toLowerCase();
     const lowerName = file.basename.toLowerCase();
     if (options.isStarred && !isStarred) return false;
@@ -3117,12 +3307,12 @@ var FileSearcher = class {
       if (!lowerPath.includes(term.toLowerCase())) return false;
     }
     for (const term of (_c = options.nameTerms) != null ? _c : []) {
-      if (!lowerName.includes(term.toLowerCase()) && !fuzzyMatch(term, lowerName)) return false;
+      if (!lowerName.includes(term.toLowerCase()) && !fuzzyMatch(term, lowerName, { ignoreDiacritics: ((_d = options.ranking) == null ? void 0 : _d.ignoreDiacritics) === true })) return false;
     }
-    for (const phrase of (_d = options.phrases) != null ? _d : []) {
+    for (const phrase of (_e = options.phrases) != null ? _e : []) {
       if (!lowerPath.includes(phrase.toLowerCase())) return false;
     }
-    for (const exclusion of (_e = options.exclusions) != null ? _e : []) {
+    for (const exclusion of (_f = options.exclusions) != null ? _f : []) {
       if (lowerPath.includes(exclusion.toLowerCase())) return false;
     }
     if (options.modifiedDays !== null && options.modifiedDays !== void 0) {
@@ -3618,6 +3808,38 @@ function highlightFirstMatch(root, terms) {
 
 // src/spotlight/resultRow.ts
 var import_obsidian7 = require("obsidian");
+
+// src/core/resultDecorators.mjs
+function buildFileDecorations({
+  parentPath,
+  modifiedLabel,
+  fileKind,
+  isStarred,
+  isBookmarked,
+  isRecent,
+  primaryMatch,
+  aliasMatched,
+  tags,
+  aliases
+}) {
+  const badges = [];
+  if (isStarred) badges.push("Starred");
+  if (isBookmarked) badges.push("Bookmarked");
+  if (isRecent) badges.push("Recent");
+  if (fileKind && fileKind !== "note") badges.push(String(fileKind).toUpperCase());
+  const meta = [parentPath, modifiedLabel].filter(Boolean).concat((Array.isArray(tags) ? tags : []).slice(0, 2).map((tag) => `#${String(tag).replace(/^#/, "")}`)).concat((Array.isArray(aliases) ? aliases : []).slice(0, 1).map((alias) => `aka ${alias}`)).join(" \xB7 ");
+  const reason = reasonLabel(primaryMatch, aliasMatched);
+  return { badges, meta, reason };
+}
+function reasonLabel(primaryMatch, aliasMatched = false) {
+  if (aliasMatched || primaryMatch === "alias") return "Matched alias";
+  if (primaryMatch === "path") return "Matched path";
+  if (primaryMatch === "filters") return "Matched filters";
+  if (primaryMatch === "browse") return "Browse ranking";
+  return "Matched filename";
+}
+
+// src/spotlight/resultRow.ts
 function renderResultRow(row, item, options) {
   var _a;
   const iconWrap = row.createDiv({ cls: "vault-spotlight-item-icon-wrap" });
@@ -3628,23 +3850,28 @@ function renderResultRow(row, item, options) {
     (0, import_obsidian7.setIcon)(iconWrap, iconForFileKind(item.fileKind));
     row.toggleClass("is-starred", item.isStarred);
     renderHighlightedText(title, item.file.basename, item.matchIndices);
-    if (item.isStarred && !options.isEmptyQuery) {
-      titleRow.createSpan({ cls: "vault-spotlight-item-badge is-star", text: "Starred" });
-    } else if (item.isBookmarked && !options.isEmptyQuery) {
-      titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Bookmark" });
-    } else if (item.isRecent && !options.isEmptyQuery) {
-      titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Recent" });
-    }
-    if (item.fileKind !== "markdown") {
+    const decorations = buildFileDecorations({
+      parentPath: ((_a = item.file.parent) == null ? void 0 : _a.path) || "/",
+      modifiedLabel: options.showModifiedTime ? item.modifiedLabel : "",
+      fileKind: item.fileKind === "markdown" ? "note" : item.fileKind,
+      isStarred: item.isStarred && !options.isEmptyQuery,
+      isBookmarked: item.isBookmarked && !options.isEmptyQuery,
+      isRecent: item.isRecent && !options.isEmptyQuery,
+      primaryMatch: item.primaryMatch,
+      aliasMatched: item.aliasMatched,
+      tags: item.tags,
+      aliases: item.aliases
+    });
+    for (const badge of decorations.badges) {
       titleRow.createSpan({
-        cls: "vault-spotlight-item-badge is-type",
-        text: item.fileKind.toUpperCase()
+        cls: badge === "Starred" ? "vault-spotlight-item-badge is-star" : "vault-spotlight-item-badge",
+        text: badge
       });
     }
-    if (options.showModifiedTime) {
-      titleRow.createSpan({ cls: "vault-spotlight-item-time", text: item.modifiedLabel });
+    if (options.showMatchReasons && !options.isEmptyQuery) {
+      titleRow.createSpan({ cls: "vault-spotlight-item-badge is-type", text: decorations.reason });
     }
-    body.createDiv({ cls: "vault-spotlight-item-meta", text: ((_a = item.file.parent) == null ? void 0 : _a.path) || "/" });
+    body.createDiv({ cls: "vault-spotlight-item-meta", text: decorations.meta });
   } else if (item.kind === "content") {
     (0, import_obsidian7.setIcon)(
       iconWrap,
@@ -3711,6 +3938,14 @@ function renderResultRow(row, item, options) {
     title.setText(item.name);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isActive ? "Active profile" : "Search profile" });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.defaultMode}${item.defaultQuery ? ` \xB7 ${item.defaultQuery}` : ""}` });
+  } else if (item.kind === "workflow") {
+    (0, import_obsidian7.setIcon)(iconWrap, item.isPinned ? "sparkles" : "play-circle");
+    title.setText(item.name);
+    titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isStarter ? "Starter workflow" : "Workflow" });
+    if (item.rankingMode) {
+      titleRow.createSpan({ cls: "vault-spotlight-item-badge is-type", text: item.rankingMode });
+    }
+    body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.mode}${item.query ? ` \xB7 ${item.query}` : ""}` });
   } else if (item.kind === "action") {
     (0, import_obsidian7.setIcon)(iconWrap, item.action.requiresPro ? "sparkles" : "bolt");
     title.setText(item.action.name);
@@ -4041,6 +4276,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     this.drillReturnQuery = "";
     this.drillReturnMode = "files";
     this.hasNavigated = false;
+    this.activeWorkflowId = "";
     this.shouldRestoreSelection = false;
     this.preview = new PreviewPane(app);
     this.fileSearcher = new FileSearcher(app);
@@ -4108,6 +4344,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     }
     this.inputEl.addEventListener("input", () => {
       this.hasNavigated = false;
+      this.activeWorkflowId = "";
       this.scheduleSearch();
     });
     this.inputEl.addEventListener("keydown", (evt) => {
@@ -4157,6 +4394,10 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     if (!this.plugin.settings.isPro) return null;
     return activeProfile(this.plugin.settings.searchProfiles, this.plugin.settings.activeProfileId);
   }
+  currentWorkflow() {
+    var _a;
+    return (_a = this.plugin.settings.workflowPresets.find((workflow) => workflow.id === this.activeWorkflowId)) != null ? _a : null;
+  }
   /**
    * Trigger cheatsheet: every mode prefix stays visible in the modal so the
    * mode system is discoverable without reading docs (the top complaint
@@ -4187,6 +4428,9 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       this.hintEl.appendText(" \xB7 ");
       this.hintEl.createEl("code", { text: "Ctrl+D" });
       this.hintEl.appendText(" star");
+    }
+    if (this.plugin.settings.workflowPresets.length === 0) {
+      this.hintEl.appendText(" \xB7 starter workflows in Browse");
     }
   }
   hasMetadataFilters() {
@@ -4227,7 +4471,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     return { mode: this.mode, body: raw.trim() };
   }
   async runSearch() {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     const generation = ++this.searchGeneration;
     const raw = this.expandAliases(this.inputEl.value);
     const trimmed = raw.trim();
@@ -4235,6 +4479,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     const isEmptyQuery = body.length === 0;
     const isPro = this.plugin.settings.isPro;
     const profile = this.currentProfile();
+    const workflow = this.currentWorkflow();
     const excludeFolders = (_a = profile == null ? void 0 : profile.excludeFolders) != null ? _a : this.plugin.settings.excludeFolders;
     const includeCanvas = (_b = profile == null ? void 0 : profile.includeCanvas) != null ? _b : this.plugin.settings.includeCanvas;
     const includePdf = (_c = profile == null ? void 0 : profile.includePdf) != null ? _c : this.plugin.settings.includePdf;
@@ -4439,9 +4684,10 @@ var SpotlightModal = class extends import_obsidian9.Modal {
           includeBases: isPro && includeBases,
           excludeFolders,
           frecency: this.plugin.settings.useFrecency ? this.plugin.settings.fileFrecency : void 0,
+          ranking: this.plugin.settings.ranking,
+          rankingMode: (_h = workflow == null ? void 0 : workflow.rankingMode) != null ? _h : profile == null ? void 0 : profile.rankingMode,
           limit: isEmptyQuery ? 40 : 50
         });
-        if (generation !== this.searchGeneration) return;
         this.items = fileResults.map((r) => ({
           kind: "file",
           file: r.file,
@@ -4449,10 +4695,34 @@ var SpotlightModal = class extends import_obsidian9.Modal {
           matchIndices: r.matchIndices,
           modifiedLabel: r.modifiedLabel,
           fileKind: r.fileKind,
+          primaryMatch: r.primaryMatch,
+          aliasMatched: r.aliasMatched,
+          tags: r.tags,
+          aliases: r.aliases,
           isRecent: r.isRecent,
           isStarred: r.isStarred,
           isBookmarked: r.isBookmarked
         }));
+        if (isEmptyQuery && isPro) {
+          const workflows = ensureStarterWorkflows(this.plugin.settings.workflowPresets).slice().sort((a, b) => {
+            var _a2, _b2;
+            return Number(b.pinned) - Number(a.pinned) || Number((_a2 = b.starter) != null ? _a2 : false) - Number((_b2 = a.starter) != null ? _b2 : false) || a.name.localeCompare(b.name);
+          }).map((workflow2) => {
+            var _a2;
+            return {
+              kind: "workflow",
+              id: workflow2.id,
+              name: workflow2.name,
+              query: workflow2.query,
+              mode: workflow2.mode,
+              profileId: workflow2.profileId,
+              isPinned: workflow2.pinned,
+              isStarter: (_a2 = workflow2.starter) != null ? _a2 : false,
+              rankingMode: workflow2.rankingMode
+            };
+          });
+          this.items = [...workflows, ...this.items];
+        }
         if (isEmptyQuery && isPro && this.plugin.settings.searchProfiles.length > 0) {
           const profiles = this.plugin.settings.searchProfiles.map((searchProfile) => ({
             kind: "profile",
@@ -4502,6 +4772,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     if (cls) this.modeBadgeEl.addClass(cls);
   }
   getBrowseSection(item) {
+    if (item.kind === "workflow" && this.inputEl.value.trim().length === 0) return "Workflows";
     if (item.kind === "profile" && this.inputEl.value.trim().length === 0) return "Search profiles";
     if (item.kind === "collection" && this.inputEl.value.trim().length === 0) return "Smart collections";
     if (item.kind !== "file" || this.inputEl.value.trim().length > 0) return null;
@@ -4518,6 +4789,10 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       matchIndices: [],
       modifiedLabel: "",
       fileKind: getVaultFileKind(file),
+      primaryMatch: "browse",
+      aliasMatched: false,
+      tags: [],
+      aliases: [],
       isRecent: this.plugin.settings.recentPaths.includes(file.path),
       isStarred: this.plugin.isStarred(file.path),
       isBookmarked: bookmarkedPaths.has(file.path)
@@ -4648,7 +4923,8 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       }
       renderResultRow(row, item, {
         isEmptyQuery,
-        showModifiedTime: this.plugin.settings.showModifiedTime
+        showModifiedTime: this.plugin.settings.showModifiedTime,
+        showMatchReasons: this.plugin.settings.ranking.showMatchReasons
       });
       if (this.plugin.settings.isPro && item.kind === "file") {
         const starBtn = row.createDiv({ cls: "vault-spotlight-star-btn" });
@@ -4837,6 +5113,10 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       this.activateProfile(selected.id);
       return;
     }
+    if (selected.kind === "workflow") {
+      this.applyWorkflow(selected.id);
+      return;
+    }
     if (selected.kind === "action") {
       if (selected.action.requiresPro && !this.plugin.settings.isPro) {
         new import_obsidian9.Notice("Vault Spotlight: Pro required for this action.");
@@ -4944,6 +5224,21 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     this.mode = "files";
     void this.runSearch();
   }
+  applyWorkflow(id) {
+    const workflows = ensureStarterWorkflows(this.plugin.settings.workflowPresets);
+    const workflow = workflows.find((entry) => entry.id === id);
+    if (!workflow) return;
+    this.activeWorkflowId = workflow.id;
+    this.actionContext = null;
+    if (workflow.profileId) {
+      this.plugin.settings.activeProfileId = workflow.profileId;
+    }
+    this.mode = workflow.mode;
+    this.inputEl.value = workflow.query;
+    void this.plugin.saveSettings();
+    this.focusInput();
+    void this.runSearch();
+  }
   saveCurrentProfile() {
     new PromptModal(this.app, {
       title: "Save search profile",
@@ -4958,6 +5253,31 @@ var SpotlightModal = class extends import_obsidian9.Modal {
         ].slice(0, 20);
         void this.plugin.saveSettings();
         new import_obsidian9.Notice("Vault Spotlight: search profile saved.");
+        this.closeActionPalette();
+      }
+    }).open();
+  }
+  saveCurrentWorkflow() {
+    const mode = this.actionReturnMode || this.mode;
+    const query = (this.actionReturnQuery || this.inputEl.value).trim();
+    if (!canSaveWorkflowPreset(this.plugin.settings.workflowPresets, this.plugin.settings.isPro)) {
+      new import_obsidian9.Notice("Vault Spotlight: workflows require Pro and a non-empty search.");
+      return;
+    }
+    new PromptModal(this.app, {
+      title: "Save workflow",
+      initial: query.slice(0, 40) || "New workflow",
+      cta: "Save workflow",
+      onSubmit: (name) => {
+        var _a;
+        const workflow = createWorkflowPreset(name, mode, query, {
+          profileId: this.plugin.settings.activeProfileId,
+          rankingMode: (_a = this.currentProfile()) == null ? void 0 : _a.rankingMode
+        });
+        this.plugin.settings.workflowPresets = [workflow, ...this.plugin.settings.workflowPresets].slice(0, 20);
+        this.activeWorkflowId = workflow.id;
+        void this.plugin.saveSettings();
+        new import_obsidian9.Notice("Vault Spotlight: workflow saved.");
         this.closeActionPalette();
       }
     }).open();
@@ -5393,7 +5713,11 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     });
     this.scope.register(["Mod"], "s", (evt) => {
       evt.preventDefault();
-      this.saveCustomSearch();
+      if (canSaveWorkflowPreset(this.plugin.settings.workflowPresets, this.plugin.settings.isPro)) {
+        this.saveCurrentWorkflow();
+      } else {
+        this.saveCustomSearch();
+      }
       return false;
     });
   }
@@ -5506,7 +5830,7 @@ function candidateCommands(configured) {
     "/usr/local/bin/rg",
     "/usr/bin/rg"
   );
-  return [...new Set(candidates)];
+  return Array.from(new Set(candidates));
 }
 var RipgrepSearcher = class {
   constructor(app, command) {
@@ -5694,7 +6018,7 @@ var RipgrepSearcher = class {
   }
   findFileBySuffix(fileMap2, path) {
     const suffix = path.replace(/\\/g, "/");
-    for (const [key, file] of fileMap2.entries()) {
+    for (const [key, file] of Array.from(fileMap2.entries())) {
       if (key === suffix || key.endsWith(`/${suffix}`) || suffix.endsWith(`/${key}`)) return file;
     }
     return void 0;
@@ -5956,7 +6280,7 @@ var WorkerIndex = class _WorkerIndex {
     URL.revokeObjectURL(this.blobUrl);
   }
   failPending(error) {
-    for (const entry of this.pending.values()) entry.reject(error);
+    for (const entry of Array.from(this.pending.values())) entry.reject(error);
     this.pending.clear();
   }
 };
@@ -6487,7 +6811,9 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
     if (!Array.isArray(this.settings.recentPaths)) this.settings.recentPaths = [];
     if (!Array.isArray(this.settings.starredPaths)) this.settings.starredPaths = [];
     if (!Array.isArray(this.settings.pinnedCustomSearchIds)) this.settings.pinnedCustomSearchIds = [];
+    this.settings.workflowPresets = normalizeWorkflowPresets(this.settings.workflowPresets);
     this.settings.searchProfiles = normalizeProfiles(this.settings.searchProfiles);
+    this.settings.ranking = normalizeRankingSettings(this.settings.ranking);
     if (typeof this.settings.searchAliases !== "string") this.settings.searchAliases = "";
     if (!this.settings.searchProfiles.some((profile) => profile.id === this.settings.activeProfileId)) {
       this.settings.activeProfileId = "";
@@ -6516,6 +6842,7 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
     }
     const customSearchIds = new Set(this.settings.customSearches.map((search) => search.id));
     this.settings.pinnedCustomSearchIds = this.settings.pinnedCustomSearchIds.filter((id) => typeof id === "string" && customSearchIds.has(id));
+    this.settings.workflowPresets = this.settings.workflowPresets.slice(0, 25);
     this.settings.recentPaths = this.settings.recentPaths.slice(0, this.settings.maxRecent);
     this.settings.starredPaths = this.settings.starredPaths.slice(0, this.settings.maxStarred);
   }

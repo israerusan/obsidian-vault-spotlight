@@ -148,7 +148,7 @@ export class WorkerIndex {
 	}
 
 	private failPending(error: Error): void {
-		for (const entry of this.pending.values()) entry.reject(error);
+		for (const entry of Array.from(this.pending.values())) entry.reject(error);
 		this.pending.clear();
 	}
 }

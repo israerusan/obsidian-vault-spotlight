@@ -57,7 +57,7 @@ function candidateCommands(configured: string): string[] {
 		"/usr/local/bin/rg",
 		"/usr/bin/rg"
 	);
-	return [...new Set(candidates)];
+	return Array.from(new Set(candidates));
 }
 
 export class RipgrepSearcher {
@@ -296,7 +296,7 @@ export class RipgrepSearcher {
 
 	private findFileBySuffix(fileMap: Map<string, TFile>, path: string): TFile | undefined {
 		const suffix = path.replace(/\\/g, "/");
-		for (const [key, file] of fileMap.entries()) {
+		for (const [key, file] of Array.from(fileMap.entries())) {
 			// Require a path-separator boundary so "notes.md" can't claim a
 			// match that actually lives in "Bar/mynotes.md".
 			if (key === suffix || key.endsWith(`/${suffix}`) || suffix.endsWith(`/${key}`)) return file;

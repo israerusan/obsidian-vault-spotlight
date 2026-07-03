@@ -18,6 +18,7 @@ export interface CoreSearchProfile {
 	includeBases: boolean;
 	excludeFolders: string[];
 	showPreview: boolean;
+	rankingMode?: "balanced" | "filename" | "recency" | "metadata" | "alias";
 }
 
 export interface ProfileSourceSettings {
@@ -26,6 +27,7 @@ export interface ProfileSourceSettings {
 	includeBases?: boolean;
 	excludeFolders?: string[];
 	showPreview?: boolean;
+	ranking?: { mode?: string };
 }
 
 export const PROFILE_MODES: Set<string>;

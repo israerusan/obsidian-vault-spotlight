@@ -1,3 +1,5 @@
+import { RANKING_MODES } from "./ranking.mjs";
+
 export const PROFILE_MODES = new Set([
 	"files",
 	"content",
@@ -25,6 +27,7 @@ export function normalizeProfiles(rawProfiles) {
 				? profile.excludeFolders.map((f) => String(f).trim()).filter(Boolean)
 				: [],
 			showPreview: profile.showPreview === true,
+			rankingMode: RANKING_MODES.has(profile.rankingMode) ? profile.rankingMode : undefined,
 		}))
 		.slice(0, 20);
 }
@@ -44,6 +47,7 @@ export function createProfileFromSettings(name, settings, mode = "files", query 
 		includeBases: settings?.includeBases !== false,
 		excludeFolders: Array.isArray(settings?.excludeFolders) ? [...settings.excludeFolders] : [],
 		showPreview: settings?.showPreview === true,
+		rankingMode: RANKING_MODES.has(settings?.ranking?.mode) ? settings.ranking.mode : undefined,
 	};
 }
 

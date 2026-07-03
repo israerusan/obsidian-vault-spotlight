@@ -7,7 +7,8 @@ import {
 	getFrontmatterValue,
 } from "./metadata";
 import { getSearchableFiles, getVaultFileKind, type VaultFileKind } from "./vaultFiles";
-import { aliasMatches as frontmatterAliasMatches } from "../core/fileAliases.mjs";
+import { aliasMatches as frontmatterAliasMatches, extractAliases } from "../core/fileAliases.mjs";
+import { normalizeRankingSettings, rankingBoosts, resolveRankingMode, type RankingSettings } from "../core/ranking.mjs";
 
 export interface FileSearchResult {
 	file: TFile;
@@ -15,6 +16,10 @@ export interface FileSearchResult {
 	matchIndices: number[];
 	modifiedLabel: string;
 	fileKind: VaultFileKind;
+	primaryMatch: "filename" | "path" | "alias" | "filters" | "browse";
+	aliasMatched: boolean;
+	tags: string[];
+	aliases: string[];
 	isRecent: boolean;
 	isStarred: boolean;
 	isBookmarked: boolean;
@@ -42,13 +47,14 @@ export interface FileSearchOptions {
 	recentPaths: string[];
 	starredPaths: string[];
 	bookmarkedPaths?: string[];
-	/** Files currently open in an editor — boosted so open work ranks first. */
 	openPaths?: Set<string>;
 	includeCanvas: boolean;
 	includePdf: boolean;
 	includeBases?: boolean;
 	excludeFolders?: string[];
 	frecency?: Record<string, FrecencyEntry>;
+	ranking?: Partial<RankingSettings>;
+	rankingMode?: string;
 	limit?: number;
 }
 
@@ -64,6 +70,8 @@ export class FileSearcher {
 		});
 		const limit = options.limit ?? 50;
 		const results: FileSearchResult[] = [];
+		const ranking = normalizeRankingSettings(options.ranking);
+		const boosts = rankingBoosts(resolveRankingMode(ranking, options.rankingMode));
 		const recentSet = new Map(options.recentPaths.map((p, i) => [p, i]));
 		const starredSet = new Map(options.starredPaths.map((p, i) => [p, i]));
 		const bookmarkedSet = new Set(options.bookmarkedPaths ?? []);
@@ -78,66 +86,71 @@ export class FileSearcher {
 			if (!this.matchesFilters(file, options)) continue;
 
 			const basename = file.basename;
+			const cache = file.extension === "md" ? this.app.metadataCache.getFileCache(file) : null;
+			const tags = cache ? Array.from(collectFileTags(cache)).slice(0, 3) : [];
+			const aliases = extractAliases(cache?.frontmatter ?? null).slice(0, 3);
 			let score = 0;
+			let primaryMatch: FileSearchResult["primaryMatch"] = isBrowseMode ? "browse" : isFilterOnly ? "filters" : "filename";
+			let aliasMatched = false;
 			const indices: number[] = [];
 
 			if (isBrowseMode) {
 				score = 1;
 			} else if (isFilterOnly) {
 				score = 100;
+				primaryMatch = "filters";
 			} else {
 				let matched = true;
 				for (const token of [...(options.nameTerms ?? []), ...options.textTokens]) {
-					const basenameMatch = fuzzyMatch(token, basename);
+					const basenameMatch = fuzzyMatch(token, basename, { ignoreDiacritics: ranking.ignoreDiacritics });
 					if (basenameMatch) {
-						score += basenameMatch.score;
-						// Accumulate across tokens (was overwriting), and only keep
-						// basename-relative indices so highlights land correctly.
+						score += basenameMatch.score + boosts.basename;
+						primaryMatch = "filename";
 						indices.push(...basenameMatch.indices);
 						continue;
 					}
-					const pathMatch = fuzzyMatch(token, file.path);
-					if (!pathMatch && !this.aliasMatches(file, token)) {
+					const pathMatch = fuzzyMatch(token, file.path, { ignoreDiacritics: ranking.ignoreDiacritics });
+					const aliasHit = this.aliasMatches(file, token);
+					if (!pathMatch && !aliasHit) {
 						matched = false;
 						break;
 					}
-					// Matched on the folder path or frontmatter alias, not the name;
-					// count it at a discount and add no indices.
-					score += pathMatch ? Math.floor(pathMatch.score / 2) : 18;
+					if (aliasHit) {
+						aliasMatched = true;
+						primaryMatch = "alias";
+						score += boosts.alias;
+					} else if (pathMatch) {
+						if (primaryMatch !== "filename") primaryMatch = "path";
+						score += Math.floor(pathMatch.score / 2) + boosts.path;
+					}
 				}
 				if (!matched) score = 0;
 			}
 
 			if (score <= 0) continue;
 
-			// Pinned-tier boost — mutually exclusive so browse sections stay
-			// contiguous and correctly ordered: Starred > Bookmarks > Recent.
 			const starredRank = starredSet.get(file.path);
 			const recentRank = recentSet.get(file.path);
-			if (starredRank !== undefined) {
+			if (ranking.preferStarredFiles && starredRank !== undefined) {
 				score += 3000 - starredRank * 10;
-			} else if (bookmarkedSet.has(file.path)) {
+			} else if (ranking.preferBookmarkedFiles && bookmarkedSet.has(file.path)) {
 				score += 2000;
-			} else if (recentRank !== undefined) {
+			} else if (ranking.preferRecentFiles && recentRank !== undefined) {
 				score += 1000 - recentRank * 10;
 			} else if (isBrowseMode) {
-				score += Math.max(0, 100 - Math.floor((Date.now() - file.stat.mtime) / 3600000));
+				score += Math.max(0, boosts.browseMtimeHours - Math.floor((Date.now() - file.stat.mtime) / 3600000));
 			} else {
-				score += Math.max(0, 10 - Math.floor((Date.now() - file.stat.mtime) / 86400000));
+				score += Math.max(0, boosts.queryMtimeDays - Math.floor((Date.now() - file.stat.mtime) / 86400000));
 			}
 
-			// Already-open editors rank ahead of equally-relevant closed files,
-			// without jumping the Starred/Bookmarks/Recent browse tiers.
-			if (options.openPaths?.has(file.path)) score += 400;
+			if (ranking.preferOpenFiles && options.openPaths?.has(file.path)) score += 400;
 
-			// Frecency: reward files opened often and recently. Strongest in
-			// browse/filter modes where there is no query relevance to rank by.
 			const fr = options.frecency?.[file.path];
 			if (fr) {
 				const freqBoost = Math.min(300, fr.count * 15);
 				const ageDays = (Date.now() - fr.last) / 86400000;
 				const recencyBoost = Math.max(0, 60 - Math.floor(ageDays) * 2);
-				const weight = isBrowseMode || isFilterOnly ? 1 : 0.25;
+				const weight = isBrowseMode || isFilterOnly ? 1 : boosts.frecencyWeight;
 				score += Math.floor((freqBoost + recencyBoost) * weight);
 			}
 
@@ -147,6 +160,10 @@ export class FileSearcher {
 				matchIndices: indices,
 				modifiedLabel: formatRelativeTime(file.stat.mtime),
 				fileKind: getVaultFileKind(file),
+				primaryMatch,
+				aliasMatched,
+				tags,
+				aliases,
 				isRecent: recentSet.has(file.path),
 				isStarred: starredSet.has(file.path),
 				isBookmarked: bookmarkedSet.has(file.path),
@@ -203,7 +220,7 @@ export class FileSearcher {
 			if (!lowerPath.includes(term.toLowerCase())) return false;
 		}
 		for (const term of options.nameTerms ?? []) {
-			if (!lowerName.includes(term.toLowerCase()) && !fuzzyMatch(term, lowerName)) return false;
+			if (!lowerName.includes(term.toLowerCase()) && !fuzzyMatch(term, lowerName, { ignoreDiacritics: options.ranking?.ignoreDiacritics === true })) return false;
 		}
 		for (const phrase of options.phrases ?? []) {
 			if (!lowerPath.includes(phrase.toLowerCase())) return false;

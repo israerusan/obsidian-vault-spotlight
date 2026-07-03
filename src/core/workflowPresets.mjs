@@ -1,0 +1,57 @@
+import { PROFILE_MODES } from "./searchProfiles.mjs";
+import { RANKING_MODES } from "./ranking.mjs";
+
+export const FREE_WORKFLOW_LIMIT = 2;
+export const MAX_WORKFLOW_PRESETS = 25;
+
+export const STARTER_WORKFLOWS = [
+	{ id: "starter-recent-work", name: "Recent work", mode: "files", query: "modified:7", pinned: true, starter: true },
+	{ id: "starter-follow-ups", name: "Follow-ups", mode: "files", query: "#waiting OR #followup", pinned: true, starter: true },
+	{ id: "starter-meetings", name: "Meeting notes", mode: "content", query: '"action item" OR "next step"', pinned: false, starter: true },
+	{ id: "starter-clients", name: "Client folder", mode: "files", query: "in:Clients", pinned: false, starter: true },
+];
+
+export function normalizeWorkflowPresets(raw) {
+	if (!Array.isArray(raw)) return [];
+	return raw
+		.filter((workflow) => workflow && typeof workflow === "object")
+		.map((workflow, index) => ({
+			id: cleanId(workflow.id) || `workflow-${Date.now()}-${index}`,
+			name: String(workflow.name || "Untitled workflow").trim() || "Untitled workflow",
+			query: typeof workflow.query === "string" ? workflow.query : String(workflow.query || ""),
+			mode: PROFILE_MODES.has(workflow.mode) ? workflow.mode : "files",
+			profileId: cleanId(workflow.profileId),
+			pinned: workflow.pinned === true,
+			starter: workflow.starter === true,
+			rankingMode: RANKING_MODES.has(workflow.rankingMode) ? workflow.rankingMode : undefined,
+		}))
+		.slice(0, MAX_WORKFLOW_PRESETS);
+}
+
+export function ensureStarterWorkflows(workflows) {
+	const normalized = normalizeWorkflowPresets(workflows);
+	return normalized.length > 0 ? normalized : STARTER_WORKFLOWS.map((workflow) => ({ ...workflow }));
+}
+
+export function canSaveWorkflowPreset(workflows, isPro) {
+	if (isPro) return true;
+	return normalizeWorkflowPresets(workflows).length < FREE_WORKFLOW_LIMIT;
+}
+
+export function createWorkflowPreset(name, mode, query, options = {}) {
+	return {
+		id: cleanId(name) || `workflow-${Date.now()}`,
+		name: String(name || "New workflow").trim() || "New workflow",
+		mode: PROFILE_MODES.has(mode) ? mode : "files",
+		query: String(query || ""),
+		profileId: cleanId(options.profileId),
+		pinned: options.pinned === true,
+		starter: options.starter === true,
+		rankingMode: RANKING_MODES.has(options.rankingMode) ? options.rankingMode : undefined,
+	};
+}
+
+function cleanId(value) {
+	const id = String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+	return id || "";
+}

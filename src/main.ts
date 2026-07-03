@@ -12,6 +12,8 @@ import { MODE_ORDER, SpotlightModal, type SpotlightMode } from "./spotlight/Spot
 import { LicenseManager } from "./license/LicenseManager";
 import { ContentSearcher } from "./search/ContentSearcher";
 import { normalizeProfiles } from "./core/searchProfiles.mjs";
+import { normalizeRankingSettings } from "./core/ranking.mjs";
+import { normalizeWorkflowPresets } from "./core/workflowPresets.mjs";
 import {
 	normalizeEscapeChar,
 	normalizeModePrefixes,
@@ -429,7 +431,9 @@ export default class VaultSpotlightPlugin extends Plugin {
 		if (!Array.isArray(this.settings.recentPaths)) this.settings.recentPaths = [];
 		if (!Array.isArray(this.settings.starredPaths)) this.settings.starredPaths = [];
 		if (!Array.isArray(this.settings.pinnedCustomSearchIds)) this.settings.pinnedCustomSearchIds = [];
+		this.settings.workflowPresets = normalizeWorkflowPresets(this.settings.workflowPresets);
 		this.settings.searchProfiles = normalizeProfiles(this.settings.searchProfiles);
+		this.settings.ranking = normalizeRankingSettings(this.settings.ranking);
 		if (typeof this.settings.searchAliases !== "string") this.settings.searchAliases = "";
 		if (!this.settings.searchProfiles.some((profile) => profile.id === this.settings.activeProfileId)) {
 			this.settings.activeProfileId = "";
@@ -475,6 +479,7 @@ export default class VaultSpotlightPlugin extends Plugin {
 		const customSearchIds = new Set(this.settings.customSearches.map((search) => search.id));
 		this.settings.pinnedCustomSearchIds = this.settings.pinnedCustomSearchIds
 			.filter((id): id is string => typeof id === "string" && customSearchIds.has(id));
+		this.settings.workflowPresets = this.settings.workflowPresets.slice(0, 25);
 
 		// Enforce caps against what was loaded from disk.
 		this.settings.recentPaths = this.settings.recentPaths.slice(0, this.settings.maxRecent);

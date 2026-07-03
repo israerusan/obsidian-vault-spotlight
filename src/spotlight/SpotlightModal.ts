@@ -22,6 +22,7 @@ import { SaveSearchPromptModal } from "./SaveSearchPromptModal";
 import { PromptModal } from "./PromptModal";
 import { getVaultFileKind } from "../search/vaultFiles";
 import { activeProfile, createProfileFromSettings, type CoreSearchProfile } from "../core/searchProfiles.mjs";
+import { canSaveWorkflowPreset, createWorkflowPreset, ensureStarterWorkflows, type WorkflowPreset } from "../core/workflowPresets.mjs";
 import { detectSearchIntegrations, type SearchIntegrations } from "../core/integrations.mjs";
 import { findBacklinks, findOutlinks } from "../core/linkGraph.mjs";
 import {
@@ -36,6 +37,7 @@ import { PreviewPane } from "./PreviewPane";
 import { renderResultRow } from "./resultRow";
 import * as batchOps from "./batchOps";
 import { copyToClipboard, renameFile } from "./batchOps";
+
 
 // Re-exported so existing importers keep working after the types moved to
 // resultTypes.ts.
@@ -74,6 +76,7 @@ export class SpotlightModal extends Modal {
 	private drillReturnQuery = "";
 	private drillReturnMode: SpotlightMode = "files";
 	private hasNavigated = false;
+	private activeWorkflowId = "";
 
 	constructor(
 		app: App,
@@ -159,6 +162,7 @@ export class SpotlightModal extends Modal {
 
 		this.inputEl.addEventListener("input", () => {
 			this.hasNavigated = false;
+			this.activeWorkflowId = "";
 			this.scheduleSearch();
 		});
 
@@ -222,6 +226,10 @@ export class SpotlightModal extends Modal {
 		return activeProfile(this.plugin.settings.searchProfiles, this.plugin.settings.activeProfileId);
 	}
 
+	private currentWorkflow(): WorkflowPreset | null {
+		return this.plugin.settings.workflowPresets.find((workflow) => workflow.id === this.activeWorkflowId) ?? null;
+	}
+
 	/**
 	 * Trigger cheatsheet: every mode prefix stays visible in the modal so the
 	 * mode system is discoverable without reading docs (the top complaint
@@ -252,6 +260,9 @@ export class SpotlightModal extends Modal {
 			this.hintEl.appendText(" · ");
 			this.hintEl.createEl("code", { text: "Ctrl+D" });
 			this.hintEl.appendText(" star");
+		}
+		if (this.plugin.settings.workflowPresets.length === 0) {
+			this.hintEl.appendText(" · starter workflows in Browse");
 		}
 	}
 
@@ -303,13 +314,14 @@ export class SpotlightModal extends Modal {
 		const isEmptyQuery = body.length === 0;
 		const isPro = this.plugin.settings.isPro;
 		const profile = this.currentProfile();
+		const workflow = this.currentWorkflow();
 		const excludeFolders = profile?.excludeFolders ?? this.plugin.settings.excludeFolders;
 		const includeCanvas = profile?.includeCanvas ?? this.plugin.settings.includeCanvas;
 		const includePdf = profile?.includePdf ?? this.plugin.settings.includePdf;
 		const includeBases = profile?.includeBases ?? this.plugin.settings.includeBases;
 
 		this.isLoading = true;
-		// Only show the skeleton when a search is genuinely slow — instant
+
 		// results (the common case) render directly, without a flash.
 		if (this.loadingTimer !== null) window.clearTimeout(this.loadingTimer);
 		this.loadingTimer = window.setTimeout(() => {
@@ -525,9 +537,11 @@ export class SpotlightModal extends Modal {
 					includeBases: isPro && includeBases,
 					excludeFolders,
 					frecency: this.plugin.settings.useFrecency ? this.plugin.settings.fileFrecency : undefined,
+					ranking: this.plugin.settings.ranking,
+					rankingMode: workflow?.rankingMode ?? profile?.rankingMode,
 					limit: isEmptyQuery ? 40 : 50,
 				});
-				if (generation !== this.searchGeneration) return;
+
 				this.items = fileResults.map((r) => ({
 					kind: "file" as const,
 					file: r.file,
@@ -535,10 +549,32 @@ export class SpotlightModal extends Modal {
 					matchIndices: r.matchIndices,
 					modifiedLabel: r.modifiedLabel,
 					fileKind: r.fileKind,
+					primaryMatch: r.primaryMatch,
+					aliasMatched: r.aliasMatched,
+					tags: r.tags,
+					aliases: r.aliases,
 					isRecent: r.isRecent,
 					isStarred: r.isStarred,
 					isBookmarked: r.isBookmarked,
 				}));
+
+				if (isEmptyQuery && isPro) {
+					const workflows = ensureStarterWorkflows(this.plugin.settings.workflowPresets)
+						.slice()
+						.sort((a, b) => Number(b.pinned) - Number(a.pinned) || Number(b.starter ?? false) - Number(a.starter ?? false) || a.name.localeCompare(b.name))
+						.map((workflow) => ({
+							kind: "workflow" as const,
+							id: workflow.id,
+							name: workflow.name,
+							query: workflow.query,
+							mode: workflow.mode,
+							profileId: workflow.profileId,
+							isPinned: workflow.pinned,
+							isStarter: workflow.starter ?? false,
+							rankingMode: workflow.rankingMode,
+						}));
+					this.items = [...workflows, ...this.items];
+				}
 
 				if (isEmptyQuery && isPro && this.plugin.settings.searchProfiles.length > 0) {
 					const profiles = this.plugin.settings.searchProfiles.map((searchProfile) => ({
@@ -610,6 +646,7 @@ export class SpotlightModal extends Modal {
 	}
 
 	private getBrowseSection(item: ResultItem): string | null {
+		if (item.kind === "workflow" && this.inputEl.value.trim().length === 0) return "Workflows";
 		if (item.kind === "profile" && this.inputEl.value.trim().length === 0) return "Search profiles";
 		if (item.kind === "collection" && this.inputEl.value.trim().length === 0) return "Smart collections";
 		if (item.kind !== "file" || this.inputEl.value.trim().length > 0) return null;
@@ -627,6 +664,10 @@ export class SpotlightModal extends Modal {
 			matchIndices: [],
 			modifiedLabel: "",
 			fileKind: getVaultFileKind(file),
+			primaryMatch: "browse",
+			aliasMatched: false,
+			tags: [],
+			aliases: [],
 			isRecent: this.plugin.settings.recentPaths.includes(file.path),
 			isStarred: this.plugin.isStarred(file.path),
 			isBookmarked: bookmarkedPaths.has(file.path),
@@ -637,7 +678,7 @@ export class SpotlightModal extends Modal {
 		const active = this.app.workspace.getActiveFile();
 		const files = this.app.vault.getMarkdownFiles();
 		const q = query.replace(/^(<-|->|\[\[)\s?/, "").trim().toLowerCase();
-		// Drilled-in file wins; otherwise the best-matching typed name,
+
 		// otherwise the active note.
 		const target = this.drillFile ?? (q ? this.bestFileMatch(files, q) : active);
 		if (!target) return [];
@@ -773,6 +814,7 @@ export class SpotlightModal extends Modal {
 			renderResultRow(row, item, {
 				isEmptyQuery,
 				showModifiedTime: this.plugin.settings.showModifiedTime,
+				showMatchReasons: this.plugin.settings.ranking.showMatchReasons,
 			});
 
 			if (this.plugin.settings.isPro && item.kind === "file") {
@@ -991,6 +1033,11 @@ export class SpotlightModal extends Modal {
 			return;
 		}
 
+		if (selected.kind === "workflow") {
+			this.applyWorkflow(selected.id);
+			return;
+		}
+
 		if (selected.kind === "action") {
 			if (selected.action.requiresPro && !this.plugin.settings.isPro) {
 				new Notice("Vault Spotlight: Pro required for this action.");
@@ -1118,6 +1165,22 @@ export class SpotlightModal extends Modal {
 		void this.runSearch();
 	}
 
+	private applyWorkflow(id: string): void {
+		const workflows = ensureStarterWorkflows(this.plugin.settings.workflowPresets);
+		const workflow = workflows.find((entry) => entry.id === id);
+		if (!workflow) return;
+		this.activeWorkflowId = workflow.id;
+		this.actionContext = null;
+		if (workflow.profileId) {
+			this.plugin.settings.activeProfileId = workflow.profileId;
+		}
+		this.mode = workflow.mode;
+		this.inputEl.value = workflow.query;
+		void this.plugin.saveSettings();
+		this.focusInput();
+		void this.runSearch();
+	}
+
 	private saveCurrentProfile(): void {
 		new PromptModal(this.app, {
 			title: "Save search profile",
@@ -1132,6 +1195,31 @@ export class SpotlightModal extends Modal {
 				].slice(0, 20);
 				void this.plugin.saveSettings();
 				new Notice("Vault Spotlight: search profile saved.");
+				this.closeActionPalette();
+			},
+		}).open();
+	}
+
+	private saveCurrentWorkflow(): void {
+		const mode = this.actionReturnMode || this.mode;
+		const query = (this.actionReturnQuery || this.inputEl.value).trim();
+		if (!canSaveWorkflowPreset(this.plugin.settings.workflowPresets, this.plugin.settings.isPro)) {
+			new Notice("Vault Spotlight: workflows require Pro and a non-empty search.");
+			return;
+		}
+		new PromptModal(this.app, {
+			title: "Save workflow",
+			initial: query.slice(0, 40) || "New workflow",
+			cta: "Save workflow",
+			onSubmit: (name) => {
+				const workflow = createWorkflowPreset(name, mode, query, {
+					profileId: this.plugin.settings.activeProfileId,
+					rankingMode: this.currentProfile()?.rankingMode,
+				});
+				this.plugin.settings.workflowPresets = [workflow, ...this.plugin.settings.workflowPresets].slice(0, 20);
+				this.activeWorkflowId = workflow.id;
+				void this.plugin.saveSettings();
+				new Notice("Vault Spotlight: workflow saved.");
 				this.closeActionPalette();
 			},
 		}).open();
@@ -1627,7 +1715,11 @@ export class SpotlightModal extends Modal {
 		});
 		this.scope.register(["Mod"], "s", (evt) => {
 			evt.preventDefault();
-			this.saveCustomSearch();
+			if (canSaveWorkflowPreset(this.plugin.settings.workflowPresets, this.plugin.settings.isPro)) {
+				this.saveCurrentWorkflow();
+			} else {
+				this.saveCustomSearch();
+			}
 			return false;
 		});
 	}

@@ -31,6 +31,10 @@ export type ResultItem =
 			matchIndices: number[];
 			modifiedLabel: string;
 			fileKind: VaultFileKind;
+			primaryMatch: "filename" | "path" | "alias" | "filters" | "browse";
+			aliasMatched: boolean;
+			tags: string[];
+			aliases: string[];
 			isRecent: boolean;
 			isStarred: boolean;
 			isBookmarked: boolean;
@@ -103,6 +107,17 @@ export type ResultItem =
 			isActive: boolean;
 	  }
 	| {
+			kind: "workflow";
+			id: string;
+			name: string;
+			query: string;
+			mode: SpotlightMode;
+			profileId: string;
+			isPinned: boolean;
+			isStarter: boolean;
+			rankingMode?: "balanced" | "filename" | "recency" | "metadata" | "alias";
+	  }
+	| {
 			kind: "action";
 			action: SpotlightAction;
 	  }
@@ -119,10 +134,8 @@ export type SpotlightAction = {
 	run: () => void | Promise<void>;
 };
 
-/** Where to open a result: null = current tab, or an Obsidian pane type. */
 export type PaneTarget = "tab" | "split" | "window" | null;
 
-/** The file a result points at, when it points at one. */
 export function itemFile(item: ResultItem): TFile | null {
 	if (item.kind === "file" || item.kind === "content" || item.kind === "heading" || item.kind === "symbol") {
 		return item.file;

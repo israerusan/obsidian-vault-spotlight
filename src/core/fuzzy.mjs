@@ -1,10 +1,12 @@
-export function fuzzyMatch(query, text) {
+export function fuzzyMatch(query, text, options = {}) {
 	if (!query) {
 		return { score: 0, indices: [] };
 	}
 
-	const q = query.toLowerCase();
-	const t = text.toLowerCase();
+	const fold = options.ignoreDiacritics === true ? stripDiacritics : identity;
+	const q = fold(query).toLowerCase();
+	const foldedText = fold(text);
+	const t = foldedText.toLowerCase();
 	let qi = 0;
 	let lastMatch = -1;
 	let score = 0;
@@ -15,7 +17,7 @@ export function fuzzyMatch(query, text) {
 			indices.push(ti);
 			if (lastMatch === ti - 1) {
 				score += 8;
-			} else if (ti === 0 || /[\s\-_/]/.test(text[ti - 1] ?? "")) {
+			} else if (ti === 0 || /[\s\-_/]/.test(foldedText[ti - 1] ?? "")) {
 				score += 12;
 			} else {
 				score += 4;
@@ -31,7 +33,7 @@ export function fuzzyMatch(query, text) {
 		// so a small typo ("dashbaord" → "dashboard") still matches. Compare the
 		// query against each word of the text; keep it cheap by only trying when
 		// the query is long enough to make a typo meaningful.
-		return typoFallback(q, text);
+		return typoFallback(q, foldedText);
 	}
 
 	if (t.includes(q)) score += 20;
@@ -84,4 +86,12 @@ export function boundedLevenshtein(a, b, max) {
 		[prev, curr] = [curr, prev];
 	}
 	return prev[bl];
+}
+
+function stripDiacritics(value) {
+	return String(value).normalize("NFD").replace(/\p{Diacritic}+/gu, "");
+}
+
+function identity(value) {
+	return String(value);
 }

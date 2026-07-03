@@ -1,6 +1,8 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type VaultSpotlightPlugin from "./main";
 import { createProfileFromSettings } from "./core/searchProfiles.mjs";
+import { DEFAULT_RANKING_SETTINGS } from "./core/ranking.mjs";
+import { ensureStarterWorkflows } from "./core/workflowPresets.mjs";
 import {
 	DEFAULT_ESCAPE_CHAR,
 	DEFAULT_MODE_PREFIXES,
@@ -29,6 +31,28 @@ export interface SearchProfile {
 	includeBases: boolean;
 	excludeFolders: string[];
 	showPreview: boolean;
+	rankingMode?: "balanced" | "filename" | "recency" | "metadata" | "alias";
+}
+
+export interface WorkflowPreset {
+	id: string;
+	name: string;
+	query: string;
+	mode: SearchProfile["defaultMode"];
+	profileId: string;
+	pinned: boolean;
+	starter?: boolean;
+	rankingMode?: SearchProfile["rankingMode"];
+}
+
+export interface RankingSettings {
+	mode: "balanced" | "filename" | "recency" | "metadata" | "alias";
+	preferOpenFiles: boolean;
+	preferStarredFiles: boolean;
+	preferBookmarkedFiles: boolean;
+	preferRecentFiles: boolean;
+	ignoreDiacritics: boolean;
+	showMatchReasons: boolean;
 }
 
 export interface FrecencyEntry {
@@ -47,8 +71,10 @@ export interface VaultSpotlightSettings {
 	maxStarred: number;
 	customSearches: CustomSearch[];
 	pinnedCustomSearchIds: string[];
+	workflowPresets: WorkflowPreset[];
 	searchProfiles: SearchProfile[];
 	activeProfileId: string;
+	ranking: RankingSettings;
 	searchAliases: string;
 	showModifiedTime: boolean;
 	ripgrepCommand: string;
@@ -70,6 +96,7 @@ export const MAX_CUSTOM_SEARCHES = 50;
 export const MAX_RECENT_SEARCHES = 15;
 
 export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
+
 	licenseKey: "",
 	isPro: false,
 	licenseEmail: "",
@@ -80,8 +107,10 @@ export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	maxStarred: 50,
 	customSearches: [],
 	pinnedCustomSearchIds: [],
+	workflowPresets: [],
 	searchProfiles: [],
 	activeProfileId: "",
+	ranking: { ...DEFAULT_RANKING_SETTINGS },
 	searchAliases: "",
 	showModifiedTime: true,
 	ripgrepCommand: "rg",
@@ -176,6 +205,67 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.useFrecency).onChange((value) => {
 					this.plugin.settings.useFrecency = value;
+					void this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl).setName("Ranking & match reasons").setHeading();
+
+		new Setting(containerEl)
+			.setName("Default ranking mode")
+			.setDesc("Choose what file search should prioritize when several notes match.")
+			.addDropdown((dropdown) => {
+				dropdown
+					.addOption("balanced", "Balanced")
+					.addOption("filename", "Filename first")
+					.addOption("recency", "Recency first")
+					.addOption("metadata", "Metadata first")
+					.addOption("alias", "Alias aware")
+					.setValue(this.plugin.settings.ranking.mode)
+					.onChange((value: RankingSettings["mode"]) => {
+						this.plugin.settings.ranking.mode = value;
+						void this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName("Prefer open files")
+			.setDesc("Boost notes that are already open in an editor.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.ranking.preferOpenFiles).onChange((value) => {
+					this.plugin.settings.ranking.preferOpenFiles = value;
+					void this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Prefer starred, bookmarked, and recent files")
+			.setDesc("Keep pinned work and recently touched notes near the top of browse results.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.ranking.preferStarredFiles && this.plugin.settings.ranking.preferBookmarkedFiles && this.plugin.settings.ranking.preferRecentFiles).onChange((value) => {
+					this.plugin.settings.ranking.preferStarredFiles = value;
+					this.plugin.settings.ranking.preferBookmarkedFiles = value;
+					this.plugin.settings.ranking.preferRecentFiles = value;
+					void this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Ignore diacritics")
+			.setDesc("Treat café like cafe when matching filenames and aliases.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.ranking.ignoreDiacritics).onChange((value) => {
+					this.plugin.settings.ranking.ignoreDiacritics = value;
+					void this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Show match reasons")
+			.setDesc("Display why a result ranked well, such as Alias match or Starred.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.ranking.showMatchReasons).onChange((value) => {
+					this.plugin.settings.ranking.showMatchReasons = value;
 					void this.plugin.saveSettings();
 				})
 			);
@@ -350,8 +440,47 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 				});
 			});
 
+		new Setting(containerEl).setName("Workflow presets (Pro)").setHeading();
+		const workflowList = containerEl.createDiv();
+		if (!this.plugin.settings.isPro) {
+			workflowList.createEl("p", { text: "Unlock Pro to save and run reusable workflows from Browse." });
+		} else {
+			new Setting(workflowList)
+				.setName("Starter workflows")
+				.setDesc("Seed Browse mode with a few high-signal workflow presets.")
+				.addButton((button) =>
+					button.setButtonText("Load starters").onClick(() => {
+						this.plugin.settings.workflowPresets = ensureStarterWorkflows(this.plugin.settings.workflowPresets);
+						void this.plugin.saveSettings().then(() => this.display());
+					})
+				);
+			if (this.plugin.settings.workflowPresets.length === 0) {
+				workflowList.createEl("p", { text: "No workflows yet. Save one from Spotlight with Ctrl+S, or load the starter workflows." });
+			} else {
+				for (const workflow of this.plugin.settings.workflowPresets) {
+					const row = workflowList.createDiv({ cls: "vault-spotlight-starred-row" });
+					row.createSpan({
+						text: `${workflow.pinned ? "★ " : ""}${workflow.name}: ${workflow.mode}${workflow.query ? ` · ${workflow.query}` : ""}${workflow.rankingMode ? ` · ${workflow.rankingMode}` : ""}`,
+					});
+					const pinBtn = row.createEl("button", { text: workflow.pinned ? "Unpin" : "Pin" });
+					pinBtn.addEventListener("click", () => {
+						this.plugin.settings.workflowPresets = this.plugin.settings.workflowPresets.map((entry) =>
+							entry.id === workflow.id ? { ...entry, pinned: !entry.pinned } : entry
+						);
+						void this.plugin.saveSettings().then(() => this.display());
+					});
+					const remove = row.createEl("button", { text: workflow.starter ? "Hide" : "Remove" });
+					remove.addEventListener("click", () => {
+						this.plugin.settings.workflowPresets = this.plugin.settings.workflowPresets.filter((entry) => entry.id !== workflow.id);
+						void this.plugin.saveSettings().then(() => this.display());
+					});
+				}
+			}
+		}
+
 		new Setting(containerEl).setName("Search profiles (Pro)").setHeading();
 		const profileList = containerEl.createDiv();
+
 		if (!this.plugin.settings.isPro) {
 			profileList.createEl("p", { text: "Unlock Pro to save workspace-style search profiles." });
 		} else {

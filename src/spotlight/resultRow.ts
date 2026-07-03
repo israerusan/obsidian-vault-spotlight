@@ -2,18 +2,15 @@ import { setIcon } from "obsidian";
 import { renderHighlightedText } from "../search/fuzzy";
 import { getVaultFileKind, iconForFileKind } from "../search/vaultFiles";
 import { iconForSymbolType } from "../search/SymbolSearcher";
+import { buildFileDecorations } from "../core/resultDecorators.mjs";
 import { capitalize, type ResultItem } from "./resultTypes";
 
 export interface ResultRowOptions {
 	isEmptyQuery: boolean;
 	showModifiedTime: boolean;
+	showMatchReasons?: boolean;
 }
 
-/**
- * Fill one result row's icon, title, badges, and meta line for its item kind.
- * Selection state, checkboxes, star buttons, and listeners stay in the modal —
- * this renders only the item's content.
- */
 export function renderResultRow(
 	row: HTMLDivElement,
 	item: ResultItem,
@@ -28,23 +25,28 @@ export function renderResultRow(
 		setIcon(iconWrap, iconForFileKind(item.fileKind));
 		row.toggleClass("is-starred", item.isStarred);
 		renderHighlightedText(title, item.file.basename, item.matchIndices);
-		if (item.isStarred && !options.isEmptyQuery) {
-			titleRow.createSpan({ cls: "vault-spotlight-item-badge is-star", text: "Starred" });
-		} else if (item.isBookmarked && !options.isEmptyQuery) {
-			titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Bookmark" });
-		} else if (item.isRecent && !options.isEmptyQuery) {
-			titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Recent" });
-		}
-		if (item.fileKind !== "markdown") {
+		const decorations = buildFileDecorations({
+			parentPath: item.file.parent?.path || "/",
+			modifiedLabel: options.showModifiedTime ? item.modifiedLabel : "",
+			fileKind: item.fileKind === "markdown" ? "note" : item.fileKind,
+			isStarred: item.isStarred && !options.isEmptyQuery,
+			isBookmarked: item.isBookmarked && !options.isEmptyQuery,
+			isRecent: item.isRecent && !options.isEmptyQuery,
+			primaryMatch: item.primaryMatch,
+			aliasMatched: item.aliasMatched,
+			tags: item.tags,
+			aliases: item.aliases,
+		});
+		for (const badge of decorations.badges) {
 			titleRow.createSpan({
-				cls: "vault-spotlight-item-badge is-type",
-				text: item.fileKind.toUpperCase(),
+				cls: badge === "Starred" ? "vault-spotlight-item-badge is-star" : "vault-spotlight-item-badge",
+				text: badge,
 			});
 		}
-		if (options.showModifiedTime) {
-			titleRow.createSpan({ cls: "vault-spotlight-item-time", text: item.modifiedLabel });
+		if (options.showMatchReasons && !options.isEmptyQuery) {
+			titleRow.createSpan({ cls: "vault-spotlight-item-badge is-type", text: decorations.reason });
 		}
-		body.createDiv({ cls: "vault-spotlight-item-meta", text: item.file.parent?.path || "/" });
+		body.createDiv({ cls: "vault-spotlight-item-meta", text: decorations.meta });
 	} else if (item.kind === "content") {
 		setIcon(
 			iconWrap,
@@ -122,6 +124,14 @@ export function renderResultRow(
 		title.setText(item.name);
 		titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isActive ? "Active profile" : "Search profile" });
 		body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.defaultMode}${item.defaultQuery ? ` · ${item.defaultQuery}` : ""}` });
+	} else if (item.kind === "workflow") {
+		setIcon(iconWrap, item.isPinned ? "sparkles" : "play-circle");
+		title.setText(item.name);
+		titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isStarter ? "Starter workflow" : "Workflow" });
+		if (item.rankingMode) {
+			titleRow.createSpan({ cls: "vault-spotlight-item-badge is-type", text: item.rankingMode });
+		}
+		body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.mode}${item.query ? ` · ${item.query}` : ""}` });
 	} else if (item.kind === "action") {
 		setIcon(iconWrap, item.action.requiresPro ? "sparkles" : "bolt");
 		title.setText(item.action.name);
