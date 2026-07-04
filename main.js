@@ -4410,6 +4410,94 @@ function insertCapture(existing, text, options = {}) {
   return options.mode === "prepend" ? prependToTop(base, line) : appendToEnd(base, line);
 }
 
+// src/core/modalCopy.mjs
+function normalizeHeading(heading) {
+  return String(heading != null ? heading : "").replace(/^#+\s*/, "").trim();
+}
+function describeCaptureTarget({ hasText, targetLabel, mode = "append", heading = "" }) {
+  if (!hasText) return "Type a note, then press Enter to capture";
+  const cleanHeading = normalizeHeading(heading);
+  if (cleanHeading) return `Capture under ${cleanHeading} in ${targetLabel}`;
+  return `${mode === "prepend" ? "Prepend to" : "Append to"} ${targetLabel}`;
+}
+function getShortcutHints({ itemKind = null, defaultNewTab = false, isPro = false }) {
+  const hints = [
+    { keys: ["\u2191", "\u2193"], label: "navigate" },
+    { keys: ["Tab"], label: "mode" }
+  ];
+  const openTarget = defaultNewTab ? "same tab" : "new tab";
+  const openLikeKinds = /* @__PURE__ */ new Set(["file", "content", "heading", "symbol", "editor"]);
+  const actionPaletteKinds = /* @__PURE__ */ new Set([
+    "file",
+    "content",
+    "heading",
+    "symbol",
+    "editor",
+    "folder",
+    "command",
+    "collection",
+    "profile",
+    "workflow",
+    "calc",
+    "datejump",
+    "capture",
+    "snippet",
+    "create"
+  ]);
+  if (openLikeKinds.has(itemKind)) {
+    hints.splice(
+      1,
+      0,
+      { keys: ["\u21B5"], label: "open" },
+      { keys: ["Ctrl", "\u21B5"], label: openTarget },
+      { keys: ["Shift", "\u21B5"], label: "new note" }
+    );
+  } else if (itemKind === "folder") {
+    hints.splice(1, 0, { keys: ["\u21B5"], label: "browse" });
+  } else if (itemKind === "history") {
+    hints.splice(1, 0, { keys: ["\u21B5"], label: "search again" });
+  } else if (itemKind === "collection" || itemKind === "profile" || itemKind === "workflow") {
+    hints.splice(1, 0, { keys: ["\u21B5"], label: "apply" });
+  } else if (itemKind === "action" || itemKind === "command") {
+    hints.splice(1, 0, { keys: ["\u21B5"], label: "run" });
+  } else if (itemKind === "calc") {
+    hints.splice(
+      1,
+      0,
+      { keys: ["\u21B5"], label: "copy" },
+      { keys: ["Shift", "\u21B5"], label: "insert" }
+    );
+  } else if (itemKind === "datejump") {
+    hints.splice(1, 0, { keys: ["\u21B5"], label: "open daily note" });
+  } else if (itemKind === "capture") {
+    hints.splice(1, 0, { keys: ["\u21B5"], label: "capture" });
+  } else if (itemKind === "snippet") {
+    hints.splice(1, 0, { keys: ["\u21B5"], label: "insert" });
+  } else if (itemKind === "create") {
+    hints.splice(1, 0, { keys: ["\u21B5"], label: "create note" });
+  } else {
+    hints.splice(
+      1,
+      0,
+      { keys: ["\u21B5"], label: "open" },
+      { keys: ["Ctrl", "\u21B5"], label: openTarget },
+      { keys: ["Shift", "\u21B5"], label: "new note" }
+    );
+  }
+  if (itemKind && actionPaletteKinds.has(itemKind) && itemKind !== "history" && itemKind !== "action" && itemKind !== "create") {
+    hints.splice(hints.length - 1, 0, { keys: ["Ctrl", "K"], label: "actions" });
+  }
+  if (isPro && itemKind === "file") {
+    hints.splice(
+      hints.length - 1,
+      0,
+      { keys: ["Ctrl", "D"], label: "star" },
+      { keys: ["Ctrl", "Space"], label: "select" }
+    );
+  }
+  return hints;
+}
+
 // src/spotlight/resultTypes.ts
 var MODE_ORDER = [
   "files",
@@ -5128,9 +5216,10 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       const link = cta.createEl("a", {
         cls: "vault-spotlight-pro-btn",
         text: "Get Pro on Buy Me a Coffee",
-        href: this.plugin.settings.purchaseUrl
+        href: safeHttpUrl(this.plugin.settings.purchaseUrl, DEFAULT_SETTINGS.purchaseUrl)
       });
       link.setAttr("target", "_blank");
+      link.setAttr("rel", "noopener noreferrer");
     }
     this.inputEl.addEventListener("input", () => {
       this.hasNavigated = false;
@@ -5768,13 +5857,20 @@ var SpotlightModal = class extends import_obsidian9.Modal {
   captureItems(body) {
     const text = body.trim();
     const dailyName = (0, import_obsidian9.moment)().format(this.dailyNoteConfig().format);
+    const captureHeading = this.plugin.settings.isPro ? this.plugin.settings.captureHeading : "";
+    const captureMode = this.plugin.settings.isPro ? this.plugin.settings.captureMode : "append";
     const items = [
       {
         kind: "capture",
         text,
         target: "daily",
         label: "Daily note",
-        description: text ? `Append to ${dailyName}` : "Type a note, then press Enter to capture"
+        description: describeCaptureTarget({
+          hasText: text.length > 0,
+          targetLabel: dailyName,
+          mode: captureMode,
+          heading: captureHeading
+        })
       }
     ];
     const inbox = this.plugin.settings.captureInboxPath.trim();
@@ -5784,7 +5880,12 @@ var SpotlightModal = class extends import_obsidian9.Modal {
         text,
         target: "inbox",
         label: "Inbox",
-        description: text ? `Append to ${inbox}` : `Capture into ${inbox}`
+        description: describeCaptureTarget({
+          hasText: text.length > 0,
+          targetLabel: inbox,
+          mode: captureMode,
+          heading: captureHeading
+        })
       });
     }
     return items;
@@ -6004,22 +6105,23 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     selected == null ? void 0 : selected.scrollIntoView({ block: "nearest" });
     if (selected == null ? void 0 : selected.id) this.inputEl.setAttribute("aria-activedescendant", selected.id);
     else this.inputEl.removeAttribute("aria-activedescendant");
+    this.renderFooter();
+    this.updateStatus(this.items.length);
     this.updatePreview();
   }
   renderFooter() {
+    var _a, _b;
     this.footerEl.empty();
     const shortcuts = this.footerEl.createDiv({ cls: "vault-spotlight-shortcuts" });
-    this.addShortcut(shortcuts, ["\u2191", "\u2193"], "navigate");
-    this.addShortcut(shortcuts, ["\u21B5"], "open");
-    this.addShortcut(shortcuts, ["Ctrl", "\u21B5"], this.plugin.settings.defaultNewTab ? "same tab" : "new tab");
-    this.addShortcut(shortcuts, ["Shift", "\u21B5"], "new note");
-    this.addShortcut(shortcuts, ["Alt", "\u21B5"], "menu");
-    this.addShortcut(shortcuts, ["Tab"], "mode");
-    this.addShortcut(shortcuts, ["Ctrl", "K"], "actions");
-    if (this.plugin.settings.isPro) {
-      this.addShortcut(shortcuts, ["Ctrl", "D"], "star");
-      this.addShortcut(shortcuts, ["Ctrl", "Space"], "select");
+    const selected = (_a = this.items[this.selectedIndex]) != null ? _a : null;
+    for (const hint of getShortcutHints({
+      itemKind: (_b = selected == null ? void 0 : selected.kind) != null ? _b : null,
+      defaultNewTab: this.plugin.settings.defaultNewTab,
+      isPro: this.plugin.settings.isPro
+    })) {
+      this.addShortcut(shortcuts, hint.keys, hint.label);
     }
+    if ((selected == null ? void 0 : selected.kind) !== "calc") this.addShortcut(shortcuts, ["Alt", "\u21B5"], "menu");
     this.statusEl = this.footerEl.createSpan({
       cls: "vault-spotlight-status",
       attr: { role: "status", "aria-live": "polite" }

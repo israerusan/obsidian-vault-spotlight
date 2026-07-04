@@ -30,6 +30,7 @@ import { evaluateExpression, parseCurrencyRates } from "../core/calculator.mjs";
 import { parseNaturalDate } from "../core/naturalDates.mjs";
 import { insertCapture } from "../core/capture.mjs";
 import { expandSnippet } from "../core/snippets.mjs";
+import { describeCaptureTarget, getShortcutHints } from "../core/modalCopy.mjs";
 import {
 	MODE_ORDER,
 	itemFile,
@@ -42,6 +43,7 @@ import { PreviewPane } from "./PreviewPane";
 import { renderResultRow } from "./resultRow";
 import * as batchOps from "./batchOps";
 import { copyToClipboard, renameFile } from "./batchOps";
+import { DEFAULT_SETTINGS, safeHttpUrl } from "../settings";
 
 
 // Re-exported so existing importers keep working after the types moved to
@@ -160,9 +162,10 @@ export class SpotlightModal extends Modal {
 			const link = cta.createEl("a", {
 				cls: "vault-spotlight-pro-btn",
 				text: "Get Pro on Buy Me a Coffee",
-				href: this.plugin.settings.purchaseUrl,
+				href: safeHttpUrl(this.plugin.settings.purchaseUrl, DEFAULT_SETTINGS.purchaseUrl),
 			});
 			link.setAttr("target", "_blank");
+			link.setAttr("rel", "noopener noreferrer");
 		}
 
 		this.inputEl.addEventListener("input", () => {
@@ -903,13 +906,20 @@ export class SpotlightModal extends Modal {
 	private captureItems(body: string): ResultItem[] {
 		const text = body.trim();
 		const dailyName = moment().format(this.dailyNoteConfig().format);
+		const captureHeading = this.plugin.settings.isPro ? this.plugin.settings.captureHeading : "";
+		const captureMode = this.plugin.settings.isPro ? this.plugin.settings.captureMode : "append";
 		const items: ResultItem[] = [
 			{
 				kind: "capture",
 				text,
 				target: "daily",
 				label: "Daily note",
-				description: text ? `Append to ${dailyName}` : "Type a note, then press Enter to capture",
+				description: describeCaptureTarget({
+					hasText: text.length > 0,
+					targetLabel: dailyName,
+					mode: captureMode,
+					heading: captureHeading,
+				}),
 			},
 		];
 		const inbox = this.plugin.settings.captureInboxPath.trim();
@@ -919,7 +929,12 @@ export class SpotlightModal extends Modal {
 				text,
 				target: "inbox",
 				label: "Inbox",
-				description: text ? `Append to ${inbox}` : `Capture into ${inbox}`,
+				description: describeCaptureTarget({
+					hasText: text.length > 0,
+					targetLabel: inbox,
+					mode: captureMode,
+					heading: captureHeading,
+				}),
 			});
 		}
 		return items;
@@ -1164,25 +1179,24 @@ export class SpotlightModal extends Modal {
 		// Point the combobox at the active option for screen readers.
 		if (selected?.id) this.inputEl.setAttribute("aria-activedescendant", selected.id);
 		else this.inputEl.removeAttribute("aria-activedescendant");
+		this.renderFooter();
+		this.updateStatus(this.items.length);
 		this.updatePreview();
 	}
 
 	private renderFooter(): void {
 		this.footerEl.empty();
 		const shortcuts = this.footerEl.createDiv({ cls: "vault-spotlight-shortcuts" });
+		const selected = this.items[this.selectedIndex] ?? null;
 
-		this.addShortcut(shortcuts, ["↑", "↓"], "navigate");
-		this.addShortcut(shortcuts, ["↵"], "open");
-		this.addShortcut(shortcuts, ["Ctrl", "↵"], this.plugin.settings.defaultNewTab ? "same tab" : "new tab");
-		this.addShortcut(shortcuts, ["Shift", "↵"], "new note");
-		this.addShortcut(shortcuts, ["Alt", "↵"], "menu");
-		this.addShortcut(shortcuts, ["Tab"], "mode");
-		this.addShortcut(shortcuts, ["Ctrl", "K"], "actions");
-
-		if (this.plugin.settings.isPro) {
-			this.addShortcut(shortcuts, ["Ctrl", "D"], "star");
-			this.addShortcut(shortcuts, ["Ctrl", "Space"], "select");
+		for (const hint of getShortcutHints({
+			itemKind: selected?.kind ?? null,
+			defaultNewTab: this.plugin.settings.defaultNewTab,
+			isPro: this.plugin.settings.isPro,
+		})) {
+			this.addShortcut(shortcuts, hint.keys, hint.label);
 		}
+		if (selected?.kind !== "calc") this.addShortcut(shortcuts, ["Alt", "↵"], "menu");
 
 		// Announce the result count / empty state to screen readers as the user
 		// types (aria-live), without stealing focus.
