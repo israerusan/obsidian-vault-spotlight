@@ -1,6 +1,11 @@
 export function fuzzyMatch(query, text, options = {}) {
-	if (!query) {
-		return { score: 0, indices: [] };
+	// An empty/whitespace-only query is "no match", not a zero-score match: every
+	// caller treats a falsy return as "skip", but a truthy {score:0} object would
+	// pass that guard and add a spurious zero-relevance hit (e.g. FileSearcher would
+	// set primaryMatch="filename" for an empty name: term). Return null so the
+	// empty case can never masquerade as a match.
+	if (!query || !String(query).trim()) {
+		return null;
 	}
 
 	const ignoreDiacritics = options.ignoreDiacritics === true;

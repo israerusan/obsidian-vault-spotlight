@@ -24,7 +24,16 @@ self.onmessage = (evt) => {
 		// Coerce defensively: a malformed message with non-string content would
 		// otherwise throw here, fire onerror, and retire the worker for the whole
 		// session.
-		index.set(msg.path, String(msg.content == null ? "" : msg.content).split("\\n"));
+		// Cap each line at 2000 chars — MUST match MAX_INDEXED_LINE_LEN in
+		// ContentSearcher.ts so the worker and in-process indexes hold identical
+		// text (a pathological multi-MB line would otherwise bloat the worker and
+		// diverge the two paths' matches).
+		index.set(
+			msg.path,
+			String(msg.content == null ? "" : msg.content)
+				.split("\\n")
+				.map(function (l) { return l.length > 2000 ? l.slice(0, 2000) : l; })
+		);
 	} else if (msg.type === "remove") {
 		index.delete(msg.path);
 	} else if (msg.type === "clear") {

@@ -1,4 +1,5 @@
 /* Vault Spotlight */
+"use strict";
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -2318,6 +2319,7 @@ function rankingBoosts(mode) {
 }
 
 // src/core/searchProfiles.mjs
+var MAX_SEARCH_PROFILES = 20;
 var PROFILE_MODES = /* @__PURE__ */ new Set([
   "files",
   "content",
@@ -2342,18 +2344,18 @@ function normalizeProfiles(rawProfiles) {
     excludeFolders: Array.isArray(profile.excludeFolders) ? profile.excludeFolders.map((f) => String(f).trim()).filter(Boolean) : [],
     showPreview: profile.showPreview === true,
     rankingMode: RANKING_MODES.has(profile.rankingMode) ? profile.rankingMode : void 0
-  })).slice(0, 20);
+  })).slice(0, MAX_SEARCH_PROFILES);
 }
 function activeProfile(profiles, activeProfileId) {
   var _a;
   return (_a = profiles.find((profile) => profile.id === activeProfileId)) != null ? _a : null;
 }
-function createProfileFromSettings(name, settings, mode = "files", query = "") {
+function createProfileFromSettings(name, settings, mode = "files", query = "", existingIds = []) {
   var _a;
+  const seen = new Set(Array.isArray(existingIds) ? existingIds : []);
+  const base = cleanId(name) || `profile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   return {
-    // Random suffix on the fallback id so two unsluggable names created in
-    // the same millisecond don't collide (pin/remove/activate would hit both).
-    id: cleanId(name) || `profile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: uniqueId(base, seen),
     name: String(name || "New profile").trim() || "New profile",
     defaultMode: PROFILE_MODES.has(mode) ? mode : "files",
     defaultQuery: String(query || ""),
@@ -2516,10 +2518,11 @@ function normalizeEscapeChar(raw) {
 function reconcileEscapeChar(escapeChar, modePrefixes) {
   var _a;
   const escape = normalizeEscapeChar(escapeChar);
-  const taken = new Set(Object.values(modePrefixes || {}));
-  if (!taken.has(escape)) return escape;
-  if (!taken.has(DEFAULT_ESCAPE_CHAR)) return DEFAULT_ESCAPE_CHAR;
-  return (_a = ["\\", "|", "?", "%", "&"].find((c) => !taken.has(c))) != null ? _a : DEFAULT_ESCAPE_CHAR;
+  const prefixes = Object.values(modePrefixes || {}).filter((p) => typeof p === "string" && p.length > 0);
+  const collides = (candidate) => prefixes.some((p) => p.startsWith(candidate));
+  if (!collides(escape)) return escape;
+  const spares = [DEFAULT_ESCAPE_CHAR, "\\", "|", "?", "%", "&", "#", "@", "*", "."];
+  return (_a = spares.find((c) => !collides(c))) != null ? _a : DEFAULT_ESCAPE_CHAR;
 }
 function detectModeFromPrefix(raw, prefixes = DEFAULT_MODE_PREFIXES, escapeChar = DEFAULT_ESCAPE_CHAR) {
   const trimmed = String(raw != null ? raw : "").trimStart();
@@ -2538,7 +2541,7 @@ function parseHeadingQuery(raw) {
   let levelMin = null;
   let levelMax = null;
   const withoutLevels = String(raw != null ? raw : "").split(/\s+/).filter((token) => {
-    const match = token.toLowerCase().match(/^level:(\d)(?:-(\d))?$/);
+    const match = token.toLowerCase().match(/^level:(\d+)(?:-(\d+))?$/);
     if (!match) return true;
     const a = Number(match[1]);
     const b = match[2] !== void 0 ? Number(match[2]) : a;
@@ -3064,7 +3067,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
     proSearch("Capture placement", "Add captured lines to the end (append) or top (prepend) of the target note.", (setting) => {
       setting.addDropdown((dropdown) => {
         dropdown.addOption("append", "Append to end").addOption("prepend", "Prepend to top").setValue(this.plugin.settings.captureMode).onChange((value) => {
-          this.plugin.settings.captureMode = value;
+          this.plugin.settings.captureMode = value === "prepend" ? "prepend" : "append";
           void this.plugin.saveSettings();
         });
       });
@@ -3223,8 +3226,14 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
     } else {
       new import_obsidian.Setting(profileList).setName("Save current settings as profile").setDesc("Profiles remember file type toggles, excluded folders, preview preference, and a default query/mode.").addButton(
         (button) => button.setButtonText("Add profile").onClick(() => {
-          const profile = createProfileFromSettings(`Profile ${this.plugin.settings.searchProfiles.length + 1}`, this.plugin.settings);
-          this.plugin.settings.searchProfiles = [...this.plugin.settings.searchProfiles, profile].slice(0, 20);
+          const profile = createProfileFromSettings(
+            `Profile ${this.plugin.settings.searchProfiles.length + 1}`,
+            this.plugin.settings,
+            "files",
+            "",
+            this.plugin.settings.searchProfiles.map((p) => p.id)
+          );
+          this.plugin.settings.searchProfiles = [...this.plugin.settings.searchProfiles, profile].slice(0, MAX_SEARCH_PROFILES);
           void this.plugin.saveSettings().then(() => this.display());
         })
       );
@@ -3377,8 +3386,8 @@ function tokenizeAdvanced(raw) {
 // src/core/fuzzy.mjs
 function fuzzyMatch(query, text, options = {}) {
   var _a;
-  if (!query) {
-    return { score: 0, indices: [] };
+  if (!query || !String(query).trim()) {
+    return null;
   }
   const ignoreDiacritics = options.ignoreDiacritics === true;
   const q = (ignoreDiacritics ? stripDiacritics(query) : String(query)).toLowerCase();
@@ -3820,13 +3829,14 @@ var HeadingSearcher = class {
     var _a, _b, _c;
     const limit = (_a = options.limit) != null ? _a : 50;
     const excluded = normalizeExcludeFolders(options.excludeFolders);
+    const matchOpts = { ignoreDiacritics: options.ignoreDiacritics === true };
     const q = query.trim();
     const fileQuery = (_c = (_b = options.fileQuery) == null ? void 0 : _b.trim()) != null ? _c : "";
     const results = [];
     const softCap = Math.max(limit * 10, 500);
     for (const file of this.app.vault.getMarkdownFiles()) {
       if (isPathExcluded(file.path, excluded)) continue;
-      if (fileQuery && !fuzzyMatch(fileQuery, file.basename) && !fuzzyMatch(fileQuery, file.path)) continue;
+      if (fileQuery && !fuzzyMatch(fileQuery, file.basename, matchOpts) && !fuzzyMatch(fileQuery, file.path, matchOpts)) continue;
       const cache = this.app.metadataCache.getFileCache(file);
       const headings = cache == null ? void 0 : cache.headings;
       if (!headings || headings.length === 0) continue;
@@ -3836,7 +3846,7 @@ var HeadingSearcher = class {
         let score = 1;
         let matchIndices = [];
         if (q.length > 0) {
-          const match = fuzzyMatch(q, h.heading);
+          const match = fuzzyMatch(q, h.heading, matchOpts);
           if (!match) continue;
           score = match.score;
           matchIndices = match.indices;
@@ -3883,7 +3893,7 @@ var CommandSearcher = class {
     }
     return [];
   }
-  search(query, limit = 50) {
+  search(query, limit = 50, ignoreDiacritics = false) {
     const commands = this.list();
     const q = query.trim();
     const results = [];
@@ -3892,7 +3902,7 @@ var CommandSearcher = class {
         results.push({ id: cmd.id, name: cmd.name, score: 1, matchIndices: [] });
         continue;
       }
-      const match = fuzzyMatch(q, cmd.name);
+      const match = fuzzyMatch(q, cmd.name, { ignoreDiacritics });
       if (!match) continue;
       results.push({ id: cmd.id, name: cmd.name, score: match.score, matchIndices: match.indices });
     }
@@ -3925,7 +3935,7 @@ var SymbolSearcher = class {
   constructor(app) {
     this.app = app;
   }
-  search(file, query, limit = 100) {
+  search(file, query, limit = 100, ignoreDiacritics = false) {
     var _a, _b, _c, _d, _e;
     if (file.extension !== "md") return [];
     const cache = this.app.metadataCache.getFileCache(file);
@@ -3957,7 +3967,7 @@ var SymbolSearcher = class {
       let score = 1;
       let matchIndices = [];
       if (q.length > 0) {
-        const match = fuzzyMatch(q, symbol.text);
+        const match = fuzzyMatch(q, symbol.text, { ignoreDiacritics });
         if (!match) continue;
         score = match.score;
         matchIndices = match.indices;
@@ -3997,7 +4007,7 @@ var EditorSearcher = class {
     });
     return paths;
   }
-  search(query, limit = 60) {
+  search(query, limit = 60, ignoreDiacritics = false) {
     const q = query.trim();
     const activeLeaf = this.app.workspace.getMostRecentLeaf();
     const rows = [];
@@ -4011,8 +4021,8 @@ var EditorSearcher = class {
       let score = 1;
       let matchIndices = [];
       if (q.length > 0) {
-        const titleMatch = fuzzyMatch(q, title);
-        const match = titleMatch != null ? titleMatch : file ? fuzzyMatch(q, file.path) : null;
+        const titleMatch = fuzzyMatch(q, title, { ignoreDiacritics });
+        const match = titleMatch != null ? titleMatch : file ? fuzzyMatch(q, file.path, { ignoreDiacritics }) : null;
         if (!match) return;
         score = match.score;
         matchIndices = titleMatch ? match.indices : [];
@@ -5541,12 +5551,8 @@ var WorkflowController = class {
       onSubmit: (name) => {
         const mode = this.host.hasActionContext() ? this.host.actionReturnMode() : this.host.liveMode();
         const query = this.host.hasActionContext() ? this.host.actionReturnQuery() : this.host.liveQuery();
-        const profile = createProfileFromSettings(name, this.settings, mode, query);
-        const exists = this.settings.searchProfiles.some((p) => p.id === profile.id);
-        this.settings.searchProfiles = [
-          ...this.settings.searchProfiles.filter((p) => p.id !== profile.id),
-          { ...profile, id: exists ? `${profile.id}-${Date.now()}` : profile.id }
-        ].slice(0, 20);
+        const profile = createProfileFromSettings(name, this.settings, mode, query, this.settings.searchProfiles.map((p) => p.id));
+        this.settings.searchProfiles = [...this.settings.searchProfiles, profile].slice(0, MAX_SEARCH_PROFILES);
         void this.host.plugin.saveSettings();
         new import_obsidian9.Notice("Vault Spotlight: search profile saved.");
         this.host.closeActionPalette();
@@ -5834,6 +5840,11 @@ var SpotlightModal = class extends import_obsidian11.Modal {
     this.modifierLabel = "Ctrl";
     this.focusTimers = [];
     this.focusRaf = null;
+    // The window the focus retries are scheduled on. Derived from the input's own
+    // document so a modal rendered in a popout schedules its rAF/timers on THAT
+    // window (whose animation frames aren't throttled while the popout has focus),
+    // matching the ownerDocument-based activeElement check in applyFocus below.
+    this.focusWin = window;
     this.shouldRestoreSelection = false;
     this.preview = new PreviewPane(app);
     this.capture = new CaptureController({
@@ -5937,22 +5948,24 @@ var SpotlightModal = class extends import_obsidian11.Modal {
       this.updateSelectionHighlight();
     });
     this.resultsEl.addEventListener("mousedown", (evt) => {
+      const starBtn = evt.target.closest(".vault-spotlight-star-btn");
+      if (!starBtn) return;
       const index = this.rowIndexFromEvent(evt);
       if (index === null) return;
       const item = this.items[index];
-      const starBtn = evt.target.closest(".vault-spotlight-star-btn");
-      if (starBtn) {
-        evt.preventDefault();
-        evt.stopPropagation();
-        if ((item == null ? void 0 : item.kind) === "file") {
-          item.isStarred = this.plugin.toggleStar(item.file.path);
-          (0, import_obsidian11.setIcon)(starBtn, item.isStarred ? "star" : "star-off");
-          const row = starBtn.closest(".vault-spotlight-item");
-          row == null ? void 0 : row.toggleClass("is-starred", item.isStarred);
-        }
-        return;
-      }
       evt.preventDefault();
+      evt.stopPropagation();
+      if ((item == null ? void 0 : item.kind) === "file") {
+        item.isStarred = this.plugin.toggleStar(item.file.path);
+        (0, import_obsidian11.setIcon)(starBtn, item.isStarred ? "star" : "star-off");
+        const row = starBtn.closest(".vault-spotlight-item");
+        row == null ? void 0 : row.toggleClass("is-starred", item.isStarred);
+      }
+    });
+    this.resultsEl.addEventListener("click", (evt) => {
+      if (evt.target.closest(".vault-spotlight-star-btn")) return;
+      const index = this.rowIndexFromEvent(evt);
+      if (index === null) return;
       this.selectedIndex = index;
       this.safeActivate();
     });
@@ -5992,7 +6005,13 @@ var SpotlightModal = class extends import_obsidian11.Modal {
         fallback: DEFAULT_SETTINGS.purchaseUrl
       });
     }
-    this.inputEl.addEventListener("input", () => {
+    this.inputEl.addEventListener("input", (evt) => {
+      if (evt.isComposing) {
+        this.hasNavigated = false;
+        this.activeWorkflowId = "";
+        this.scheduleSearch();
+        return;
+      }
       const item = this.items[this.selectedIndex];
       const file = item ? itemFile(item) : null;
       const drill = getDrillPrefixMatch(this.inputEl.value, this.plugin.settings.modePrefixes);
@@ -6208,7 +6227,7 @@ var SpotlightModal = class extends import_obsidian11.Modal {
       if (mode === "commands") {
         const cmdQuery = body;
         this.setBadge("Commands", "is-content");
-        const commandResults = this.commandSearcher.search(cmdQuery, cmdQuery ? RESULT_LIMIT : COMMAND_BROWSE_LIMIT);
+        const commandResults = this.commandSearcher.search(cmdQuery, cmdQuery ? RESULT_LIMIT : COMMAND_BROWSE_LIMIT, this.plugin.settings.ranking.ignoreDiacritics);
         if (generation !== this.searchGeneration) return;
         let ordered = commandResults;
         const recentIds = this.plugin.settings.recentCommandIds;
@@ -6276,7 +6295,8 @@ var SpotlightModal = class extends import_obsidian11.Modal {
           limit: RESULT_LIMIT,
           fileQuery: parsed.fileQuery,
           levelMin: parsed.levelMin,
-          levelMax: parsed.levelMax
+          levelMax: parsed.levelMax,
+          ignoreDiacritics: this.plugin.settings.ranking.ignoreDiacritics
         });
         if (generation !== this.searchGeneration) return;
         this.items = headingResults.map((r) => ({
@@ -6302,7 +6322,7 @@ var SpotlightModal = class extends import_obsidian11.Modal {
           this.updateStatus(0);
           return;
         }
-        const symbolResults = this.symbolSearcher.search(target, body, SYMBOL_LIMIT);
+        const symbolResults = this.symbolSearcher.search(target, body, SYMBOL_LIMIT, this.plugin.settings.ranking.ignoreDiacritics);
         if (generation !== this.searchGeneration) return;
         this.items = symbolResults.map((r) => ({
           kind: "symbol",
@@ -6315,7 +6335,7 @@ var SpotlightModal = class extends import_obsidian11.Modal {
         }));
       } else if (mode === "editors") {
         this.setBadge("Editors", "is-content");
-        const editorResults = this.editorSearcher.search(body, RESULT_LIMIT);
+        const editorResults = this.editorSearcher.search(body, RESULT_LIMIT, this.plugin.settings.ranking.ignoreDiacritics);
         if (generation !== this.searchGeneration) return;
         this.items = editorResults.map((r) => ({
           kind: "editor",
@@ -6742,7 +6762,7 @@ var SpotlightModal = class extends import_obsidian11.Modal {
     this.items.forEach((item, index) => {
       const section = this.getBrowseSection(item);
       if (section && section !== lastSection) {
-        this.resultsEl.createDiv({ cls: "vault-spotlight-section-label", text: section });
+        this.resultsEl.createDiv({ cls: "vault-spotlight-section-label", text: section, attr: { role: "presentation" } });
         lastSection = section;
       }
       const row = this.resultsEl.createDiv({
@@ -6777,6 +6797,7 @@ var SpotlightModal = class extends import_obsidian11.Modal {
     const selectedRow = this.resultsEl.querySelector(".is-selected");
     if (selectedRow == null ? void 0 : selectedRow.id) this.inputEl.setAttribute("aria-activedescendant", selectedRow.id);
     else this.inputEl.removeAttribute("aria-activedescendant");
+    if (this.selectedIndex > 0) selectedRow == null ? void 0 : selectedRow.scrollIntoView({ block: "nearest" });
     this.renderFooter();
   }
   /** Resolve the result index for a delegated list event, or null if off-row. */
@@ -7317,7 +7338,9 @@ var SpotlightModal = class extends import_obsidian11.Modal {
           id: "rename",
           name: "Rename",
           description: "Rename the selected note or file.",
-          requiresPro: true,
+          // Rename is free (a basic file operation) and available from both the
+          // action palette and the right-click / Alt+Enter menu — the two paths
+          // are intentionally consistent (the context menu never gated it).
           run: () => renameFile(this.app, file)
         },
         {
@@ -7564,27 +7587,32 @@ var SpotlightModal = class extends import_obsidian11.Modal {
       return false;
     });
     this.scope.register(["Mod"], "Enter", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       this.safeActivate(this.plugin.settings.defaultNewTab ? null : "tab");
       return false;
     });
     this.scope.register(["Mod", "Alt"], "Enter", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       this.safeActivate("split");
       return false;
     });
     this.scope.register(["Alt"], "Enter", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       const item = this.items[this.selectedIndex];
       if (item) this.openActionsMenu(item);
       return false;
     });
     this.scope.register(["Shift"], "Enter", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       void this.createFromQuery();
       return false;
     });
     this.scope.register(["Mod"], "k", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       this.openActionPalette();
       return false;
@@ -7611,16 +7639,19 @@ var SpotlightModal = class extends import_obsidian11.Modal {
     });
     if (!this.plugin.settings.isPro) return;
     this.scope.register(["Mod"], " ", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       this.toggleCheck();
       return false;
     });
     this.scope.register(["Mod"], "d", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       this.toggleStarSelected();
       return false;
     });
     this.scope.register(["Mod"], "s", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       if (canSaveWorkflowPreset(this.plugin.settings.workflowPresets, this.plugin.settings.isPro)) {
         this.workflows.saveCurrentWorkflow();
@@ -7631,18 +7662,20 @@ var SpotlightModal = class extends import_obsidian11.Modal {
     });
   }
   clearFocusTimers() {
-    for (const id of this.focusTimers) window.clearTimeout(id);
+    for (const id of this.focusTimers) this.focusWin.clearTimeout(id);
     this.focusTimers = [];
     if (this.focusRaf !== null) {
-      window.cancelAnimationFrame(this.focusRaf);
+      this.focusWin.cancelAnimationFrame(this.focusRaf);
       this.focusRaf = null;
     }
   }
   focusInput() {
+    var _a, _b;
     this.clearFocusTimers();
+    this.focusWin = (_b = (_a = this.inputEl) == null ? void 0 : _a.ownerDocument.defaultView) != null ? _b : window;
     const applyFocus = () => {
-      var _a;
-      if (!((_a = this.inputEl) == null ? void 0 : _a.isConnected)) return;
+      var _a2;
+      if (!((_a2 = this.inputEl) == null ? void 0 : _a2.isConnected)) return;
       if (this.inputEl.ownerDocument.activeElement === this.inputEl) return;
       this.inputEl.focus({ preventScroll: true });
       if (this.pendingSelectAll) {
@@ -7654,9 +7687,9 @@ var SpotlightModal = class extends import_obsidian11.Modal {
       }
     };
     applyFocus();
-    this.focusRaf = window.requestAnimationFrame(applyFocus);
-    this.focusTimers.push(window.setTimeout(applyFocus, 0));
-    this.focusTimers.push(window.setTimeout(applyFocus, 50));
+    this.focusRaf = this.focusWin.requestAnimationFrame(applyFocus);
+    this.focusTimers.push(this.focusWin.setTimeout(applyFocus, 0));
+    this.focusTimers.push(this.focusWin.setTimeout(applyFocus, 50));
   }
 };
 
@@ -7940,34 +7973,58 @@ var RipgrepSearcher = class {
     const lines = output.split("\n").filter(Boolean);
     let suffixMap = null;
     for (const line of lines) {
-      const match = line.match(/^(.+?):(\d+):(.*)$/);
-      if (!match) continue;
-      const [, rawPath, lineNum, snippet] = match;
+      const resolved = this.resolveRgLine(line, () => suffixMap != null ? suffixMap : suffixMap = this.buildSuffixMap());
+      if (!resolved) continue;
+      const { file, lineNum, snippet } = resolved;
       if (needAll) {
         const low = snippet.toLowerCase();
         if (!needAll.every((tk) => low.includes(tk))) continue;
       }
+      results.push({
+        file,
+        line: lineNum,
+        snippet: snippet.trim().slice(0, 160),
+        // Gentle early-line preference with a floor — never negative, so a
+        // late-line match can't sort below everything regardless of relevance.
+        // Base 100 (NOT higher) so it matches the in-process/worker markdown
+        // score exactly: canvas (90) and base (85) rows merge against whichever
+        // engine ran, so a mismatched base here would flip the relative order of
+        // a canvas/base hit vs a deep-line markdown hit depending on whether
+        // ripgrep happens to be installed. Keep all three markdown paths equal.
+        score: Math.max(1, 100 - Math.floor(lineNum / 10)),
+        engine: "ripgrep"
+      });
+    }
+    return results.sort((a, b) => b.score - a.score).slice(0, limit);
+  }
+  /**
+   * Parse one `path:line:content` rg output line into a resolved file + line +
+   * snippet. Both the path (colons are legal in filenames on macOS/Linux) and the
+   * content can contain ":<digits>:", so the split point is ambiguous from the
+   * text alone — e.g. `plan:1:draft.md:5:text` could split at `:1:` or `:5:`. Try
+   * each `:<digits>:` boundary left-to-right and take the FIRST whose path
+   * resolves to a real vault file; that disambiguates a colon-in-path from a
+   * colon-in-content. Returns null when nothing resolves (dropped, as before).
+   */
+  resolveRgLine(line, getSuffixMap) {
+    const re = /:(\d+):/g;
+    let m;
+    while ((m = re.exec(line)) !== null) {
+      const rawPath = line.slice(0, m.index);
+      if (!rawPath) continue;
       const normalized = rawPath.replace(/\\/g, "/").replace(/^\.\//, "");
       let file;
       const direct = this.app.vault.getAbstractFileByPath(normalized);
       if (direct instanceof import_obsidian12.TFile) {
         file = direct;
       } else {
-        suffixMap != null ? suffixMap : suffixMap = this.buildSuffixMap();
-        file = this.findFileBySuffix(suffixMap, normalized);
+        file = this.findFileBySuffix(getSuffixMap(), normalized);
       }
-      if (!file) continue;
-      results.push({
-        file,
-        line: Number(lineNum),
-        snippet: snippet.trim().slice(0, 160),
-        // Gentle early-line preference with a floor — never negative, so a
-        // late-line match can't sort below everything regardless of relevance.
-        score: Math.max(1, 120 - Math.floor(Number(lineNum) / 10)),
-        engine: "ripgrep"
-      });
+      if (file) {
+        return { file, lineNum: Number(m[1]), snippet: line.slice(m.index + m[0].length) };
+      }
     }
-    return results.sort((a, b) => b.score - a.score).slice(0, limit);
+    return null;
   }
   buildSuffixMap() {
     const map = /* @__PURE__ */ new Map();
@@ -8019,7 +8076,7 @@ var CanvasSearcher = class {
           engine: "canvas"
         });
         if (results.length >= softCap) {
-          results.sort((a, b) => b.score - a.score);
+          results.sort(compareContentRows);
           results.length = limit;
         }
       }
@@ -8027,7 +8084,7 @@ var CanvasSearcher = class {
     if (this.cache.size > present.size) {
       for (const path of this.cache.keys()) if (!present.has(path)) this.cache.delete(path);
     }
-    return results.sort((a, b) => b.score - a.score).slice(0, limit);
+    return results.sort(compareContentRows).slice(0, limit);
   }
   /** Parsed searchable lines for one canvas, served from cache unless its mtime moved. */
   async getSearchableLines(file) {
@@ -8102,7 +8159,7 @@ var BaseSearcher = class {
           engine: "base"
         });
         if (results.length >= softCap) {
-          results.sort((a, b) => b.score - a.score);
+          results.sort(compareContentRows);
           results.length = limit;
         }
       }
@@ -8110,7 +8167,7 @@ var BaseSearcher = class {
     if (this.cache.size > present.size) {
       for (const path of this.cache.keys()) if (!present.has(path)) this.cache.delete(path);
     }
-    return results.sort((a, b) => b.score - a.score).slice(0, limit);
+    return results.sort(compareContentRows).slice(0, limit);
   }
   /** Split lines for one base file, served from cache unless its mtime moved. */
   async getLines(file) {
@@ -8144,7 +8201,16 @@ self.onmessage = (evt) => {
 		// Coerce defensively: a malformed message with non-string content would
 		// otherwise throw here, fire onerror, and retire the worker for the whole
 		// session.
-		index.set(msg.path, String(msg.content == null ? "" : msg.content).split("\\n"));
+		// Cap each line at 2000 chars \u2014 MUST match MAX_INDEXED_LINE_LEN in
+		// ContentSearcher.ts so the worker and in-process indexes hold identical
+		// text (a pathological multi-MB line would otherwise bloat the worker and
+		// diverge the two paths' matches).
+		index.set(
+			msg.path,
+			String(msg.content == null ? "" : msg.content)
+				.split("\\n")
+				.map(function (l) { return l.length > 2000 ? l.slice(0, 2000) : l; })
+		);
 	} else if (msg.type === "remove") {
 		index.delete(msg.path);
 	} else if (msg.type === "clear") {
@@ -8195,6 +8261,8 @@ self.onmessage = (evt) => {
 `;
 
 // src/search/WorkerIndex.ts
+var WorkerTimeoutError = class extends Error {
+};
 var COLD_SEARCH_TIMEOUT_MS = 15e3;
 var WARM_SEARCH_TIMEOUT_MS = 3e3;
 var WorkerIndex = class _WorkerIndex {
@@ -8265,7 +8333,7 @@ var WorkerIndex = class _WorkerIndex {
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
       const timer = window.setTimeout(() => {
-        if (this.pending.delete(id)) reject(new Error("content index worker timed out"));
+        if (this.pending.delete(id)) reject(new WorkerTimeoutError("content index worker timed out"));
       }, this.warm ? WARM_SEARCH_TIMEOUT_MS : COLD_SEARCH_TIMEOUT_MS);
       this.pending.set(id, {
         resolve: (rows) => {
@@ -8339,6 +8407,15 @@ function snippetMatchIndices(snippet, tokens) {
 function compareContentRows(a, b) {
   return b.score - a.score || (a.file.path < b.file.path ? -1 : a.file.path > b.file.path ? 1 : 0) || a.line - b.line;
 }
+var MAX_INDEXED_LINE_LEN = 2e3;
+var MAX_WORKER_TIMEOUTS = 3;
+function splitIndexedLines(content) {
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].length > MAX_INDEXED_LINE_LEN) lines[i] = lines[i].slice(0, MAX_INDEXED_LINE_LEN);
+  }
+  return lines;
+}
 var ContentSearcher = class {
   constructor(app, ripgrepCommand = "rg") {
     this.app = app;
@@ -8351,6 +8428,10 @@ var ContentSearcher = class {
     this.indexEpoch = 0;
     // undefined = not tried yet; null = unavailable or died → in-process fallback.
     this.workerIndex = void 0;
+    // Consecutive worker-scan timeouts. A single timeout is likely transient (GC/OS
+    // pause, one heavy scan) and must NOT kill the worker for the whole session, so
+    // we only retire it after several in a row. Reset on any successful scan.
+    this.workerTimeouts = 0;
     this.disposed = false;
     this.ripgrep = new RipgrepSearcher(app, ripgrepCommand);
     this.canvas = new CanvasSearcher(app);
@@ -8406,6 +8487,7 @@ var ContentSearcher = class {
     if (worker) {
       try {
         const rows = await worker.search(tokens, limit, excluded);
+        this.workerTimeouts = 0;
         const results2 = [];
         for (const row of rows) {
           const file = this.app.vault.getAbstractFileByPath(row.path);
@@ -8421,8 +8503,18 @@ var ContentSearcher = class {
         return results2;
       } catch (err) {
         if (this.disposed) return [];
-        console.warn("[VaultSpotlight] content index worker failed, falling back in-process", err);
-        this.retireWorker();
+        if (err instanceof WorkerTimeoutError) {
+          this.workerTimeouts++;
+          if (this.workerTimeouts >= MAX_WORKER_TIMEOUTS) {
+            console.warn(
+              `[VaultSpotlight] content index worker timed out ${this.workerTimeouts}\xD7 in a row \u2014 retiring it, using in-process index`
+            );
+            this.retireWorker();
+          }
+        } else {
+          console.warn("[VaultSpotlight] content index worker failed, falling back in-process", err);
+          this.retireWorker();
+        }
       }
     }
     await this.ensureIndex();
@@ -8484,7 +8576,7 @@ var ContentSearcher = class {
     if (!this.indexBuilt) return;
     try {
       const content = await this.app.vault.cachedRead(file);
-      this.index.set(file.path, content.split("\n"));
+      this.index.set(file.path, splitIndexedLines(content));
     } catch (e) {
       this.index.delete(file.path);
     }
@@ -8502,6 +8594,8 @@ var ContentSearcher = class {
     this.ripgrep.dispose();
     (_a = this.workerIndex) == null ? void 0 : _a.dispose();
     this.workerIndex = null;
+    this.index.clear();
+    this.indexBuilt = false;
   }
   ensureIndex() {
     if (this.buildPromise) return this.buildPromise;
@@ -8511,7 +8605,7 @@ var ContentSearcher = class {
       for (const file of this.app.vault.getMarkdownFiles()) {
         try {
           const content = await this.app.vault.cachedRead(file);
-          this.index.set(file.path, content.split("\n"));
+          this.index.set(file.path, splitIndexedLines(content));
         } catch (e) {
         }
       }
@@ -8936,10 +9030,17 @@ var VaultSpotlightPlugin = class extends import_obsidian14.Plugin {
       }
       this.settings.fileFrecency = clean;
     }
+    this.pruneFrecency();
     this.settings.modePrefixes = normalizeModePrefixes(this.settings.modePrefixes);
     this.settings.escapeChar = normalizeEscapeChar(this.settings.escapeChar);
     this.settings.escapeChar = reconcileEscapeChar(this.settings.escapeChar, this.settings.modePrefixes);
     this.settings.defaultNewTab = this.settings.defaultNewTab === true;
+    this.settings.showModifiedTime = this.settings.showModifiedTime !== false;
+    this.settings.useFrecency = this.settings.useFrecency !== false;
+    this.settings.showPreview = this.settings.showPreview === true;
+    this.settings.includeCanvas = this.settings.includeCanvas !== false;
+    this.settings.includePdf = this.settings.includePdf !== false;
+    this.settings.includeBases = this.settings.includeBases !== false;
     this.settings.enableCalculator = this.settings.enableCalculator !== false;
     this.settings.enableDateJump = this.settings.enableDateJump !== false;
     if (typeof this.settings.currencyRates !== "string") this.settings.currencyRates = "";
@@ -8990,6 +9091,7 @@ var VaultSpotlightPlugin = class extends import_obsidian14.Plugin {
     return this.savePromise;
   }
 };
-function coercePositiveInt(value, fallback) {
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+function coercePositiveInt(value, fallback, max = 1e3) {
+  if (!Number.isFinite(value) || value <= 0) return fallback;
+  return Math.min(Math.floor(value), max);
 }

@@ -23,10 +23,13 @@ export class HeadingSearcher {
 			fileQuery?: string;
 			levelMin?: number | null;
 			levelMax?: number | null;
+			/** Fold accents when matching (honors the ranking "ignore diacritics" setting). */
+			ignoreDiacritics?: boolean;
 		} = {}
 	): HeadingResult[] {
 		const limit = options.limit ?? 50;
 		const excluded = normalizeExcludeFolders(options.excludeFolders);
+		const matchOpts = { ignoreDiacritics: options.ignoreDiacritics === true };
 		const q = query.trim();
 		const fileQuery = options.fileQuery?.trim() ?? "";
 		const results: HeadingResult[] = [];
@@ -38,7 +41,7 @@ export class HeadingSearcher {
 
 		for (const file of this.app.vault.getMarkdownFiles()) {
 			if (isPathExcluded(file.path, excluded)) continue;
-			if (fileQuery && !fuzzyMatch(fileQuery, file.basename) && !fuzzyMatch(fileQuery, file.path)) continue;
+			if (fileQuery && !fuzzyMatch(fileQuery, file.basename, matchOpts) && !fuzzyMatch(fileQuery, file.path, matchOpts)) continue;
 			const cache = this.app.metadataCache.getFileCache(file);
 			const headings = cache?.headings;
 			if (!headings || headings.length === 0) continue;
@@ -49,7 +52,7 @@ export class HeadingSearcher {
 				let score = 1;
 				let matchIndices: number[] = [];
 				if (q.length > 0) {
-					const match = fuzzyMatch(q, h.heading);
+					const match = fuzzyMatch(q, h.heading, matchOpts);
 					if (!match) continue;
 					score = match.score;
 					matchIndices = match.indices;

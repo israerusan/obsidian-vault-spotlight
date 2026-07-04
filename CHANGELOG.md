@@ -3,6 +3,59 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.10.0] - 2026-07-04
+
+A robustness and polish pass driven by a full multi-agent audit of the plugin.
+
+### Fixed
+- **Rename now works on the free tier.** The action palette locked "Rename" behind
+  Pro while the right-click / Alt+Enter menu offered it ungated — the two paths are
+  now consistent and rename is free everywhere (it's a basic file operation).
+- Content-search result ordering no longer depends on whether ripgrep is installed:
+  a Canvas or Base match and a deep-line note match now sort the same way with or
+  without `rg`, so Pro/desktop and free/mobile see the same order for a query.
+- "Ignore diacritics" now applies to heading, symbol, open-editor, and command
+  search too — previously only filename search honored it, so with the setting on,
+  `cafe` matched `Café.md` but not a `## Café` heading. All modes now agree.
+- The off-thread content index is no longer abandoned for the rest of the session
+  after a single slow scan on a very large vault. A transient timeout (a GC/OS pause
+  or one heavy scan) now falls back in-process for just that query and keeps the
+  worker; it's only retired after several consecutive timeouts.
+- A mode-trigger prefix like `!!` no longer becomes silently unreachable when the
+  escape character is `!` (the escape is matched first, so it shadowed the trigger).
+  The escape character now reconciles against prefix overlaps, not just exact
+  matches.
+- Adding a search profile right after removing one no longer mints a duplicate id
+  (the "Profile N" name reuses a number by list length), so removing, pinning, or
+  activating one profile can't act on another.
+- `level:` heading filters accept multi-digit levels predictably — `level:10` is
+  parsed and clamped (dropping the filter) instead of leaking in as a search word.
+- Touch: a scroll-drag that starts on a result no longer activates it and closes the
+  launcher before you lift your finger (activation moved from press to click).
+- IME: composing CJK text is no longer interrupted by drill-in navigation or the
+  Enter-family and Pro shortcuts (`Mod`/`Shift`/`Alt`+Enter, `Mod`+`K`/`D`/`S`/Space).
+- A preserved selection (e.g. after a passive background re-index) now stays scrolled
+  into view instead of sitting off-screen until the next arrow key.
+- Screen readers: result section labels are marked presentational so they're no
+  longer exposed as stray, roleless items inside the results listbox.
+
+### Performance
+- Content search stays responsive (and uses less memory) on notes containing
+  pathologically long machine-generated lines: each indexed line is capped in both
+  the off-thread and in-process indexes, mirroring ripgrep's column cap. This most
+  helps mobile, where the in-process index is the only content-search path.
+
+### Internal
+- Settings load is hardened further: an oversized `fileFrecency` map is pruned to its
+  cap on load, the remaining boolean toggles are coerced against corrupt values, and
+  the recent/starred caps are clamped to a sane maximum.
+- Popout-window safety: the modal's focus-retry timers/rAF now run on the modal's own
+  window.
+- Full TypeScript `strict` mode is enabled, plus `noImplicitReturns` and
+  `noFallthroughCasesInSwitch`.
+- New unit tests cover profile-id de-duplication, escape/prefix reconciliation,
+  multi-digit `level:` parsing, and the empty-query matcher contract.
+
 ## [2.9.1] - 2026-07-04
 
 Follow-ups from a product critique of 2.9.0.

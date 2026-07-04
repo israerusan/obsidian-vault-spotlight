@@ -44,7 +44,7 @@ export class EditorSearcher {
 		return paths;
 	}
 
-	search(query: string, limit = 60): EditorResult[] {
+	search(query: string, limit = 60, ignoreDiacritics = false): EditorResult[] {
 		const q = query.trim();
 		const activeLeaf = this.app.workspace.getMostRecentLeaf();
 		const rows: Array<EditorResult & { mru: number }> = [];
@@ -59,8 +59,8 @@ export class EditorSearcher {
 			let score = 1;
 			let matchIndices: number[] = [];
 			if (q.length > 0) {
-				const titleMatch = fuzzyMatch(q, title);
-				const match = titleMatch ?? (file ? fuzzyMatch(q, file.path) : null);
+				const titleMatch = fuzzyMatch(q, title, { ignoreDiacritics });
+				const match = titleMatch ?? (file ? fuzzyMatch(q, file.path, { ignoreDiacritics }) : null);
 				if (!match) return;
 				score = match.score;
 				// Path-only matches get no indices — they'd point into the path,

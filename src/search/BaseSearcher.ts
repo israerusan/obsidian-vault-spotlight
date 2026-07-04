@@ -1,5 +1,5 @@
 import { App, TFile } from "obsidian";
-import type { ContentSearchResult } from "./ContentSearcher";
+import { compareContentRows, type ContentSearchResult } from "./ContentSearcher";
 import { isPathExcluded } from "./vaultFiles";
 
 /**
@@ -46,7 +46,9 @@ export class BaseSearcher {
 					engine: "base",
 				});
 				if (results.length >= softCap) {
-					results.sort((a, b) => b.score - a.score);
+					// Deterministic (score, path, line) sort — same comparator the
+					// markdown engines use — so tied rows aren't pruned by iteration order.
+					results.sort(compareContentRows);
 					results.length = limit;
 				}
 			}
@@ -57,7 +59,7 @@ export class BaseSearcher {
 			for (const path of this.cache.keys()) if (!present.has(path)) this.cache.delete(path);
 		}
 
-		return results.sort((a, b) => b.score - a.score).slice(0, limit);
+		return results.sort(compareContentRows).slice(0, limit);
 	}
 
 	/** Split lines for one base file, served from cache unless its mtime moved. */

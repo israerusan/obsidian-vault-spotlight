@@ -44,7 +44,7 @@ export class CommandSearcher {
 		return [];
 	}
 
-	search(query: string, limit = 50): CommandResult[] {
+	search(query: string, limit = 50, ignoreDiacritics = false): CommandResult[] {
 		const commands = this.list();
 		const q = query.trim();
 		const results: CommandResult[] = [];
@@ -54,7 +54,7 @@ export class CommandSearcher {
 				results.push({ id: cmd.id, name: cmd.name, score: 1, matchIndices: [] });
 				continue;
 			}
-			const match = fuzzyMatch(q, cmd.name);
+			const match = fuzzyMatch(q, cmd.name, { ignoreDiacritics });
 			if (!match) continue;
 			results.push({ id: cmd.id, name: cmd.name, score: match.score, matchIndices: match.indices });
 		}

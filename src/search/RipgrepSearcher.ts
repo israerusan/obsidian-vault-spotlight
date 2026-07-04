@@ -282,10 +282,9 @@ export class RipgrepSearcher {
 		let suffixMap: Map<string, TFile> | null = null;
 
 		for (const line of lines) {
-			const match = line.match(/^(.+?):(\d+):(.*)$/);
-			if (!match) continue;
-
-			const [, rawPath, lineNum, snippet] = match;
+			const resolved = this.resolveRgLine(line, () => (suffixMap ??= this.buildSuffixMap()));
+			if (!resolved) continue;
+			const { file, lineNum, snippet } = resolved;
 
 			// AND filter for multi-word queries: rg only guaranteed the anchor
 			// token; require every token to appear on the line.
@@ -294,30 +293,56 @@ export class RipgrepSearcher {
 				if (!needAll.every((tk) => low.includes(tk))) continue;
 			}
 
+			results.push({
+				file,
+				line: lineNum,
+				snippet: snippet.trim().slice(0, 160),
+				// Gentle early-line preference with a floor — never negative, so a
+				// late-line match can't sort below everything regardless of relevance.
+				// Base 100 (NOT higher) so it matches the in-process/worker markdown
+				// score exactly: canvas (90) and base (85) rows merge against whichever
+				// engine ran, so a mismatched base here would flip the relative order of
+				// a canvas/base hit vs a deep-line markdown hit depending on whether
+				// ripgrep happens to be installed. Keep all three markdown paths equal.
+				score: Math.max(1, 100 - Math.floor(lineNum / 10)),
+				engine: "ripgrep",
+			});
+		}
+
+		return results.sort((a, b) => b.score - a.score).slice(0, limit);
+	}
+
+	/**
+	 * Parse one `path:line:content` rg output line into a resolved file + line +
+	 * snippet. Both the path (colons are legal in filenames on macOS/Linux) and the
+	 * content can contain ":<digits>:", so the split point is ambiguous from the
+	 * text alone — e.g. `plan:1:draft.md:5:text` could split at `:1:` or `:5:`. Try
+	 * each `:<digits>:` boundary left-to-right and take the FIRST whose path
+	 * resolves to a real vault file; that disambiguates a colon-in-path from a
+	 * colon-in-content. Returns null when nothing resolves (dropped, as before).
+	 */
+	private resolveRgLine(
+		line: string,
+		getSuffixMap: () => Map<string, TFile>
+	): { file: TFile; lineNum: number; snippet: string } | null {
+		const re = /:(\d+):/g;
+		let m: RegExpExecArray | null;
+		while ((m = re.exec(line)) !== null) {
+			const rawPath = line.slice(0, m.index);
+			if (!rawPath) continue;
 			const normalized = rawPath.replace(/\\/g, "/").replace(/^\.\//, "");
 			let file: TFile | undefined;
 			const direct = this.app.vault.getAbstractFileByPath(normalized);
 			if (direct instanceof TFile) {
 				file = direct;
 			} else {
-				suffixMap ??= this.buildSuffixMap();
-				file = this.findFileBySuffix(suffixMap, normalized);
+				file = this.findFileBySuffix(getSuffixMap(), normalized);
 			}
-
-			if (!file) continue;
-
-			results.push({
-				file,
-				line: Number(lineNum),
-				snippet: snippet.trim().slice(0, 160),
-				// Gentle early-line preference with a floor — never negative, so a
-				// late-line match can't sort below everything regardless of relevance.
-				score: Math.max(1, 120 - Math.floor(Number(lineNum) / 10)),
-				engine: "ripgrep",
-			});
+			if (file) {
+				return { file, lineNum: Number(m[1]), snippet: line.slice(m.index + m[0].length) };
+			}
 		}
-
-		return results.sort((a, b) => b.score - a.score).slice(0, limit);
+		return null;
 	}
 
 	private buildSuffixMap(): Map<string, TFile> {

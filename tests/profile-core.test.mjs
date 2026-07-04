@@ -1,7 +1,7 @@
 import assert from "assert";
 import { addTagToTags } from "../src/core/frontmatterTags.mjs";
 import { buildResultMarkdown } from "../src/core/resultMarkdown.mjs";
-import { activeProfile, normalizeProfiles } from "../src/core/searchProfiles.mjs";
+import { activeProfile, createProfileFromSettings, normalizeProfiles } from "../src/core/searchProfiles.mjs";
 
 const profiles = normalizeProfiles([
 	{ id: "research", name: "Research", defaultMode: "content", defaultQuery: "> ai ethics", includeCanvas: true, includePdf: true, excludeFolders: ["Archive"] },
@@ -24,6 +24,16 @@ const dupProfiles = normalizeProfiles([
 	{ id: "Work!", name: "Work again" },
 ]);
 assert.equal(new Set(dupProfiles.map((p) => p.id)).size, 2, "colliding profile ids are re-minted unique");
+
+// createProfileFromSettings dedups its id against existing ids at CREATION time —
+// re-adding after a removal (the settings "Profile N" name reuses a number by list
+// length) must not mint a colliding id, or the settings tab's id-keyed
+// remove/pin/activate would hit two rows at once.
+const existing = createProfileFromSettings("Profile 3", {}); // id: "profile-3"
+assert.equal(existing.id, "profile-3", "slugified id when free");
+const dup = createProfileFromSettings("Profile 3", {}, "files", "", [existing.id]);
+assert.notEqual(dup.id, existing.id, "a name that slugifies to an in-use id gets a distinct one");
+assert.equal(dup.id, "profile-3-2", "distinct id follows the base-N suffix pattern");
 
 assert.deepEqual(addTagToTags(["work"], "client"), ["work", "client"], "should append to existing frontmatter tags");
 assert.deepEqual(addTagToTags(undefined, "client"), ["client"], "should create frontmatter tags when missing");

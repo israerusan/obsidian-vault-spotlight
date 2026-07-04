@@ -71,6 +71,35 @@ assert.notEqual(spare, "!", "must not pick a char already used as a prefix");
 assert.ok(!Object.values(escapeTaken).includes(spare), "spare is free of all prefixes");
 // Blank/garbage input normalizes first, then reconciles
 assert.equal(reconcileEscapeChar("", DEFAULT_MODE_PREFIXES), DEFAULT_ESCAPE_CHAR);
+// An escape char that is a PROPER PREFIX of a multi-char trigger also shadows it:
+// detectModeFromPrefix checks the escape (via startsWith) BEFORE any prefix, so
+// escape "!" with a trigger "!!" makes every "!!…" query parse as escaped and the
+// "!!" mode unreachable. Reconcile must treat that as a collision, not just exact
+// equality.
+const prefixCollide = { ...DEFAULT_MODE_PREFIXES, headings: "!!" };
+const reconciledPrefix = reconcileEscapeChar("!", prefixCollide);
+assert.notEqual(reconciledPrefix, "!", "escape that is a prefix of a trigger is reconciled away");
+assert.ok(
+	!Object.values(prefixCollide).some((p) => p.startsWith(reconciledPrefix)),
+	"reconciled escape is not a prefix of any trigger"
+);
+// With the reconciled escape, "!!deep" now reaches the headings mode again.
+assert.deepEqual(detectModeFromPrefix("!!deep", prefixCollide, reconciledPrefix), {
+	mode: "headings",
+	body: "deep",
+	escaped: false,
+});
+// Even when many single-char triggers are in use, reconcile returns a char that is
+// free of EVERY trigger — never a still-colliding fallback.
+const crowded = {
+	content: "!", commands: "\\", headings: "|", symbols: "?", links: "%",
+	editors: "&", folders: "#", capture: "@", snippets: "*",
+};
+const freeEscape = reconcileEscapeChar("!", crowded);
+assert.ok(
+	!Object.values(crowded).some((p) => p.startsWith(freeEscape)),
+	"reconciled escape is free of every trigger even when the common spares are taken"
+);
 
 // --- parseHeadingQuery ---
 
@@ -113,6 +142,22 @@ assert.deepEqual(parseHeadingQuery("intro level:7"), {
 	headingQuery: "intro",
 	levelMin: null,
 	levelMax: null,
+});
+// Multi-digit level tokens are now parsed (\d+) and clamped, instead of falling
+// through as a plain search token. level:10 clamps above the 6 ceiling → empty
+// span → filter dropped (same treatment as level:7).
+assert.deepEqual(parseHeadingQuery("intro level:10"), {
+	fileQuery: "",
+	headingQuery: "intro",
+	levelMin: null,
+	levelMax: null,
+});
+// A multi-digit upper bound clamps into range rather than being ignored.
+assert.deepEqual(parseHeadingQuery("level:2-10"), {
+	fileQuery: "",
+	headingQuery: "",
+	levelMin: 2,
+	levelMax: 6,
 });
 
 // --- pushRecentCommand ---

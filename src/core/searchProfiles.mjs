@@ -1,5 +1,8 @@
 import { RANKING_MODES } from "./ranking.mjs";
 
+/** Hard cap on stored search profiles (shared by the normalizer and the UI). */
+export const MAX_SEARCH_PROFILES = 20;
+
 export const PROFILE_MODES = new Set([
 	"files",
 	"content",
@@ -34,18 +37,26 @@ export function normalizeProfiles(rawProfiles) {
 			showPreview: profile.showPreview === true,
 			rankingMode: RANKING_MODES.has(profile.rankingMode) ? profile.rankingMode : undefined,
 		}))
-		.slice(0, 20);
+		.slice(0, MAX_SEARCH_PROFILES);
 }
 
 export function activeProfile(profiles, activeProfileId) {
 	return profiles.find((profile) => profile.id === activeProfileId) ?? null;
 }
 
-export function createProfileFromSettings(name, settings, mode = "files", query = "") {
+export function createProfileFromSettings(name, settings, mode = "files", query = "", existingIds = []) {
+	// Dedup against ids already in use so re-adding after a removal can't mint a
+	// colliding id. The settings "Add profile" button names entries "Profile N"
+	// by list length, so after removing a middle profile the counter reuses a
+	// number → cleanId() would produce a duplicate, and the settings tab matches
+	// pin/remove/activate BY id (acting on one row would hit both). Mirrors the
+	// re-mint pass normalizeProfiles runs on load, but at creation time.
+	const seen = new Set(Array.isArray(existingIds) ? existingIds : []);
+	// Random suffix on the fallback id so two unsluggable names created in the
+	// same millisecond don't collide even before the uniqueId pass.
+	const base = cleanId(name) || `profile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 	return {
-		// Random suffix on the fallback id so two unsluggable names created in
-		// the same millisecond don't collide (pin/remove/activate would hit both).
-		id: cleanId(name) || `profile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+		id: uniqueId(base, seen),
 		name: String(name || "New profile").trim() || "New profile",
 		defaultMode: PROFILE_MODES.has(mode) ? mode : "files",
 		defaultQuery: String(query || ""),

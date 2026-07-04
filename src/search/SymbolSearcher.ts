@@ -34,7 +34,7 @@ export function iconForSymbolType(type: SymbolType): string {
 export class SymbolSearcher {
 	constructor(private app: App) {}
 
-	search(file: TFile, query: string, limit = 100): SymbolResult[] {
+	search(file: TFile, query: string, limit = 100, ignoreDiacritics = false): SymbolResult[] {
 		if (file.extension !== "md") return [];
 		const cache = this.app.metadataCache.getFileCache(file);
 		if (!cache) return [];
@@ -68,7 +68,7 @@ export class SymbolSearcher {
 			let score = 1;
 			let matchIndices: number[] = [];
 			if (q.length > 0) {
-				const match = fuzzyMatch(q, symbol.text);
+				const match = fuzzyMatch(q, symbol.text, { ignoreDiacritics });
 				if (!match) continue;
 				score = match.score;
 				matchIndices = match.indices;

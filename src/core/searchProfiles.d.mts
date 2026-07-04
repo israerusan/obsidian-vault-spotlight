@@ -31,6 +31,7 @@ export interface ProfileSourceSettings {
 }
 
 export const PROFILE_MODES: Set<string>;
+export const MAX_SEARCH_PROFILES: number;
 
 export function normalizeProfiles(rawProfiles: unknown): CoreSearchProfile[];
 export function activeProfile(
@@ -41,5 +42,6 @@ export function createProfileFromSettings(
 	name: string,
 	settings: ProfileSourceSettings | null | undefined,
 	mode?: string,
-	query?: string
+	query?: string,
+	existingIds?: readonly string[]
 ): CoreSearchProfile;

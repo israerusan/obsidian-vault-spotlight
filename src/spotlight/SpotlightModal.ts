@@ -268,26 +268,32 @@ export class SpotlightModal extends Modal {
 			this.selectedIndex = index;
 			this.updateSelectionHighlight();
 		});
+		// The star toggle stays on mousedown: it must preventDefault to keep focus in
+		// the input (a re-search would reset the selection and scroll to the top,
+		// losing the user's place mid-list).
 		this.resultsEl.addEventListener("mousedown", (evt) => {
+			const starBtn = (evt.target as HTMLElement).closest<HTMLElement>(".vault-spotlight-star-btn");
+			if (!starBtn) return;
 			const index = this.rowIndexFromEvent(evt);
 			if (index === null) return;
 			const item = this.items[index];
-			const starBtn = (evt.target as HTMLElement).closest<HTMLElement>(".vault-spotlight-star-btn");
-			if (starBtn) {
-				// Star toggle: update the icon, row state, and item flag in place —
-				// re-running the whole search would reset the selection and scroll to
-				// the top, losing the user's place mid-list.
-				evt.preventDefault();
-				evt.stopPropagation();
-				if (item?.kind === "file") {
-					item.isStarred = this.plugin.toggleStar(item.file.path);
-					setIcon(starBtn, item.isStarred ? "star" : "star-off");
-					const row = starBtn.closest<HTMLElement>(".vault-spotlight-item");
-					row?.toggleClass("is-starred", item.isStarred);
-				}
-				return;
-			}
 			evt.preventDefault();
+			evt.stopPropagation();
+			if (item?.kind === "file") {
+				item.isStarred = this.plugin.toggleStar(item.file.path);
+				setIcon(starBtn, item.isStarred ? "star" : "star-off");
+				const row = starBtn.closest<HTMLElement>(".vault-spotlight-item");
+				row?.toggleClass("is-starred", item.isStarred);
+			}
+		});
+		// Activation runs on CLICK, not mousedown, so a touch scroll-drag that starts
+		// on a row doesn't activate it (and close the modal) before the finger lifts —
+		// a click never fires after a scroll gesture. Star clicks were handled on
+		// mousedown above and are ignored here.
+		this.resultsEl.addEventListener("click", (evt) => {
+			if ((evt.target as HTMLElement).closest(".vault-spotlight-star-btn")) return;
+			const index = this.rowIndexFromEvent(evt);
+			if (index === null) return;
 			this.selectedIndex = index;
 			this.safeActivate();
 		});
@@ -337,7 +343,19 @@ export class SpotlightModal extends Modal {
 			});
 		}
 
-		this.inputEl.addEventListener("input", () => {
+		this.inputEl.addEventListener("input", (evt) => {
+			// Never run drill-in logic mid-IME-composition: an intermediate CJK
+			// candidate that transiently equals a mode prefix would otherwise clear the
+			// input and drill/redirect, discarding the in-progress text. Defer to the
+			// same composition the scope-key handlers already respect, and just search
+			// the interim value. The committing input event (isComposing false) runs the
+			// normal path below.
+			if ((evt as InputEvent).isComposing) {
+				this.hasNavigated = false;
+				this.activeWorkflowId = "";
+				this.scheduleSearch();
+				return;
+			}
 			const item = this.items[this.selectedIndex];
 			const file = item ? itemFile(item) : null;
 			const drill = getDrillPrefixMatch(this.inputEl.value, this.plugin.settings.modePrefixes);
@@ -596,7 +614,7 @@ export class SpotlightModal extends Modal {
 				const cmdQuery = body;
 				this.setBadge("Commands", "is-content");
 				// Empty query: resurface recently-run commands first, then the rest.
-				const commandResults = this.commandSearcher.search(cmdQuery, cmdQuery ? RESULT_LIMIT : COMMAND_BROWSE_LIMIT);
+				const commandResults = this.commandSearcher.search(cmdQuery, cmdQuery ? RESULT_LIMIT : COMMAND_BROWSE_LIMIT, this.plugin.settings.ranking.ignoreDiacritics);
 				if (generation !== this.searchGeneration) return;
 				let ordered = commandResults;
 				const recentIds = this.plugin.settings.recentCommandIds;
@@ -667,6 +685,7 @@ export class SpotlightModal extends Modal {
 					fileQuery: parsed.fileQuery,
 					levelMin: parsed.levelMin,
 					levelMax: parsed.levelMax,
+					ignoreDiacritics: this.plugin.settings.ranking.ignoreDiacritics,
 				});
 				if (generation !== this.searchGeneration) return;
 				this.items = headingResults.map((r) => ({
@@ -692,7 +711,7 @@ export class SpotlightModal extends Modal {
 					this.updateStatus(0);
 					return;
 				}
-				const symbolResults = this.symbolSearcher.search(target, body, SYMBOL_LIMIT);
+				const symbolResults = this.symbolSearcher.search(target, body, SYMBOL_LIMIT, this.plugin.settings.ranking.ignoreDiacritics);
 				if (generation !== this.searchGeneration) return;
 				this.items = symbolResults.map((r) => ({
 					kind: "symbol" as const,
@@ -705,7 +724,7 @@ export class SpotlightModal extends Modal {
 				}));
 			} else if (mode === "editors") {
 				this.setBadge("Editors", "is-content");
-				const editorResults = this.editorSearcher.search(body, RESULT_LIMIT);
+				const editorResults = this.editorSearcher.search(body, RESULT_LIMIT, this.plugin.settings.ranking.ignoreDiacritics);
 				if (generation !== this.searchGeneration) return;
 				this.items = editorResults.map((r) => ({
 					kind: "editor" as const,
@@ -1201,7 +1220,10 @@ export class SpotlightModal extends Modal {
 		this.items.forEach((item, index) => {
 			const section = this.getBrowseSection(item);
 			if (section && section !== lastSection) {
-				this.resultsEl.createDiv({ cls: "vault-spotlight-section-label", text: section });
+				// role=presentation: a listbox may only contain option (and group)
+				// children, so a bare label div is exposed as presentational rather
+				// than as a stray, roleless node inside the options.
+				this.resultsEl.createDiv({ cls: "vault-spotlight-section-label", text: section, attr: { role: "presentation" } });
 				lastSection = section;
 			}
 
@@ -1253,6 +1275,12 @@ export class SpotlightModal extends Modal {
 		const selectedRow = this.resultsEl.querySelector<HTMLElement>(".is-selected");
 		if (selectedRow?.id) this.inputEl.setAttribute("aria-activedescendant", selectedRow.id);
 		else this.inputEl.removeAttribute("aria-activedescendant");
+		// Keep a preserved mid-list selection visible after a full re-render (e.g. a
+		// passive metadata "resolved" re-index restores a non-zero selectedIndex):
+		// without this the selected row can sit scrolled off-screen until the next
+		// arrow key. A fresh search resets to index 0, so this no-ops on the common
+		// path (the list is already scrolled to top).
+		if (this.selectedIndex > 0) selectedRow?.scrollIntoView({ block: "nearest" });
 
 		// Refresh the footer for the freshly-selected row. renderFooter() was only
 		// called on selection *moves*, so after a new search or a Tab mode switch the
@@ -1905,7 +1933,9 @@ export class SpotlightModal extends Modal {
 					id: "rename",
 					name: "Rename",
 					description: "Rename the selected note or file.",
-					requiresPro: true,
+					// Rename is free (a basic file operation) and available from both the
+					// action palette and the right-click / Alt+Enter menu — the two paths
+					// are intentionally consistent (the context menu never gated it).
 					run: () => renameFile(this.app, file),
 				},
 				{
@@ -2211,27 +2241,34 @@ export class SpotlightModal extends Modal {
 		// Ctrl+Enter flips the default open target: new tab normally, current
 		// tab when "open in new tab by default" is on.
 		this.scope.register(["Mod"], "Enter", (evt) => {
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			this.safeActivate(this.plugin.settings.defaultNewTab ? null : "tab");
 			return false;
 		});
 		this.scope.register(["Mod", "Alt"], "Enter", (evt) => {
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			this.safeActivate("split");
 			return false;
 		});
 		this.scope.register(["Alt"], "Enter", (evt) => {
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			const item = this.items[this.selectedIndex];
 			if (item) this.openActionsMenu(item);
 			return false;
 		});
 		this.scope.register(["Shift"], "Enter", (evt) => {
+			// A held Shift while committing an IME candidate must not fire
+			// createFromQuery and close the modal out from under the composition.
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			void this.createFromQuery();
 			return false;
 		});
 		this.scope.register(["Mod"], "k", (evt) => {
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			this.openActionPalette();
 			return false;
@@ -2262,16 +2299,19 @@ export class SpotlightModal extends Modal {
 		if (!this.plugin.settings.isPro) return;
 
 		this.scope.register(["Mod"], " ", (evt) => {
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			this.toggleCheck();
 			return false;
 		});
 		this.scope.register(["Mod"], "d", (evt) => {
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			this.toggleStarSelected();
 			return false;
 		});
 		this.scope.register(["Mod"], "s", (evt) => {
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			if (canSaveWorkflowPreset(this.plugin.settings.workflowPresets, this.plugin.settings.isPro)) {
 				this.workflows.saveCurrentWorkflow();
@@ -2284,14 +2324,19 @@ export class SpotlightModal extends Modal {
 
 	private focusTimers: number[] = [];
 	private focusRaf: number | null = null;
+	// The window the focus retries are scheduled on. Derived from the input's own
+	// document so a modal rendered in a popout schedules its rAF/timers on THAT
+	// window (whose animation frames aren't throttled while the popout has focus),
+	// matching the ownerDocument-based activeElement check in applyFocus below.
+	private focusWin: Window = window;
 
 	private clearFocusTimers(): void {
-		for (const id of this.focusTimers) window.clearTimeout(id);
+		for (const id of this.focusTimers) this.focusWin.clearTimeout(id);
 		this.focusTimers = [];
 		// The deferred focus retry also runs off a rAF — track and cancel it so no
 		// callback fires against a torn-down modal.
 		if (this.focusRaf !== null) {
-			window.cancelAnimationFrame(this.focusRaf);
+			this.focusWin.cancelAnimationFrame(this.focusRaf);
 			this.focusRaf = null;
 		}
 	}
@@ -2300,7 +2345,10 @@ export class SpotlightModal extends Modal {
 		// Drop any focus retries still queued from a previous call so rapid
 		// focusInput() invocations (drill, workflow/profile activation, palette
 		// toggles) don't stack up and steal focus from a just-opened child modal.
+		// clearFocusTimers() runs against the PRIOR focusWin (where those ids live)
+		// before we re-derive it below.
 		this.clearFocusTimers();
+		this.focusWin = this.inputEl?.ownerDocument.defaultView ?? window;
 
 		const applyFocus = () => {
 			if (!this.inputEl?.isConnected) return;
@@ -2319,8 +2367,8 @@ export class SpotlightModal extends Modal {
 		};
 
 		applyFocus();
-		this.focusRaf = window.requestAnimationFrame(applyFocus);
-		this.focusTimers.push(window.setTimeout(applyFocus, 0));
-		this.focusTimers.push(window.setTimeout(applyFocus, 50));
+		this.focusRaf = this.focusWin.requestAnimationFrame(applyFocus);
+		this.focusTimers.push(this.focusWin.setTimeout(applyFocus, 0));
+		this.focusTimers.push(this.focusWin.setTimeout(applyFocus, 50));
 	}
 }

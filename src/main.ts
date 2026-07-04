@@ -530,6 +530,11 @@ export default class VaultSpotlightPlugin extends Plugin {
 			}
 			this.settings.fileFrecency = clean;
 		}
+		// Enforce the entry cap on load too (not only after bumpFrecency): a corrupt
+		// or hostile data.json with, say, 100k frecency keys would otherwise load
+		// whole and be re-serialized on every save, self-healing only on the next
+		// file open. Trim it to the top MAX_FRECENCY_ENTRIES by recency now.
+		this.pruneFrecency();
 		this.settings.modePrefixes = normalizeModePrefixes(this.settings.modePrefixes);
 		this.settings.escapeChar = normalizeEscapeChar(this.settings.escapeChar);
 		// The escape char is checked before mode prefixes, so if it equals one it
@@ -537,6 +542,16 @@ export default class VaultSpotlightPlugin extends Plugin {
 		// a free spare) when the user's escape char collides with a live prefix.
 		this.settings.escapeChar = reconcileEscapeChar(this.settings.escapeChar, this.settings.modePrefixes);
 		this.settings.defaultNewTab = this.settings.defaultNewTab === true;
+		// Coerce the remaining boolean toggles the same way (Object.assign copies a
+		// corrupt data.json value like `"false"` — a truthy string — verbatim, which
+		// would then drive behavior). Defaults: showModifiedTime/useFrecency and the
+		// file-type includes are on, showPreview is off.
+		this.settings.showModifiedTime = this.settings.showModifiedTime !== false;
+		this.settings.useFrecency = this.settings.useFrecency !== false;
+		this.settings.showPreview = this.settings.showPreview === true;
+		this.settings.includeCanvas = this.settings.includeCanvas !== false;
+		this.settings.includePdf = this.settings.includePdf !== false;
+		this.settings.includeBases = this.settings.includeBases !== false;
 		// Delight-layer settings: coerce to safe shapes.
 		this.settings.enableCalculator = this.settings.enableCalculator !== false;
 		this.settings.enableDateJump = this.settings.enableDateJump !== false;
@@ -617,6 +632,10 @@ export default class VaultSpotlightPlugin extends Plugin {
 	}
 }
 
-function coercePositiveInt(value: unknown, fallback: number): number {
-	return Number.isFinite(value) && (value as number) > 0 ? Math.floor(value as number) : fallback;
+function coercePositiveInt(value: unknown, fallback: number, max = 1000): number {
+	// Guard NaN/0/negative (→ fallback) AND an absurdly large value (→ clamp): a
+	// hostile data.json with maxRecent: 1e9 would otherwise remove the effective
+	// growth cap on recentPaths/starredPaths.
+	if (!Number.isFinite(value) || (value as number) <= 0) return fallback;
+	return Math.min(Math.floor(value as number), max);
 }

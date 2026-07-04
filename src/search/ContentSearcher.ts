@@ -2,7 +2,7 @@ import { App, TFile } from "obsidian";
 import { RipgrepSearcher } from "./RipgrepSearcher";
 import { CanvasSearcher } from "./CanvasSearcher";
 import { BaseSearcher } from "./BaseSearcher";
-import { WorkerIndex } from "./WorkerIndex";
+import { WorkerIndex, WorkerTimeoutError } from "./WorkerIndex";
 import { isPathExcluded, normalizeExcludeFolders } from "./vaultFiles";
 
 export interface ContentSearchResult {
@@ -49,12 +49,35 @@ export function snippetMatchIndices(snippet: string, tokens: string[]): number[]
  * contract forbids. Plain `<`/`>` (not localeCompare) so it's locale-independent and
  * matches the identical comparator inlined in workerSource.mjs.
  */
-function compareContentRows(a: ContentSearchResult, b: ContentSearchResult): number {
+export function compareContentRows(a: ContentSearchResult, b: ContentSearchResult): number {
 	return (
 		b.score - a.score ||
 		(a.file.path < b.file.path ? -1 : a.file.path > b.file.path ? 1 : 0) ||
 		a.line - b.line
 	);
+}
+
+/**
+ * Cap each indexed line's length. A single machine-generated multi-MB line (a
+ * minified export, a data: URI, a giant JSON blob) would otherwise be retained
+ * whole for the session and `toLowerCase()`d on every debounced keystroke — the
+ * only content path on mobile, where the worker/ripgrep may be unavailable.
+ * Matches past this column are lost, mirroring ripgrep's `--max-columns` intent.
+ * MUST stay identical to the cap inlined in core/workerSource.mjs so the worker
+ * and in-process indexes retain (and match) the exact same text.
+ */
+const MAX_INDEXED_LINE_LEN = 2000;
+
+/** Consecutive worker-scan timeouts tolerated before the worker is retired. */
+const MAX_WORKER_TIMEOUTS = 3;
+
+/** Split file content into lines, truncating any pathologically long line. */
+function splitIndexedLines(content: string): string[] {
+	const lines = content.split("\n");
+	for (let i = 0; i < lines.length; i++) {
+		if (lines[i].length > MAX_INDEXED_LINE_LEN) lines[i] = lines[i].slice(0, MAX_INDEXED_LINE_LEN);
+	}
+	return lines;
 }
 
 export interface ContentSearchOptions {
@@ -78,6 +101,10 @@ export class ContentSearcher {
 	private bases: BaseSearcher;
 	// undefined = not tried yet; null = unavailable or died → in-process fallback.
 	private workerIndex: WorkerIndex | null | undefined = undefined;
+	// Consecutive worker-scan timeouts. A single timeout is likely transient (GC/OS
+	// pause, one heavy scan) and must NOT kill the worker for the whole session, so
+	// we only retire it after several in a row. Reset on any successful scan.
+	private workerTimeouts = 0;
 	private disposed = false;
 
 	constructor(private app: App, ripgrepCommand = "rg") {
@@ -156,6 +183,9 @@ export class ContentSearcher {
 		if (worker) {
 			try {
 				const rows = await worker.search(tokens, limit, excluded);
+				// A scan came back: the worker is alive and responsive, so clear the
+				// timeout streak.
+				this.workerTimeouts = 0;
 				const results: ContentSearchResult[] = [];
 				for (const row of rows) {
 					const file = this.app.vault.getAbstractFileByPath(row.path);
@@ -174,8 +204,27 @@ export class ContentSearcher {
 				// not a worker failure; don't kick off a full-vault index build
 				// for a result nobody will see.
 				if (this.disposed) return [];
-				console.warn("[VaultSpotlight] content index worker failed, falling back in-process", err);
-				this.retireWorker();
+				if (err instanceof WorkerTimeoutError) {
+					// The worker was too slow to answer, but it's probably still
+					// alive (a GC/OS pause, or one legitimately heavy scan on a huge
+					// vault). Fall back in-process for THIS query but keep the worker;
+					// only retire it once several scans in a row have timed out — a
+					// worker that's genuinely wedged. Retiring on the first timeout
+					// would drop the off-thread index for the rest of the session and
+					// run every later content search on the main thread.
+					this.workerTimeouts++;
+					if (this.workerTimeouts >= MAX_WORKER_TIMEOUTS) {
+						console.warn(
+							`[VaultSpotlight] content index worker timed out ${this.workerTimeouts}× in a row — retiring it, using in-process index`
+						);
+						this.retireWorker();
+					}
+				} else {
+					// A real worker failure (onerror / message error / postMessage
+					// throw): retire immediately.
+					console.warn("[VaultSpotlight] content index worker failed, falling back in-process", err);
+					this.retireWorker();
+				}
 			}
 		}
 
@@ -264,7 +313,7 @@ export class ContentSearcher {
 		if (!this.indexBuilt) return;
 		try {
 			const content = await this.app.vault.cachedRead(file);
-			this.index.set(file.path, content.split("\n"));
+			this.index.set(file.path, splitIndexedLines(content));
 		} catch {
 			this.index.delete(file.path);
 		}
@@ -282,6 +331,10 @@ export class ContentSearcher {
 		this.ripgrep.dispose();
 		this.workerIndex?.dispose();
 		this.workerIndex = null;
+		// Release the in-process index too, so the retained vault text isn't kept
+		// alive by a lingering reference to the searcher after unload.
+		this.index.clear();
+		this.indexBuilt = false;
 	}
 
 	private ensureIndex(): Promise<void> {
@@ -295,7 +348,7 @@ export class ContentSearcher {
 			for (const file of this.app.vault.getMarkdownFiles()) {
 				try {
 					const content = await this.app.vault.cachedRead(file);
-					this.index.set(file.path, content.split("\n"));
+					this.index.set(file.path, splitIndexedLines(content));
 				} catch {
 					// Skip a file that vanished or is unreadable mid-build rather
 					// than aborting the whole index.

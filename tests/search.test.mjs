@@ -22,8 +22,11 @@ assert.deepEqual(typo.indices, [], "typo fallback returns no highlight indices")
 const shortTypo = fuzzyMatch("dax", "dog");
 assert.equal(shortTypo, null, "short queries get no typo tolerance");
 
-const empty = fuzzyMatch("", "Anything");
-assert.deepEqual(empty, { score: 0, indices: [] }, "empty query matches everything at score 0");
+// An empty (or whitespace-only) query is "no match", not a truthy zero-score
+// object: callers treat a falsy return as "skip", and a {score:0} would slip
+// through that guard as a spurious zero-relevance hit.
+assert.equal(fuzzyMatch("", "Anything"), null, "empty query is not a match");
+assert.equal(fuzzyMatch("   ", "Anything"), null, "whitespace-only query is not a match");
 
 // --- diacritic folding keeps highlight indices aligned to the ORIGINAL string ---
 // Accented strings are assembled from char codes so the precomposed vs

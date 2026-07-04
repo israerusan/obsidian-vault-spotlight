@@ -2,7 +2,7 @@ import { App, Notice } from "obsidian";
 import type VaultSpotlightPlugin from "../main";
 import { PromptModal } from "./PromptModal";
 import { SaveSearchPromptModal } from "./SaveSearchPromptModal";
-import { activeProfile, createProfileFromSettings } from "../core/searchProfiles.mjs";
+import { activeProfile, createProfileFromSettings, MAX_SEARCH_PROFILES } from "../core/searchProfiles.mjs";
 import { canSaveWorkflowPreset, createWorkflowPreset, ensureStarterWorkflows, FREE_WORKFLOW_LIMIT, MAX_WORKFLOW_PRESETS } from "../core/workflowPresets.mjs";
 import type { RankingMode } from "../core/ranking.mjs";
 import type { SpotlightMode } from "./resultTypes";
@@ -92,12 +92,11 @@ export class WorkflowController {
 			onSubmit: (name) => {
 				const mode = this.host.hasActionContext() ? this.host.actionReturnMode() : this.host.liveMode();
 				const query = this.host.hasActionContext() ? this.host.actionReturnQuery() : this.host.liveQuery();
-				const profile = createProfileFromSettings(name, this.settings, mode, query);
-				const exists = this.settings.searchProfiles.some((p) => p.id === profile.id);
-				this.settings.searchProfiles = [
-					...this.settings.searchProfiles.filter((p) => p.id !== profile.id),
-					{ ...profile, id: exists ? `${profile.id}-${Date.now()}` : profile.id },
-				].slice(0, 20);
+				// createProfileFromSettings now dedups the id against existing profiles,
+				// so a name that slugifies to an existing id gets a distinct one (rather
+				// than replacing it) — no manual collision suffix needed here.
+				const profile = createProfileFromSettings(name, this.settings, mode, query, this.settings.searchProfiles.map((p) => p.id));
+				this.settings.searchProfiles = [...this.settings.searchProfiles, profile].slice(0, MAX_SEARCH_PROFILES);
 				void this.host.plugin.saveSettings();
 				new Notice("Vault Spotlight: search profile saved.");
 				this.host.closeActionPalette();

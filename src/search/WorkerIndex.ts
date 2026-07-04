@@ -9,6 +9,14 @@ export interface WorkerIndexRow {
 }
 
 /**
+ * A worker scan that didn't answer within the deadline. Distinct from a genuine
+ * worker failure (onerror/postMessage throw) so the caller can fall back for a
+ * single query WITHOUT permanently retiring a worker that's merely slow (a GC/OS
+ * pause or one heavy scan on a huge vault) — see ContentSearcher.searchVaultIndex.
+ */
+export class WorkerTimeoutError extends Error {}
+
+/**
  * Off-main-thread content index. File reads still happen on the main thread
  * (only it can touch the vault); the retained text and the scan live in the
  * worker. Callers must be ready for `search` to reject (worker died) and
@@ -105,7 +113,7 @@ export class WorkerIndex {
 			// this promise would hang forever and content mode would be stuck on
 			// the loading skeleton with the fallback path unreachable.
 			const timer = window.setTimeout(() => {
-				if (this.pending.delete(id)) reject(new Error("content index worker timed out"));
+				if (this.pending.delete(id)) reject(new WorkerTimeoutError("content index worker timed out"));
 			}, this.warm ? WARM_SEARCH_TIMEOUT_MS : COLD_SEARCH_TIMEOUT_MS);
 			this.pending.set(id, {
 				resolve: (rows) => {

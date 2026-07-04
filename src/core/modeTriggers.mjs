@@ -43,18 +43,27 @@ export function normalizeEscapeChar(raw) {
 }
 
 /**
- * The escape char is checked BEFORE mode prefixes (see detectModeFromPrefix), so
- * if it collides with a live prefix that mode becomes unreachable. Resolve a
- * normalized escape char against the current prefix map: keep it if free, else
- * fall back to the default, else the first free spare. Shared by loadSettings
- * and the settings tab so a live edit can never silently kill a search mode.
+ * The escape char is checked BEFORE mode prefixes (see detectModeFromPrefix) and
+ * via `startsWith`, so it becomes unreachable-shadowing not only when it EQUALS a
+ * live prefix but also when it is a proper prefix of a multi-char trigger — e.g.
+ * escape "!" with a trigger "!!" makes every "!!…" query parse as escaped, so the
+ * "!!" mode can never fire. Resolve a normalized escape char against the current
+ * prefix map: keep it if it collides with nothing, else fall back to the default,
+ * else the first spare that is provably free (never return a still-colliding
+ * char). Shared by loadSettings and the settings tab so a live edit can never
+ * silently kill a search mode.
  */
 export function reconcileEscapeChar(escapeChar, modePrefixes) {
 	const escape = normalizeEscapeChar(escapeChar);
-	const taken = new Set(Object.values(modePrefixes || {}));
-	if (!taken.has(escape)) return escape;
-	if (!taken.has(DEFAULT_ESCAPE_CHAR)) return DEFAULT_ESCAPE_CHAR;
-	return ["\\", "|", "?", "%", "&"].find((c) => !taken.has(c)) ?? DEFAULT_ESCAPE_CHAR;
+	const prefixes = Object.values(modePrefixes || {}).filter((p) => typeof p === "string" && p.length > 0);
+	// A single-char candidate collides if it equals, or is the leading char of,
+	// any trigger (startsWith covers the equality case too).
+	const collides = (candidate) => prefixes.some((p) => p.startsWith(candidate));
+	if (!collides(escape)) return escape;
+	// Ten single-char candidates vs at most nine distinct trigger lead-chars
+	// guarantees at least one is free; the ?? is a belt-and-suspenders fallback.
+	const spares = [DEFAULT_ESCAPE_CHAR, "\\", "|", "?", "%", "&", "#", "@", "*", "."];
+	return spares.find((c) => !collides(c)) ?? DEFAULT_ESCAPE_CHAR;
 }
 
 /**
@@ -90,7 +99,10 @@ export function parseHeadingQuery(raw) {
 	const withoutLevels = String(raw ?? "")
 		.split(/\s+/)
 		.filter((token) => {
-			const match = token.toLowerCase().match(/^level:(\d)(?:-(\d))?$/);
+			// \d+ (not \d) so a multi-digit level like "level:10" is parsed and then
+			// clamped by the range logic below, instead of silently falling through
+			// as a plain search token.
+			const match = token.toLowerCase().match(/^level:(\d+)(?:-(\d+))?$/);
 			if (!match) return true;
 			const a = Number(match[1]);
 			const b = match[2] !== undefined ? Number(match[2]) : a;

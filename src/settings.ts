@@ -1,6 +1,6 @@
 import { App, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type VaultSpotlightPlugin from "./main";
-import { createProfileFromSettings } from "./core/searchProfiles.mjs";
+import { createProfileFromSettings, MAX_SEARCH_PROFILES } from "./core/searchProfiles.mjs";
 import { DEFAULT_RANKING_SETTINGS } from "./core/ranking.mjs";
 import { ensureStarterWorkflows, FREE_WORKFLOW_LIMIT } from "./core/workflowPresets.mjs";
 import { createSnippet, MAX_SNIPPETS } from "./core/snippets.mjs";
@@ -327,8 +327,10 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 					.addOption("metadata", "Metadata first")
 					.addOption("alias", "Alias aware")
 					.setValue(this.plugin.settings.ranking.mode)
-					.onChange((value: RankingSettings["mode"]) => {
-						this.plugin.settings.ranking.mode = value;
+					.onChange((value: string) => {
+						// The value is always one of the addOption keys above; narrow the
+						// string Obsidian's onChange hands back to the settings union.
+						this.plugin.settings.ranking.mode = value as RankingSettings["mode"];
 						void this.plugin.saveSettings();
 					});
 			});
@@ -619,8 +621,8 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 					.addOption("append", "Append to end")
 					.addOption("prepend", "Prepend to top")
 					.setValue(this.plugin.settings.captureMode)
-					.onChange((value: "append" | "prepend") => {
-						this.plugin.settings.captureMode = value;
+					.onChange((value: string) => {
+						this.plugin.settings.captureMode = value === "prepend" ? "prepend" : "append";
 						void this.plugin.saveSettings();
 					});
 			});
@@ -817,8 +819,14 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 				.setDesc("Profiles remember file type toggles, excluded folders, preview preference, and a default query/mode.")
 				.addButton((button) =>
 					button.setButtonText("Add profile").onClick(() => {
-						const profile = createProfileFromSettings(`Profile ${this.plugin.settings.searchProfiles.length + 1}`, this.plugin.settings);
-						this.plugin.settings.searchProfiles = [...this.plugin.settings.searchProfiles, profile].slice(0, 20);
+						const profile = createProfileFromSettings(
+							`Profile ${this.plugin.settings.searchProfiles.length + 1}`,
+							this.plugin.settings,
+							"files",
+							"",
+							this.plugin.settings.searchProfiles.map((p) => p.id)
+						);
+						this.plugin.settings.searchProfiles = [...this.plugin.settings.searchProfiles, profile].slice(0, MAX_SEARCH_PROFILES);
 						void this.plugin.saveSettings().then(() => this.display());
 					})
 				);
