@@ -10,6 +10,17 @@ import {
 	normalizeModePrefixes,
 } from "./core/modeTriggers.mjs";
 
+/** Returns `url` if it is a well-formed http(s) URL, otherwise `fallback`. */
+export function safeHttpUrl(url: string, fallback: string): string {
+	try {
+		const parsed = new URL(url);
+		if (parsed.protocol === "http:" || parsed.protocol === "https:") return url;
+	} catch {
+		// Not a parseable URL — fall through.
+	}
+	return fallback;
+}
+
 export type ModePrefixes = Record<
 	"content" | "commands" | "headings" | "symbols" | "links" | "editors" | "folders",
 	string
@@ -171,9 +182,12 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			status.createEl("p", { text: "Free tier active. Upgrade to unlock batch open, content search, and saved commands." });
 			const link = status.createEl("a", {
 				text: "Get Pro on Buy Me a Coffee",
-				href: this.plugin.settings.purchaseUrl,
+				// Only render http(s) URLs — a stored "javascript:" value would
+				// otherwise become a clickable script link (self-XSS) in the pane.
+				href: safeHttpUrl(this.plugin.settings.purchaseUrl, DEFAULT_SETTINGS.purchaseUrl),
 			});
 			link.setAttr("target", "_blank");
+			link.setAttr("rel", "noopener noreferrer");
 		}
 
 		new Setting(containerEl)
@@ -184,7 +198,10 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 					.setPlaceholder("https://your-store.com/product")
 					.setValue(this.plugin.settings.purchaseUrl)
 					.onChange((value) => {
-						this.plugin.settings.purchaseUrl = value.trim() || DEFAULT_SETTINGS.purchaseUrl;
+						const trimmed = value.trim();
+						this.plugin.settings.purchaseUrl = trimmed
+							? safeHttpUrl(trimmed, DEFAULT_SETTINGS.purchaseUrl)
+							: DEFAULT_SETTINGS.purchaseUrl;
 						void this.plugin.saveSettings();
 					})
 			);

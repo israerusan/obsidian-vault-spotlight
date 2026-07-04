@@ -86,9 +86,6 @@ export class FileSearcher {
 			if (!this.matchesFilters(file, options)) continue;
 
 			const basename = file.basename;
-			const cache = file.extension === "md" ? this.app.metadataCache.getFileCache(file) : null;
-			const tags = cache ? Array.from(collectFileTags(cache)).slice(0, 3) : [];
-			const aliases = extractAliases(cache?.frontmatter ?? null).slice(0, 3);
 			let score = 0;
 			let primaryMatch: FileSearchResult["primaryMatch"] = isBrowseMode ? "browse" : isFilterOnly ? "filters" : "filename";
 			let aliasMatched = false;
@@ -128,6 +125,13 @@ export class FileSearcher {
 			}
 
 			if (score <= 0) continue;
+
+			// Only now that the file is a keeper do we pay for tag/alias metadata
+			// (a metadataCache lookup + Set build per file) — skipping it for the
+			// vast majority of non-matching files on every keystroke.
+			const cache = file.extension === "md" ? this.app.metadataCache.getFileCache(file) : null;
+			const tags = cache ? Array.from(collectFileTags(cache)).slice(0, 3) : [];
+			const aliases = extractAliases(cache?.frontmatter ?? null).slice(0, 3);
 
 			const starredRank = starredSet.get(file.path);
 			const recentRank = recentSet.get(file.path);

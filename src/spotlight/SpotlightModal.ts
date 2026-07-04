@@ -209,6 +209,7 @@ export class SpotlightModal extends Modal {
 			window.clearTimeout(this.loadingTimer);
 			this.loadingTimer = null;
 		}
+		this.clearFocusTimers();
 		this.preview.unload();
 		this.plugin.onSpotlightClosed(this);
 		this.containerEl.removeClass("vault-spotlight-container");
@@ -818,14 +819,25 @@ export class SpotlightModal extends Modal {
 			});
 
 			if (this.plugin.settings.isPro && item.kind === "file") {
-				const starBtn = row.createDiv({ cls: "vault-spotlight-star-btn" });
-				setIcon(starBtn, item.isStarred ? "star" : "star-off");
-				starBtn.setAttr("aria-label", item.isStarred ? "Unstar" : "Star");
+				const starItem = item;
+				const starBtn = row.createEl("button", {
+					cls: "vault-spotlight-star-btn",
+					attr: { type: "button" },
+				});
+				setIcon(starBtn, starItem.isStarred ? "star" : "star-off");
+				starBtn.setAttr("aria-label", starItem.isStarred ? "Unstar" : "Star");
 				starBtn.addEventListener("mousedown", (evt) => {
 					evt.preventDefault();
 					evt.stopPropagation();
-					this.plugin.toggleStar(item.file.path);
-					void this.runSearch();
+					// Update the icon, row state, and item flag in place — re-running
+					// the whole search would reset the selection and scroll to the
+					// top, losing the user's place mid-list.
+					starItem.isStarred = this.plugin.toggleStar(starItem.file.path);
+					setIcon(starBtn, starItem.isStarred ? "star" : "star-off");
+					starBtn.setAttr("aria-label", starItem.isStarred ? "Unstar" : "Star");
+					// Keep the is-starred class in sync so the CSS star colour tracks
+					// the real state (the class, not the icon, drives the tint).
+					row.toggleClass("is-starred", starItem.isStarred);
 				});
 			}
 
@@ -892,7 +904,12 @@ export class SpotlightModal extends Modal {
 			this.addShortcut(shortcuts, ["Ctrl", "Space"], "select");
 		}
 
-		this.statusEl = this.footerEl.createSpan({ cls: "vault-spotlight-status" });
+		// Announce the result count / empty state to screen readers as the user
+		// types (aria-live), without stealing focus.
+		this.statusEl = this.footerEl.createSpan({
+			cls: "vault-spotlight-status",
+			attr: { role: "status", "aria-live": "polite" },
+		});
 	}
 
 	private addShortcut(container: HTMLElement, keys: string[], label: string): void {
@@ -904,6 +921,9 @@ export class SpotlightModal extends Modal {
 	}
 
 	private updateStatus(count: number): void {
+		// Reflect real listbox state for assistive tech instead of a hardcoded
+		// "expanded" — the combobox is only expanded when options are showing.
+		this.inputEl?.setAttribute("aria-expanded", count > 0 ? "true" : "false");
 		if (!this.statusEl) return;
 		if (this.checkedPaths.size > 0) {
 			this.statusEl.setText(`${this.checkedPaths.size} selected`);
@@ -917,7 +937,12 @@ export class SpotlightModal extends Modal {
 	}
 
 	private moveSelection(delta: number): void {
-		if (this.items.length === 0 || this.isLoading) return;
+		if (this.items.length === 0) return;
+		// Navigate over whatever rows are actually on screen. Gating on isLoading
+		// froze the arrows during a slow ripgrep search even while the previous
+		// results were still visible; only block when the list shows skeletons
+		// (no real rows to move between).
+		if (this.resultsEl.querySelector(".vault-spotlight-item") === null) return;
 		this.selectedIndex = (this.selectedIndex + delta + this.items.length) % this.items.length;
 		// Arrowing onto a result arms drill-in: the next symbols/links trigger
 		// keypress explores that result instead of typing into the query.
@@ -971,8 +996,18 @@ export class SpotlightModal extends Modal {
 	private toggleStarSelected(): void {
 		const item = this.items[this.selectedIndex];
 		if (!item || item.kind !== "file") return;
-		this.plugin.toggleStar(item.file.path);
-		void this.runSearch();
+		// In-place update (see the row star button) so Ctrl+D on the 20th result
+		// doesn't snap the list back to the top.
+		item.isStarred = this.plugin.toggleStar(item.file.path);
+		const row = this.resultsEl.querySelector<HTMLElement>(
+			`.vault-spotlight-item[data-index="${this.selectedIndex}"]`
+		);
+		row?.toggleClass("is-starred", item.isStarred);
+		const starBtn = row?.querySelector<HTMLElement>(".vault-spotlight-star-btn");
+		if (starBtn) {
+			setIcon(starBtn, item.isStarred ? "star" : "star-off");
+			starBtn.setAttr("aria-label", item.isStarred ? "Unstar" : "Star");
+		}
 	}
 
 	private cycleMode(): void {
@@ -1063,7 +1098,7 @@ export class SpotlightModal extends Modal {
 		// Opening a real result means the current query was useful — remember it.
 		this.recordSearch();
 
-		const targets =
+		let targets =
 			this.checkedPaths.size > 0
 				? this.items.filter((i) => {
 						const f = itemFile(i);
@@ -1071,7 +1106,10 @@ export class SpotlightModal extends Modal {
 				  })
 				: [selected];
 
-		if (targets.length === 0) return;
+		// The checked set can go stale when the query changes so none of the
+		// checked paths are in view any more — Enter must still open the
+		// highlighted row rather than silently doing nothing.
+		if (targets.length === 0) targets = [selected];
 
 		this.checkedPaths.clear();
 		this.close();
@@ -1525,7 +1563,11 @@ export class SpotlightModal extends Modal {
 	private openActionsMenu(item: ResultItem, evt?: MouseEvent): void {
 		const file = itemFile(item);
 		if (!file) return;
-		const line = item.kind === "content" || item.kind === "heading" ? item.line : null;
+		// Seek to the matched line for anything that carries one, so opening a
+		// symbol/heading/content hit via the menu lands on the passage — matching
+		// what Enter (openItem) already does.
+		const line =
+			item.kind === "content" || item.kind === "heading" || item.kind === "symbol" ? item.line : null;
 		const menu = new Menu();
 
 		const openIn = (paneType: "tab" | "split" | "window") => {
@@ -1724,7 +1766,19 @@ export class SpotlightModal extends Modal {
 		});
 	}
 
+	private focusTimers: number[] = [];
+
+	private clearFocusTimers(): void {
+		for (const id of this.focusTimers) window.clearTimeout(id);
+		this.focusTimers = [];
+	}
+
 	private focusInput(): void {
+		// Drop any focus retries still queued from a previous call so rapid
+		// focusInput() invocations (drill, workflow/profile activation, palette
+		// toggles) don't stack up and steal focus from a just-opened child modal.
+		this.clearFocusTimers();
+
 		const applyFocus = () => {
 			if (!this.inputEl?.isConnected) return;
 			// ownerDocument, not the global document — popout-window safe.
@@ -1736,7 +1790,7 @@ export class SpotlightModal extends Modal {
 
 		applyFocus();
 		window.requestAnimationFrame(applyFocus);
-		window.setTimeout(applyFocus, 0);
-		window.setTimeout(applyFocus, 50);
+		this.focusTimers.push(window.setTimeout(applyFocus, 0));
+		this.focusTimers.push(window.setTimeout(applyFocus, 50));
 	}
 }

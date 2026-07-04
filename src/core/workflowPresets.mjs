@@ -40,7 +40,9 @@ export function canSaveWorkflowPreset(workflows, isPro) {
 
 export function createWorkflowPreset(name, mode, query, options = {}) {
 	return {
-		id: cleanId(name) || `workflow-${Date.now()}`,
+		// A random suffix on the fallback id avoids collisions when two presets
+		// with unsluggable names (all symbols) are created in the same millisecond.
+		id: cleanId(name) || `workflow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
 		name: String(name || "New workflow").trim() || "New workflow",
 		mode: PROFILE_MODES.has(mode) ? mode : "files",
 		query: String(query || ""),

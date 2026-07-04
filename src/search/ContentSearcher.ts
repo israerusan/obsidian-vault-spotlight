@@ -25,6 +25,10 @@ export class ContentSearcher {
 	private index = new Map<string, string[]>();
 	private indexBuilt = false;
 	private buildPromise: Promise<void> | null = null;
+	// Bumped by invalidate(); a build that started under an older epoch must not
+	// mark the index complete (a mid-build clear wiped its early files). Mirrors
+	// the guard in WorkerIndex so both index paths survive a concurrent reset.
+	private indexEpoch = 0;
 	private ripgrep: RipgrepSearcher;
 	private canvas: CanvasSearcher;
 	private bases: BaseSearcher;
@@ -60,20 +64,13 @@ export class ContentSearcher {
 		const limit = options.limit ?? 40;
 		const excluded = normalizeExcludeFolders(options.excludeFolders);
 		const tokens = query.trim().split(/\s+/).filter(Boolean).map((t) => t.toLowerCase());
+		if (tokens.length === 0) return [];
 
-		if (options.useRipgrep) {
-			const rgResults = await this.ripgrep.search(query, {
-				includeCanvas: options.includeCanvas,
-				includeBases: options.includeBases ?? false,
-				excludeFolders: options.excludeFolders,
-				limit,
-			});
-			// A non-null result means ripgrep ran — trust it even when empty, so a
-			// legitimate no-match query doesn't trigger a full-vault index build.
-			if (rgResults !== null) return rgResults;
-		}
-
-		const vaultResults = await this.searchVaultIndex(tokens, limit, excluded);
+		// Canvas and Bases hold structure ripgrep can't parse line-by-line — a
+		// canvas note is a single line of JSON, a base is a YAML view/filter
+		// block. They always go through their node/YAML-aware searchers and merge
+		// into whichever text engine ran for markdown, rather than through rg
+		// globs that would mangle (or drop) the matches.
 		const extraLimit = Math.max(10, Math.floor(limit / 2));
 		const extras: ContentSearchResult[] = [];
 		if (options.includeCanvas) {
@@ -82,8 +79,20 @@ export class ContentSearcher {
 		if (options.includeBases) {
 			extras.push(...(await this.bases.search(tokens, extraLimit, excluded)));
 		}
-		if (extras.length === 0) return vaultResults;
-		return this.mergeResults(vaultResults, extras, limit);
+
+		// A non-null ripgrep result means rg ran — trust it even when empty, so a
+		// legitimate no-match query doesn't trigger a full-vault index build.
+		let base: ContentSearchResult[] | null = null;
+		if (options.useRipgrep) {
+			base = await this.ripgrep.search(query, {
+				excludeFolders: options.excludeFolders,
+				limit,
+			});
+		}
+		if (base === null) base = await this.searchVaultIndex(tokens, limit, excluded);
+
+		if (extras.length === 0) return base;
+		return this.mergeResults(base, extras, limit);
 	}
 
 	private async searchVaultIndex(
@@ -122,6 +131,13 @@ export class ContentSearcher {
 
 		await this.ensureIndex();
 		const results: ContentSearchResult[] = [];
+		// Bound memory without dropping the true top matches: a one-character
+		// query ("e") matches nearly every line in the vault. Whenever the
+		// working set grows past a soft cap, sort and keep only the current
+		// top `limit`. Everything discarded scored below all kept rows, so it can
+		// never belong in the final top-`limit` — the result is identical to
+		// collecting everything and slicing, but memory stays O(limit).
+		const softCap = Math.max(limit * 10, 500);
 
 		for (const file of this.app.vault.getMarkdownFiles()) {
 			if (isPathExcluded(file.path, excluded)) continue;
@@ -142,6 +158,10 @@ export class ContentSearcher {
 					score: Math.max(1, 100 - Math.floor(i / 10)),
 					engine: "vault",
 				});
+				if (results.length >= softCap) {
+					results.sort((a, b) => b.score - a.score);
+					results.length = limit;
+				}
 			}
 		}
 
@@ -170,6 +190,11 @@ export class ContentSearcher {
 	/** Full reset — use when the ripgrep command or global config changes. */
 	invalidate(): void {
 		this.workerIndex?.invalidate();
+		// Bump the epoch so any in-flight build becomes a no-op (it can't flip
+		// indexBuilt for a cleared index), then drop the promise so the next
+		// search starts a *fresh, complete* build rather than awaiting the stale
+		// one and scanning a half-emptied index.
+		this.indexEpoch++;
 		this.index.clear();
 		this.indexBuilt = false;
 		this.buildPromise = null;
@@ -214,6 +239,7 @@ export class ContentSearcher {
 		// on contents would hand a second keystroke a half-built index.
 		if (this.buildPromise) return this.buildPromise;
 		if (this.indexBuilt) return Promise.resolve();
+		const epoch = this.indexEpoch;
 		this.buildPromise = (async () => {
 			for (const file of this.app.vault.getMarkdownFiles()) {
 				try {
@@ -224,7 +250,9 @@ export class ContentSearcher {
 					// than aborting the whole index.
 				}
 			}
-			this.indexBuilt = true;
+			// invalidate() during the build wiped some of what was just read;
+			// leave indexBuilt false so the next caller triggers a fresh build.
+			if (epoch === this.indexEpoch) this.indexBuilt = true;
 		})().finally(() => {
 			this.buildPromise = null;
 		});

@@ -114,8 +114,6 @@ export class RipgrepSearcher {
 	async search(
 		query: string,
 		options: {
-			includeCanvas: boolean;
-			includeBases?: boolean;
 			limit: number;
 			excludeFolders?: string[];
 		}
@@ -156,19 +154,18 @@ export class RipgrepSearcher {
 			// all-tokens filter below; a single word keeps the tight cap.
 			multi ? "40" : "4",
 			// Cap line length so a minified/one-line file can't blow maxBuffer.
+			// `--max-columns-preview` still prints a usable prefix of an
+			// over-long line instead of an "omitted" notice, so the AND filter
+			// and snippet below see real text rather than a byte-count message.
 			"--max-columns",
 			"500",
+			"--max-columns-preview",
+			// Markdown only. Canvas (single-line JSON) and Bases (YAML) are
+			// searched by their structure-aware searchers in ContentSearcher, not
+			// by rg line globs that would mangle their snippets.
 			"-g",
 			"*.md",
 		];
-
-		if (options.includeCanvas) {
-			args.push("-g", "*.canvas");
-		}
-
-		if (options.includeBases) {
-			args.push("-g", "*.base");
-		}
 
 		for (const folder of options.excludeFolders ?? []) {
 			const f = folder.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
@@ -296,7 +293,7 @@ export class RipgrepSearcher {
 
 	private findFileBySuffix(fileMap: Map<string, TFile>, path: string): TFile | undefined {
 		const suffix = path.replace(/\\/g, "/");
-		for (const [key, file] of Array.from(fileMap.entries())) {
+		for (const [key, file] of fileMap) {
 			// Require a path-separator boundary so "notes.md" can't claim a
 			// match that actually lives in "Bar/mynotes.md".
 			if (key === suffix || key.endsWith(`/${suffix}`) || suffix.endsWith(`/${key}`)) return file;

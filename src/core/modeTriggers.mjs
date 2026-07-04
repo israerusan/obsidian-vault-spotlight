@@ -79,6 +79,13 @@ export function parseHeadingQuery(raw) {
 			const b = match[2] !== undefined ? Number(match[2]) : a;
 			levelMin = Math.max(1, Math.min(a, b));
 			levelMax = Math.min(6, Math.max(a, b));
+			// Out-of-range inputs (level:0, level:7) clamp to an empty span
+			// (min > max) that would silently match no headings — treat those
+			// as no level filter instead of returning nothing with no reason.
+			if (levelMin > levelMax) {
+				levelMin = null;
+				levelMax = null;
+			}
 			return false;
 		})
 		.join(" ")

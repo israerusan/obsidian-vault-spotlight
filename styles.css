@@ -257,6 +257,13 @@
 	color: var(--text-faint);
 	flex-shrink: 0;
 	transition: color 0.12s ease, background 0.12s ease;
+	/* Neutralise Obsidian's default <button> chrome so the icon-only control
+	   stays flush with the row (transparent until hover). */
+	padding: 0;
+	border: none;
+	background: transparent;
+	box-shadow: none;
+	cursor: pointer;
 }
 
 .vault-spotlight-star-btn:hover {

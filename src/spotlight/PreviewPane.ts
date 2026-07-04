@@ -8,6 +8,9 @@ export class PreviewPane {
 	private el: HTMLDivElement | null = null;
 	private component: Component | null = null;
 	private timer: number | null = null;
+	// Bumped on every update() so a slower async read from an earlier selection
+	// can't render into the pane after a newer selection replaced it.
+	private token = 0;
 
 	constructor(private app: App) {}
 
@@ -27,6 +30,7 @@ export class PreviewPane {
 		if (this.timer !== null) window.clearTimeout(this.timer);
 		const previewEl = this.el;
 		const component = this.component;
+		const token = ++this.token;
 
 		this.timer = window.setTimeout(() => {
 			this.timer = null;
@@ -47,17 +51,18 @@ export class PreviewPane {
 			void this.app.vault
 				.cachedRead(file)
 				.then((content) => {
-					if (this.component !== component || !previewEl.isConnected) return;
+					if (this.token !== token || this.component !== component || !previewEl.isConnected) return;
 					return MarkdownRenderer.render(this.app, content.slice(0, 10000), bodyEl, file.path, component);
 				})
 				.then(() => {
-					if (this.component !== component || !bodyEl.isConnected) return;
+					if (this.token !== token || this.component !== component || !bodyEl.isConnected) return;
 					// Scroll the matched term into view and mark it, so a content or
 					// heading hit lands on the relevant passage instead of the top.
 					const hit = highlightFirstMatch(bodyEl, terms);
 					hit?.scrollIntoView({ block: "center" });
 				})
 				.catch(() => {
+					if (this.token !== token || !previewEl.isConnected) return;
 					previewEl.empty();
 					previewEl.createDiv({ cls: "vault-spotlight-preview-empty", text: "Preview unavailable" });
 				});

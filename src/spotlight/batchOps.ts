@@ -26,6 +26,28 @@ function filesForBatch(ctx: BatchOpsContext): TFile[] {
 	return ctx.resultItems().map((item) => itemFile(item)).filter((file): file is TFile => !!file);
 }
 
+/**
+ * Apply `op` to every file, isolating failures: one unwritable/locked note
+ * can't abort the rest or surface as an unhandled promise rejection, and the
+ * user always gets a summary (including how many failed).
+ */
+async function runBatch(
+	files: TFile[],
+	op: (file: TFile) => Promise<void>,
+	verb: string,
+	noun = "note"
+): Promise<void> {
+	const outcomes = await Promise.allSettled(files.map((file) => op(file)));
+	const failed = outcomes.filter((o) => o.status === "rejected").length;
+	const ok = outcomes.length - failed;
+	const plural = ok === 1 ? "" : "s";
+	const base = `Vault Spotlight: ${verb} ${ok} ${noun}${plural}`;
+	new Notice(failed > 0 ? `${base} (${failed} failed).` : `${base}.`);
+	if (failed > 0) {
+		console.error(`[VaultSpotlight] ${verb}: ${failed} of ${outcomes.length} file(s) failed.`);
+	}
+}
+
 function markdownFilesForBatch(ctx: BatchOpsContext): TFile[] {
 	return filesForBatch(ctx).filter((file) => file.extension === "md");
 }
@@ -77,8 +99,9 @@ export function batchAddTag(ctx: BatchOpsContext): void {
 			if (!cleaned) return;
 			// processFrontMatter handles YAML serialization (inline AND
 			// block-style tag lists) — never edit frontmatter text by hand.
-			void Promise.all(
-				files.map(async (file) => {
+			void runBatch(
+				files,
+				async (file) => {
 					const cache = ctx.app.metadataCache.getFileCache(file);
 					const existing = cache ? collectFileTags(cache) : new Set<string>();
 					// Already tagged (frontmatter or inline) — leave the note untouched.
@@ -86,8 +109,9 @@ export function batchAddTag(ctx: BatchOpsContext): void {
 					await ctx.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
 						fm.tags = addTagToTags(fm.tags, cleaned);
 					});
-				})
-			).then(() => new Notice(`Vault Spotlight: tag added to ${files.length} note${files.length === 1 ? "" : "s"}.`));
+				},
+				"tag added to"
+			);
 		},
 	}).open();
 }
@@ -105,8 +129,9 @@ export function batchRemoveTag(ctx: BatchOpsContext): void {
 		onSubmit: (raw) => {
 			const cleaned = normalizeTag(raw);
 			if (!cleaned) return;
-			void Promise.all(
-				files.map(async (file) => {
+			void runBatch(
+				files,
+				async (file) => {
 					await ctx.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
 						const next = removeTagFromTags(fm.tags, cleaned);
 						if (next === null) delete fm.tags;
@@ -115,8 +140,9 @@ export function batchRemoveTag(ctx: BatchOpsContext): void {
 					// Inline #tag occurrences in the body are plain text, not
 					// frontmatter — strip them with an atomic read-modify-write.
 					await ctx.app.vault.process(file, (content) => removeInlineTag(content, cleaned));
-				})
-			).then(() => new Notice(`Vault Spotlight: tag removed from ${files.length} note${files.length === 1 ? "" : "s"}.`));
+				},
+				"tag removed from"
+			);
 		},
 	}).open();
 }
@@ -140,17 +166,18 @@ export function batchSetProperty(ctx: BatchOpsContext): void {
 			const key = raw.slice(0, sep).trim();
 			const value = raw.slice(sep + 1).trim();
 			if (!key) return;
-			void Promise.all(
-				files.map((file) =>
+			void runBatch(
+				files,
+				(file) =>
 					ctx.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
 						// Reuse an existing key that differs only in case rather
 						// than adding a near-duplicate property.
 						const existingKey =
 							Object.keys(fm).find((k) => k.toLowerCase() === key.toLowerCase()) ?? key;
 						fm[existingKey] = value;
-					})
-				)
-			).then(() => new Notice(`Vault Spotlight: property set on ${files.length} note${files.length === 1 ? "" : "s"}.`));
+					}),
+				"property set on"
+			);
 		},
 	}).open();
 }
@@ -166,11 +193,32 @@ export function batchMoveFiles(ctx: BatchOpsContext): void {
 			const folder = normalizePath(raw.trim());
 			if (!folder) return;
 			void (async () => {
-				if (!ctx.app.vault.getAbstractFileByPath(folder)) await ctx.app.vault.createFolder(folder);
-				for (const file of files) {
-					await ctx.app.fileManager.renameFile(file, normalizePath(`${folder}/${file.name}`));
+				try {
+					if (!ctx.app.vault.getAbstractFileByPath(folder)) await ctx.app.vault.createFolder(folder);
+				} catch (err) {
+					console.error("[VaultSpotlight] move: could not create target folder", err);
+					new Notice("Vault Spotlight: could not create the target folder.");
+					return;
 				}
-				new Notice(`Vault Spotlight: moved ${files.length} file${files.length === 1 ? "" : "s"}.`);
+				// Move files one at a time: fileManager.renameFile rewrites
+				// backlinks across the vault, so concurrent renames could
+				// read-modify-write the same linking note and clobber each other.
+				// Isolate per-file failures (a name collision on one) so they
+				// don't strand the rest, and report the total.
+				let moved = 0;
+				let failed = 0;
+				for (const file of files) {
+					try {
+						await ctx.app.fileManager.renameFile(file, normalizePath(`${folder}/${file.name}`));
+						moved++;
+					} catch (err) {
+						failed++;
+						console.error("[VaultSpotlight] move failed", file.path, err);
+					}
+				}
+				const plural = moved === 1 ? "" : "s";
+				const base = `Vault Spotlight: moved ${moved} file${plural}`;
+				new Notice(failed > 0 ? `${base} (${failed} failed).` : `${base}.`);
 			})();
 		},
 	}).open();

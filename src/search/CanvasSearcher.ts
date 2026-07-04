@@ -15,6 +15,9 @@ export class CanvasSearcher {
 		const needAll = tokens.map((t) => t.toLowerCase()).filter(Boolean);
 		if (needAll.length === 0) return [];
 		const results: ContentSearchResult[] = [];
+		// Prune to top-`limit` past a soft cap so a huge canvas can't grow an
+		// unbounded array, without dropping any genuinely top-scored node.
+		const softCap = Math.max(limit * 10, 500);
 
 		for (const file of this.app.vault.getFiles()) {
 			if (file.extension !== "canvas") continue;
@@ -39,6 +42,10 @@ export class CanvasSearcher {
 					score: Math.max(1, 90 - Math.floor(line / 10)),
 					engine: "canvas",
 				});
+				if (results.length >= softCap) {
+					results.sort((a, b) => b.score - a.score);
+					results.length = limit;
+				}
 			}
 		}
 

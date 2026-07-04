@@ -14,6 +14,9 @@ export class BaseSearcher {
 		const needAll = tokens.map((t) => t.toLowerCase()).filter(Boolean);
 		if (needAll.length === 0) return [];
 		const results: ContentSearchResult[] = [];
+		// Prune to top-`limit` past a soft cap so a huge base file can't grow an
+		// unbounded array, without dropping any genuinely top-scored line.
+		const softCap = Math.max(limit * 10, 500);
 
 		for (const file of this.app.vault.getFiles()) {
 			if (file.extension !== "base") continue;
@@ -42,6 +45,10 @@ export class BaseSearcher {
 					score: Math.max(1, 85 - Math.floor(i / 10)),
 					engine: "base",
 				});
+				if (results.length >= softCap) {
+					results.sort((a, b) => b.score - a.score);
+					results.length = limit;
+				}
 			}
 		}
 

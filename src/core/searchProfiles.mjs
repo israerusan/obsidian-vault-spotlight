@@ -38,7 +38,9 @@ export function activeProfile(profiles, activeProfileId) {
 
 export function createProfileFromSettings(name, settings, mode = "files", query = "") {
 	return {
-		id: cleanId(name) || `profile-${Date.now()}`,
+		// Random suffix on the fallback id so two unsluggable names created in
+		// the same millisecond don't collide (pin/remove/activate would hit both).
+		id: cleanId(name) || `profile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
 		name: String(name || "New profile").trim() || "New profile",
 		defaultMode: PROFILE_MODES.has(mode) ? mode : "files",
 		defaultQuery: String(query || ""),

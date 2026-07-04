@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-vault-spotlight",
-	"version": "2.5.0",
+	"version": "2.5.1",
 	"description": "Spotlight-style vault launcher for Obsidian: fuzzy file search, commands, headings, ripgrep-fast content search, Canvas and Bases support, search profiles, and batch actions",
 	"main": "main.js",
 	"scripts": {
@@ -9,7 +9,7 @@
 		"sync:shared": "node scripts/sync-shared.mjs",
 		"lint": "tsc --noEmit -p . && eslint src",
 		"test": "npm run lint && node scripts/sync-shared.mjs --check && node tests/mode-triggers.test.mjs && node tests/search.test.mjs && node tests/metadata.test.mjs && node tests/worker-index.test.mjs && node tests/verify-license.test.mjs && node tests/license.test.mjs && node tests/feature-gates.test.mjs && node tests/profile-core.test.mjs && node tests/phase1-core.test.mjs && node tests/workflow-core.test.mjs && node tests/links-core.test.mjs && node tests/vault-integration.test.mjs",
-		"test:ci": "node tests/mode-triggers.test.mjs && node tests/search.test.mjs && node tests/metadata.test.mjs && node tests/worker-index.test.mjs && node tests/verify-license.test.mjs && node tests/license.test.mjs && node tests/feature-gates.test.mjs && node tests/profile-core.test.mjs && node tests/workflow-core.test.mjs && node tests/links-core.test.mjs && VAULT_ROOT= node tests/vault-integration.test.mjs",
+		"test:ci": "node tests/mode-triggers.test.mjs && node tests/search.test.mjs && node tests/metadata.test.mjs && node tests/worker-index.test.mjs && node tests/verify-license.test.mjs && node tests/license.test.mjs && node tests/feature-gates.test.mjs && node tests/profile-core.test.mjs && node tests/workflow-core.test.mjs && node tests/links-core.test.mjs && node tests/vault-integration.test.mjs",
 		"license:generate": "node scripts/generate-license.mjs"
 	},
 	"keywords": [

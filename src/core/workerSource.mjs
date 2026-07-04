@@ -14,7 +14,10 @@ const index = new Map();
 self.onmessage = (evt) => {
 	const msg = evt.data || {};
 	if (msg.type === "set") {
-		index.set(msg.path, msg.content.split("\\n"));
+		// Coerce defensively: a malformed message with non-string content would
+		// otherwise throw here, fire onerror, and retire the worker for the whole
+		// session.
+		index.set(msg.path, String(msg.content == null ? "" : msg.content).split("\\n"));
 	} else if (msg.type === "remove") {
 		index.delete(msg.path);
 	} else if (msg.type === "clear") {
@@ -22,6 +25,13 @@ self.onmessage = (evt) => {
 	} else if (msg.type === "search") {
 		const tokens = msg.tokens || [];
 		const excluded = msg.excluded || [];
+		const limit = msg.limit || 40;
+		// Bound memory without dropping the true top matches: a one-character
+		// query matches nearly every line. Whenever the working set grows past a
+		// soft cap, sort and keep only the current top \`limit\`; discarded rows
+		// scored below every kept row so they can't belong in the final top-N.
+		// This keeps the worker's result set identical to the in-process fallback.
+		const softCap = Math.max(limit * 10, 500);
 		const results = [];
 		for (const entry of index) {
 			const path = entry[0];
@@ -45,10 +55,14 @@ self.onmessage = (evt) => {
 					snippet: lines[i].trim().slice(0, 160),
 					score: Math.max(1, 100 - Math.floor(i / 10)),
 				});
+				if (results.length >= softCap) {
+					results.sort((a, b) => b.score - a.score);
+					results.length = limit;
+				}
 			}
 		}
 		results.sort((a, b) => b.score - a.score);
-		self.postMessage({ type: "results", id: msg.id, results: results.slice(0, msg.limit || 40) });
+		self.postMessage({ type: "results", id: msg.id, results: results.slice(0, limit) });
 	}
 };
 `;

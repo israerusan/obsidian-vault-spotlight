@@ -15,6 +15,7 @@ import { normalizeProfiles } from "./core/searchProfiles.mjs";
 import { normalizeRankingSettings } from "./core/ranking.mjs";
 import { normalizeWorkflowPresets } from "./core/workflowPresets.mjs";
 import {
+	DEFAULT_ESCAPE_CHAR,
 	normalizeEscapeChar,
 	normalizeModePrefixes,
 	previousFilePath,
@@ -451,6 +452,15 @@ export default class VaultSpotlightPlugin extends Plugin {
 		}
 		this.settings.modePrefixes = normalizeModePrefixes(this.settings.modePrefixes);
 		this.settings.escapeChar = normalizeEscapeChar(this.settings.escapeChar);
+		// The escape char is checked before mode prefixes, so if it equals one it
+		// would silently make that mode unreachable. Reconcile to the default (or
+		// a free spare) when the user's escape char collides with a live prefix.
+		const takenPrefixes = new Set<string>(Object.values(this.settings.modePrefixes));
+		if (takenPrefixes.has(this.settings.escapeChar)) {
+			this.settings.escapeChar = takenPrefixes.has(DEFAULT_ESCAPE_CHAR)
+				? ["\\", "|", "?", "%", "&"].find((c) => !takenPrefixes.has(c)) ?? DEFAULT_ESCAPE_CHAR
+				: DEFAULT_ESCAPE_CHAR;
+		}
 		this.settings.defaultNewTab = this.settings.defaultNewTab === true;
 		this.settings.recentCommandIds = (Array.isArray(this.settings.recentCommandIds) ? this.settings.recentCommandIds : [])
 			.filter((id): id is string => typeof id === "string" && id.length > 0)

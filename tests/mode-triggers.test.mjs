@@ -83,6 +83,20 @@ assert.deepEqual(parseHeadingQuery("level:1-3 roadmap # setup"), {
 });
 // Reversed range is normalized
 assert.deepEqual(parseHeadingQuery("level:3-1"), { fileQuery: "", headingQuery: "", levelMin: 1, levelMax: 3 });
+// Out-of-range levels (0, 7+) would clamp to an empty span and silently match
+// nothing — they drop the filter instead so the rest of the query still runs.
+assert.deepEqual(parseHeadingQuery("intro level:0"), {
+	fileQuery: "",
+	headingQuery: "intro",
+	levelMin: null,
+	levelMax: null,
+});
+assert.deepEqual(parseHeadingQuery("intro level:7"), {
+	fileQuery: "",
+	headingQuery: "intro",
+	levelMin: null,
+	levelMax: null,
+});
 
 // --- pushRecentCommand ---
 

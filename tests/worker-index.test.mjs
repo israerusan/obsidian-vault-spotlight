@@ -52,4 +52,39 @@ send({ type: "search", id: 6, tokens: [], excluded: [], limit: 2 });
 res = lastResults();
 assert.equal(res.results.length, 0, "limit is respected on an empty index");
 
+// A malformed "set" (no content) must not throw — that would fire onerror and
+// retire the worker for the rest of the session.
+assert.doesNotThrow(
+	() => send({ type: "set", path: "Broken.md" }),
+	"missing content is coerced, not thrown on"
+);
+
+// Memory guard: a broad query that matches a huge number of lines must stay
+// bounded (cap the intermediate array) and still return the requested limit,
+// rather than building millions of objects and freezing.
+send({ type: "clear" });
+const hugeLines = Array.from({ length: 4000 }, (_, i) => `match line ${i}`).join("\n");
+for (let f = 0; f < 80; f++) send({ type: "set", path: `Big/${f}.md`, content: hugeLines });
+send({ type: "search", id: 7, tokens: ["match"], excluded: [], limit: 40 });
+res = lastResults();
+assert.equal(res.results.length, 40, "broad query is sliced to the requested limit");
+assert.ok(res.results.every((r) => r.score >= 1), "capped results still score");
+
+// The memory bound must prune by SCORE, not by file-iteration order: a genuinely
+// top-scored match in a file indexed AFTER the cap fills must still rank first.
+send({ type: "clear" });
+// 40 early files, each with 60 matches on deep lines (first match at line 51 →
+// score 95), enough to blow past the internal soft cap several times over.
+const earlyLines = Array.from({ length: 50 }, () => "x").concat(Array.from({ length: 60 }, () => "match"));
+for (let f = 0; f < 40; f++) send({ type: "set", path: `Early/${f}.md`, content: earlyLines.join("\n") });
+// A late file with the token on line 1 → score 100, the true top result.
+send({ type: "set", path: "Late/top.md", content: "match here" });
+send({ type: "search", id: 8, tokens: ["match"], excluded: [], limit: 40 });
+res = lastResults();
+assert.ok(
+	res.results.some((r) => r.path === "Late/top.md" && r.line === 1),
+	"a top-scored match in a late file is not truncated away by the memory cap"
+);
+assert.equal(res.results[0].path, "Late/top.md", "the highest-scored match still ranks first");
+
 console.log("worker index tests passed");
