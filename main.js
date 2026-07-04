@@ -2381,8 +2381,8 @@ var FREE_WORKFLOW_LIMIT = 2;
 var MAX_WORKFLOW_PRESETS = 25;
 var STARTER_WORKFLOWS = [
   { id: "starter-recent-work", name: "Recent work", mode: "files", query: "modified:7", pinned: true, starter: true },
-  { id: "starter-follow-ups", name: "Follow-ups", mode: "files", query: "#waiting OR #followup", pinned: true, starter: true },
-  { id: "starter-meetings", name: "Meeting notes", mode: "content", query: '"action item" OR "next step"', pinned: false, starter: true },
+  { id: "starter-follow-ups", name: "Follow-ups", mode: "files", query: "#followup", pinned: true, starter: true },
+  { id: "starter-meetings", name: "Meeting notes", mode: "content", query: "action item", pinned: false, starter: true },
   { id: "starter-clients", name: "Client folder", mode: "files", query: "in:Clients", pinned: false, starter: true }
 ];
 function normalizeWorkflowPresets(raw) {
@@ -3170,41 +3170,48 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
         });
       });
     }
-    this.proHeading("Workflow presets");
+    new import_obsidian.Setting(containerEl).setName("Workflow presets").setDesc(`Save searches to re-run from Browse. Free includes ${FREE_WORKFLOW_LIMIT}; Pro is unlimited and can load starter presets.`).setHeading();
     const workflowList = containerEl.createDiv();
-    if (!this.plugin.settings.isPro) {
-      workflowList.createEl("p", { text: "Unlock Pro to save and run reusable workflows from Browse." });
-    } else {
+    const isProUser = this.plugin.settings.isPro;
+    if (isProUser) {
       new import_obsidian.Setting(workflowList).setName("Starter workflows").setDesc("Seed Browse mode with a few high-signal workflow presets.").addButton(
         (button) => button.setButtonText("Load starters").onClick(() => {
           this.plugin.settings.workflowPresets = ensureStarterWorkflows(this.plugin.settings.workflowPresets);
           void this.plugin.saveSettings().then(() => this.display());
         })
       );
-      if (this.plugin.settings.workflowPresets.length === 0) {
-        workflowList.createEl("p", { text: `No workflows yet. Save one from Spotlight with ${mod}+S, or load the starter workflows.` });
-      } else {
-        for (const workflow of this.plugin.settings.workflowPresets) {
-          const row = workflowList.createDiv({ cls: "vault-spotlight-starred-row" });
-          row.createSpan({
-            text: `${workflow.pinned ? "\u2605 " : ""}${workflow.name}: ${workflow.mode}${workflow.query ? ` \xB7 ${workflow.query}` : ""}${workflow.rankingMode ? ` \xB7 ${workflow.rankingMode}` : ""}`
-          });
-          const pinBtn = row.createEl("button", { text: workflow.pinned ? "Unpin" : "Pin" });
-          pinBtn.setAttribute("aria-label", `${workflow.pinned ? "Unpin" : "Pin"} workflow ${workflow.name}`);
-          pinBtn.addEventListener("click", () => {
-            this.plugin.settings.workflowPresets = this.plugin.settings.workflowPresets.map(
-              (entry) => entry.id === workflow.id ? { ...entry, pinned: !entry.pinned } : entry
-            );
-            void this.plugin.saveSettings().then(() => this.display());
-          });
-          const remove = row.createEl("button", { text: workflow.starter ? "Hide" : "Remove" });
-          remove.setAttribute("aria-label", `${workflow.starter ? "Hide" : "Remove"} workflow ${workflow.name}`);
-          remove.addEventListener("click", () => {
-            this.plugin.settings.workflowPresets = this.plugin.settings.workflowPresets.filter((entry) => entry.id !== workflow.id);
-            void this.plugin.saveSettings().then(() => this.display());
-          });
-        }
+    }
+    if (this.plugin.settings.workflowPresets.length === 0) {
+      workflowList.createEl("p", {
+        text: isProUser ? `No workflows yet. Save one from Spotlight with ${mod}+S, or load the starter workflows.` : `No workflows yet. Save up to ${FREE_WORKFLOW_LIMIT} from Spotlight \u2014 press ${mod}+S on any search to keep it.`
+      });
+    } else {
+      for (const workflow of this.plugin.settings.workflowPresets) {
+        const row = workflowList.createDiv({ cls: "vault-spotlight-starred-row" });
+        row.createSpan({
+          text: `${workflow.pinned ? "\u2605 " : ""}${workflow.name}: ${workflow.mode}${workflow.query ? ` \xB7 ${workflow.query}` : ""}${workflow.rankingMode ? ` \xB7 ${workflow.rankingMode}` : ""}`
+        });
+        const pinBtn = row.createEl("button", { text: workflow.pinned ? "Unpin" : "Pin" });
+        pinBtn.setAttribute("aria-label", `${workflow.pinned ? "Unpin" : "Pin"} workflow ${workflow.name}`);
+        pinBtn.addEventListener("click", () => {
+          this.plugin.settings.workflowPresets = this.plugin.settings.workflowPresets.map(
+            (entry) => entry.id === workflow.id ? { ...entry, pinned: !entry.pinned } : entry
+          );
+          void this.plugin.saveSettings().then(() => this.display());
+        });
+        const remove = row.createEl("button", { text: workflow.starter ? "Hide" : "Remove" });
+        remove.setAttribute("aria-label", `${workflow.starter ? "Hide" : "Remove"} workflow ${workflow.name}`);
+        remove.addEventListener("click", () => {
+          this.plugin.settings.workflowPresets = this.plugin.settings.workflowPresets.filter((entry) => entry.id !== workflow.id);
+          void this.plugin.saveSettings().then(() => this.display());
+        });
       }
+    }
+    if (!isProUser && this.plugin.settings.workflowPresets.length > 0) {
+      const usage = new import_obsidian.Setting(workflowList).setName(
+        `${Math.min(this.plugin.settings.workflowPresets.length, FREE_WORKFLOW_LIMIT)} of ${FREE_WORKFLOW_LIMIT} free workflows used`
+      );
+      this.appendUpgrade(usage);
     }
     this.proHeading("Search profiles");
     const profileList = containerEl.createDiv();
@@ -5842,7 +5849,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
             this.renderEmptyState(
               "text",
               "Search file contents",
-              "Type to search inside your notes. Recent searches will appear here."
+              "Type to search inside your notes \u2014 every word must appear on the same line. Recent searches appear here."
             );
             this.updateStatus(0);
           } else {
@@ -6018,25 +6025,28 @@ var SpotlightModal = class extends import_obsidian9.Modal {
           isStarred: r.isStarred,
           isBookmarked: r.isBookmarked
         }));
-        if (isEmptyQuery && isPro) {
-          const workflows = ensureStarterWorkflows(this.plugin.settings.workflowPresets).slice().sort((a, b) => {
-            var _a2, _b2;
-            return Number(b.pinned) - Number(a.pinned) || Number((_a2 = b.starter) != null ? _a2 : false) - Number((_b2 = a.starter) != null ? _b2 : false) || a.name.localeCompare(b.name);
-          }).map((workflow2) => {
-            var _a2;
-            return {
-              kind: "workflow",
-              id: workflow2.id,
-              name: workflow2.name,
-              query: workflow2.query,
-              mode: workflow2.mode,
-              profileId: workflow2.profileId,
-              isPinned: workflow2.pinned,
-              isStarter: (_a2 = workflow2.starter) != null ? _a2 : false,
-              rankingMode: workflow2.rankingMode
-            };
-          });
-          this.items = [...workflows, ...this.items];
+        if (isEmptyQuery) {
+          const source = isPro ? ensureStarterWorkflows(this.plugin.settings.workflowPresets) : normalizeWorkflowPresets(this.plugin.settings.workflowPresets).slice(0, FREE_WORKFLOW_LIMIT);
+          if (source.length > 0) {
+            const workflows = source.slice().sort((a, b) => {
+              var _a2, _b2;
+              return Number(b.pinned) - Number(a.pinned) || Number((_a2 = b.starter) != null ? _a2 : false) - Number((_b2 = a.starter) != null ? _b2 : false) || a.name.localeCompare(b.name);
+            }).map((workflow2) => {
+              var _a2;
+              return {
+                kind: "workflow",
+                id: workflow2.id,
+                name: workflow2.name,
+                query: workflow2.query,
+                mode: workflow2.mode,
+                profileId: workflow2.profileId,
+                isPinned: workflow2.pinned,
+                isStarter: (_a2 = workflow2.starter) != null ? _a2 : false,
+                rankingMode: workflow2.rankingMode
+              };
+            });
+            this.items = [...workflows, ...this.items];
+          }
         }
         if (isEmptyQuery && isPro && this.plugin.settings.searchProfiles.length > 0) {
           const profiles = this.plugin.settings.searchProfiles.map((searchProfile) => ({
@@ -6965,7 +6975,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     const mode = this.actionContext ? this.actionReturnMode : this.mode;
     const query = (this.actionContext ? this.actionReturnQuery : this.inputEl.value).trim();
     if (!canSaveWorkflowPreset(this.plugin.settings.workflowPresets, this.plugin.settings.isPro)) {
-      new import_obsidian9.Notice("Vault Spotlight: workflows require Pro and a non-empty search.");
+      new import_obsidian9.Notice(`Vault Spotlight: the free plan includes ${FREE_WORKFLOW_LIMIT} workflows \u2014 upgrade to Pro for unlimited.`);
       return;
     }
     new PromptModal(this.app, {

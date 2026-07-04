@@ -3,6 +3,24 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.9.1] - 2026-07-04
+
+Follow-ups from a product critique of 2.9.0.
+
+### Fixed
+- The built-in "Follow-ups" and "Meeting notes" starter workflows used Boolean
+  `OR`, which the query language does not support (it treated `OR` as a required
+  word), so they returned no results. They now use working single-filter queries.
+
+### Changed
+- Workflows are genuinely usable on the free tier: you can now save **and re-run**
+  up to two of your own workflows from Browse. Previously the 2-workflow free
+  allowance existed in code but Browse only ever showed workflows to Pro users, so
+  a saved free workflow was invisible. Pro remains unlimited and can load the
+  curated starter presets. Settings and the README now state the policy clearly.
+- The content-search empty state now notes that every word must appear on the same
+  line (line-level AND matching), so results match expectations.
+
 ## [2.9.0] - 2026-07-04
 
 A premium-feel polish pass plus a batch of correctness fixes surfaced by a

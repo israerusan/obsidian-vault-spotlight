@@ -1,6 +1,6 @@
 # Vault Spotlight
 
-Spotlight-style vault launcher for [Obsidian](https://obsidian.md). Open notes, run commands, filter by metadata, and turn repeated searches into reusable Pro workflows — all from a keyboard-first modal.
+Spotlight-style vault launcher for [Obsidian](https://obsidian.md). Open notes, run commands, filter by metadata, and turn repeated searches into reusable workflows — all from a keyboard-first modal.
 
 ## What it does
 
@@ -104,7 +104,8 @@ License keys are verified **offline** (Ed25519). No account, server, or subscrip
 | Body content search (`>`) | No | Yes |
 | Heading search across the vault (`^`) | No | Yes |
 | Search profiles | No | Yes |
-| Workflow presets and starter workflows | No | Yes |
+| Workflow presets | 2 | Unlimited |
+| Starter workflow presets | No | Yes |
 | Ranking controls and match-reason badges | No | Yes |
 | Smart collections / saved searches | No | Yes |
 | Batch open / export / organizer actions | No | Yes |

@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-vault-spotlight",
-	"version": "2.9.0",
+	"version": "2.9.1",
 	"description": "Spotlight-style vault launcher for Obsidian: fuzzy file search, commands, headings, ripgrep-fast content search, inline calculator/converter, natural-language date jump, quick capture, snippets, and batch actions",
 	"main": "main.js",
 	"scripts": {

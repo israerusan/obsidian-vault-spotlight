@@ -25,7 +25,7 @@ import { SaveSearchPromptModal } from "./SaveSearchPromptModal";
 import { PromptModal } from "./PromptModal";
 import { getVaultFileKind } from "../search/vaultFiles";
 import { activeProfile, createProfileFromSettings, type CoreSearchProfile } from "../core/searchProfiles.mjs";
-import { canSaveWorkflowPreset, createWorkflowPreset, ensureStarterWorkflows, MAX_WORKFLOW_PRESETS, type WorkflowPreset } from "../core/workflowPresets.mjs";
+import { canSaveWorkflowPreset, createWorkflowPreset, ensureStarterWorkflows, normalizeWorkflowPresets, FREE_WORKFLOW_LIMIT, MAX_WORKFLOW_PRESETS, type WorkflowPreset } from "../core/workflowPresets.mjs";
 import { detectSearchIntegrations, type SearchIntegrations } from "../core/integrations.mjs";
 import { findBacklinks, findOutlinks } from "../core/linkGraph.mjs";
 import { evaluateExpression, parseCurrencyRates } from "../core/calculator.mjs";
@@ -590,7 +590,7 @@ export class SpotlightModal extends Modal {
 						this.renderEmptyState(
 							"text",
 							"Search file contents",
-							"Type to search inside your notes. Recent searches will appear here."
+							"Type to search inside your notes — every word must appear on the same line. Recent searches appear here."
 						);
 						this.updateStatus(0);
 					} else {
@@ -768,22 +768,31 @@ export class SpotlightModal extends Modal {
 					isBookmarked: r.isBookmarked,
 				}));
 
-				if (isEmptyQuery && isPro) {
-					const workflows = ensureStarterWorkflows(this.plugin.settings.workflowPresets)
-						.slice()
-						.sort((a, b) => Number(b.pinned) - Number(a.pinned) || Number(b.starter ?? false) - Number(a.starter ?? false) || a.name.localeCompare(b.name))
-						.map((workflow) => ({
-							kind: "workflow" as const,
-							id: workflow.id,
-							name: workflow.name,
-							query: workflow.query,
-							mode: workflow.mode,
-							profileId: workflow.profileId,
-							isPinned: workflow.pinned,
-							isStarter: workflow.starter ?? false,
-							rankingMode: workflow.rankingMode,
-						}));
-					this.items = [...workflows, ...this.items];
+				if (isEmptyQuery) {
+					// Workflows are free up to FREE_WORKFLOW_LIMIT so users can feel the
+					// recurring-workflow benefit before upgrading. Pro is unlimited and
+					// gets the curated starter presets seeded when it has none of its own;
+					// free shows only the user's own saved workflows (capped).
+					const source = isPro
+						? ensureStarterWorkflows(this.plugin.settings.workflowPresets)
+						: normalizeWorkflowPresets(this.plugin.settings.workflowPresets).slice(0, FREE_WORKFLOW_LIMIT);
+					if (source.length > 0) {
+						const workflows = source
+							.slice()
+							.sort((a, b) => Number(b.pinned) - Number(a.pinned) || Number(b.starter ?? false) - Number(a.starter ?? false) || a.name.localeCompare(b.name))
+							.map((workflow) => ({
+								kind: "workflow" as const,
+								id: workflow.id,
+								name: workflow.name,
+								query: workflow.query,
+								mode: workflow.mode,
+								profileId: workflow.profileId,
+								isPinned: workflow.pinned,
+								isStarter: workflow.starter ?? false,
+								rankingMode: workflow.rankingMode,
+							}));
+						this.items = [...workflows, ...this.items];
+					}
 				}
 
 				if (isEmptyQuery && isPro && this.plugin.settings.searchProfiles.length > 0) {
@@ -1922,7 +1931,7 @@ export class SpotlightModal extends Modal {
 		const mode = this.actionContext ? this.actionReturnMode : this.mode;
 		const query = (this.actionContext ? this.actionReturnQuery : this.inputEl.value).trim();
 		if (!canSaveWorkflowPreset(this.plugin.settings.workflowPresets, this.plugin.settings.isPro)) {
-			new Notice("Vault Spotlight: workflows require Pro and a non-empty search.");
+			new Notice(`Vault Spotlight: the free plan includes ${FREE_WORKFLOW_LIMIT} workflows — upgrade to Pro for unlimited.`);
 			return;
 		}
 		new PromptModal(this.app, {

@@ -2,7 +2,7 @@ import { App, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type VaultSpotlightPlugin from "./main";
 import { createProfileFromSettings } from "./core/searchProfiles.mjs";
 import { DEFAULT_RANKING_SETTINGS } from "./core/ranking.mjs";
-import { ensureStarterWorkflows } from "./core/workflowPresets.mjs";
+import { ensureStarterWorkflows, FREE_WORKFLOW_LIMIT } from "./core/workflowPresets.mjs";
 import { createSnippet, MAX_SNIPPETS } from "./core/snippets.mjs";
 import {
 	DEFAULT_ESCAPE_CHAR,
@@ -739,11 +739,16 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			});
 		}
 
-		this.proHeading("Workflow presets");
+		// Workflows are free up to FREE_WORKFLOW_LIMIT (save/run your own); Pro is
+		// unlimited and can seed the curated starters — so this is a plain heading,
+		// not a Pro-locked one.
+		new Setting(containerEl)
+			.setName("Workflow presets")
+			.setDesc(`Save searches to re-run from Browse. Free includes ${FREE_WORKFLOW_LIMIT}; Pro is unlimited and can load starter presets.`)
+			.setHeading();
 		const workflowList = containerEl.createDiv();
-		if (!this.plugin.settings.isPro) {
-			workflowList.createEl("p", { text: "Unlock Pro to save and run reusable workflows from Browse." });
-		} else {
+		const isProUser = this.plugin.settings.isPro;
+		if (isProUser) {
 			new Setting(workflowList)
 				.setName("Starter workflows")
 				.setDesc("Seed Browse mode with a few high-signal workflow presets.")
@@ -753,30 +758,41 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 						void this.plugin.saveSettings().then(() => this.display());
 					})
 				);
-			if (this.plugin.settings.workflowPresets.length === 0) {
-				workflowList.createEl("p", { text: `No workflows yet. Save one from Spotlight with ${mod}+S, or load the starter workflows.` });
-			} else {
-				for (const workflow of this.plugin.settings.workflowPresets) {
-					const row = workflowList.createDiv({ cls: "vault-spotlight-starred-row" });
-					row.createSpan({
-						text: `${workflow.pinned ? "★ " : ""}${workflow.name}: ${workflow.mode}${workflow.query ? ` · ${workflow.query}` : ""}${workflow.rankingMode ? ` · ${workflow.rankingMode}` : ""}`,
-					});
-					const pinBtn = row.createEl("button", { text: workflow.pinned ? "Unpin" : "Pin" });
-					pinBtn.setAttribute("aria-label", `${workflow.pinned ? "Unpin" : "Pin"} workflow ${workflow.name}`);
-					pinBtn.addEventListener("click", () => {
-						this.plugin.settings.workflowPresets = this.plugin.settings.workflowPresets.map((entry) =>
-							entry.id === workflow.id ? { ...entry, pinned: !entry.pinned } : entry
-						);
-						void this.plugin.saveSettings().then(() => this.display());
-					});
-					const remove = row.createEl("button", { text: workflow.starter ? "Hide" : "Remove" });
-					remove.setAttribute("aria-label", `${workflow.starter ? "Hide" : "Remove"} workflow ${workflow.name}`);
-					remove.addEventListener("click", () => {
-						this.plugin.settings.workflowPresets = this.plugin.settings.workflowPresets.filter((entry) => entry.id !== workflow.id);
-						void this.plugin.saveSettings().then(() => this.display());
-					});
-				}
+		}
+		if (this.plugin.settings.workflowPresets.length === 0) {
+			workflowList.createEl("p", {
+				text: isProUser
+					? `No workflows yet. Save one from Spotlight with ${mod}+S, or load the starter workflows.`
+					: `No workflows yet. Save up to ${FREE_WORKFLOW_LIMIT} from Spotlight — press ${mod}+S on any search to keep it.`,
+			});
+		} else {
+			for (const workflow of this.plugin.settings.workflowPresets) {
+				const row = workflowList.createDiv({ cls: "vault-spotlight-starred-row" });
+				row.createSpan({
+					text: `${workflow.pinned ? "★ " : ""}${workflow.name}: ${workflow.mode}${workflow.query ? ` · ${workflow.query}` : ""}${workflow.rankingMode ? ` · ${workflow.rankingMode}` : ""}`,
+				});
+				const pinBtn = row.createEl("button", { text: workflow.pinned ? "Unpin" : "Pin" });
+				pinBtn.setAttribute("aria-label", `${workflow.pinned ? "Unpin" : "Pin"} workflow ${workflow.name}`);
+				pinBtn.addEventListener("click", () => {
+					this.plugin.settings.workflowPresets = this.plugin.settings.workflowPresets.map((entry) =>
+						entry.id === workflow.id ? { ...entry, pinned: !entry.pinned } : entry
+					);
+					void this.plugin.saveSettings().then(() => this.display());
+				});
+				const remove = row.createEl("button", { text: workflow.starter ? "Hide" : "Remove" });
+				remove.setAttribute("aria-label", `${workflow.starter ? "Hide" : "Remove"} workflow ${workflow.name}`);
+				remove.addEventListener("click", () => {
+					this.plugin.settings.workflowPresets = this.plugin.settings.workflowPresets.filter((entry) => entry.id !== workflow.id);
+					void this.plugin.saveSettings().then(() => this.display());
+				});
 			}
+		}
+		// Free-tier allowance + upgrade path once at least one workflow exists.
+		if (!isProUser && this.plugin.settings.workflowPresets.length > 0) {
+			const usage = new Setting(workflowList).setName(
+				`${Math.min(this.plugin.settings.workflowPresets.length, FREE_WORKFLOW_LIMIT)} of ${FREE_WORKFLOW_LIMIT} free workflows used`
+			);
+			this.appendUpgrade(usage);
 		}
 
 		this.proHeading("Search profiles");
