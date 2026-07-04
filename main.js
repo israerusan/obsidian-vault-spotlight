@@ -3094,8 +3094,11 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
             this.plugin.settings.snippets = this.plugin.settings.snippets.filter((s) => s.id !== removed.id);
             const notice = new import_obsidian.Notice("", 6e3);
             notice.noticeEl.createSpan({ text: `Removed "${removed.name}". ` });
-            const undo = notice.noticeEl.createEl("a", { text: "Undo" });
-            undo.style.cursor = "pointer";
+            const undo = notice.noticeEl.createEl("button", {
+              cls: "vault-spotlight-undo",
+              text: "Undo",
+              attr: { type: "button" }
+            });
             undo.addEventListener("click", () => {
               this.plugin.settings.snippets = [...this.plugin.settings.snippets, removed].slice(0, MAX_SNIPPETS);
               void this.plugin.saveSettings().then(() => this.display());
@@ -4997,7 +5000,11 @@ function renderResultRow(row, item, options) {
     (0, import_obsidian7.setIcon)(iconWrap, "clipboard-type");
     renderHighlightedText(title, item.name, item.matchIndices);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Snippet" });
-    body.createDiv({ cls: "vault-spotlight-item-snippet", text: item.body.replace(/\s+/g, " ").slice(0, 120) });
+    const snippetPreview = item.body.replace(/\s+/g, " ").trim();
+    body.createDiv({
+      cls: "vault-spotlight-item-snippet",
+      text: snippetPreview.length > 120 ? `${snippetPreview.slice(0, 120)}\u2026` : snippetPreview
+    });
   } else {
     row.addClass("is-emphasis");
     (0, import_obsidian7.setIcon)(iconWrap, "file-plus");
@@ -5582,7 +5589,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       this.hintEl.createEl("code", { text: `${mod}+D` });
       this.hintEl.appendText(" star");
     }
-    if (this.plugin.settings.workflowPresets.length === 0) {
+    if (isPro && this.plugin.settings.workflowPresets.length === 0) {
       this.hintEl.appendText(" \xB7 starter workflows in Browse");
     }
   }
@@ -6318,6 +6325,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     }
   }
   renderEmptyState(icon, title, desc) {
+    var _a;
     if (this.loadingTimer !== null) {
       window.clearTimeout(this.loadingTimer);
       this.loadingTimer = null;
@@ -6331,6 +6339,8 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     iconWrap.setAttr("aria-hidden", "true");
     empty.createDiv({ cls: "vault-spotlight-empty-title", text: title });
     empty.createDiv({ cls: "vault-spotlight-empty-desc", text: desc });
+    (_a = this.inputEl) == null ? void 0 : _a.removeAttribute("aria-activedescendant");
+    this.updatePreview();
   }
   renderResults() {
     if (this.loadingTimer !== null) {

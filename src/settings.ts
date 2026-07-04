@@ -654,8 +654,14 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 						// Offer a quick undo so a mis-click isn't silently destructive.
 						const notice = new Notice("", 6000);
 						notice.noticeEl.createSpan({ text: `Removed "${removed.name}". ` });
-						const undo = notice.noticeEl.createEl("a", { text: "Undo" });
-						undo.style.cursor = "pointer";
+						// A real button so the undo is keyboard-focusable and
+						// Enter/Space-activatable, not a mouse-only <a> — undoing a
+						// destructive delete must not require a pointer.
+						const undo = notice.noticeEl.createEl("button", {
+							cls: "vault-spotlight-undo",
+							text: "Undo",
+							attr: { type: "button" },
+						});
 						undo.addEventListener("click", () => {
 							this.plugin.settings.snippets = [...this.plugin.settings.snippets, removed].slice(0, MAX_SNIPPETS);
 							void this.plugin.saveSettings().then(() => this.display());

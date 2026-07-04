@@ -358,7 +358,9 @@ export class SpotlightModal extends Modal {
 			this.hintEl.createEl("code", { text: `${mod}+D` });
 			this.hintEl.appendText(" star");
 		}
-		if (this.plugin.settings.workflowPresets.length === 0) {
+		// Workflows are only surfaced in Browse for Pro, so this pointer would send
+		// free users to a feature they can't see — gate it on the same flag.
+		if (isPro && this.plugin.settings.workflowPresets.length === 0) {
 			this.hintEl.appendText(" · starter workflows in Browse");
 		}
 	}
@@ -1213,6 +1215,15 @@ export class SpotlightModal extends Modal {
 		iconWrap.setAttr("aria-hidden", "true");
 		empty.createDiv({ cls: "vault-spotlight-empty-title", text: title });
 		empty.createDiv({ cls: "vault-spotlight-empty-desc", text: desc });
+		// No row is selected in an empty state, so the combobox must not keep
+		// pointing at a now-removed option (a screen reader would reference a
+		// nonexistent descendant). The many direct callers of renderEmptyState
+		// (Pro gate, symbols/editors/folders/links/snippets, search-failed) never
+		// reach the clearing logic in renderResults, so clear it here.
+		this.inputEl?.removeAttribute("aria-activedescendant");
+		// Keep a mounted preview pane in step with the empty list rather than
+		// leaving the previously-selected note rendered beside "No matches".
+		this.updatePreview();
 	}
 
 	private renderResults(): void {

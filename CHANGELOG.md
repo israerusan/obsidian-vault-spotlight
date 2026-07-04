@@ -3,6 +3,25 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.7.1] - 2026-07-04
+
+### Fixed
+- Empty states (Pro gate, symbols/editors/folders/links/snippets, and the
+  search-failed message) no longer leave the search box's
+  `aria-activedescendant` pointing at a removed row, and a mounted preview pane
+  now clears alongside the list instead of showing a stale note beside
+  "No matches".
+- The snippet-removed toast's **Undo** is now a real button — keyboard-focusable
+  and activatable with Enter/Space — instead of a mouse-only link.
+- The "starter workflows in Browse" hint is no longer shown to Free users, who
+  can't surface workflows in Browse.
+- Long snippet previews now end with an ellipsis instead of a hard mid-word cut.
+
+### Changed
+- Design-system tidy-up: every font size in the launcher now references the
+  shared type ramp (no ad-hoc pixel values), a checked-and-selected row keeps
+  its accent selection wash, and an unused style rule was removed.
+
 ## [2.7.0] - 2026-07-04
 
 ### Changed
@@ -91,6 +110,8 @@ All notable changes to Vault Spotlight are documented here. This project follows
 ### Fixed
 - Search robustness, batch-op safety, and modal polish.
 
+[2.7.1]: https://github.com/israerusan/obsidian-vault-spotlight/releases/tag/2.7.1
+[2.7.0]: https://github.com/israerusan/obsidian-vault-spotlight/releases/tag/2.7.0
 [2.6.4]: https://github.com/israerusan/obsidian-vault-spotlight/releases/tag/2.6.4
 [2.6.3]: https://github.com/israerusan/obsidian-vault-spotlight/releases/tag/2.6.3
 [2.6.2]: https://github.com/israerusan/obsidian-vault-spotlight/releases/tag/2.6.2

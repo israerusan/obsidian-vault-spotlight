@@ -163,7 +163,11 @@ export function renderResultRow(
 		setIcon(iconWrap, "clipboard-type");
 		renderHighlightedText(title, item.name, item.matchIndices);
 		titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Snippet" });
-		body.createDiv({ cls: "vault-spotlight-item-snippet", text: item.body.replace(/\s+/g, " ").slice(0, 120) });
+		const snippetPreview = item.body.replace(/\s+/g, " ").trim();
+		body.createDiv({
+			cls: "vault-spotlight-item-snippet",
+			text: snippetPreview.length > 120 ? `${snippetPreview.slice(0, 120)}…` : snippetPreview,
+		});
 	} else {
 		row.addClass("is-emphasis");
 		setIcon(iconWrap, "file-plus");
