@@ -30,9 +30,15 @@ import { evaluateExpression, parseCurrencyRates } from "../core/calculator.mjs";
 import { parseNaturalDate } from "../core/naturalDates.mjs";
 import { insertCapture } from "../core/capture.mjs";
 import { expandSnippet } from "../core/snippets.mjs";
-import { describeCaptureTarget, getShortcutHints } from "../core/modalCopy.mjs";
 import {
-	MODE_ORDER,
+	describeCaptureTarget,
+	cycleMode as cycleModeHelper,
+	getDrillPrefixMatch,
+	getModifierLabel,
+	getPreviewFocusText,
+	getShortcutHints,
+} from "../core/modalCopy.mjs";
+import {
 	itemFile,
 	type PaneTarget,
 	type ResultItem,
@@ -63,8 +69,10 @@ export class SpotlightModal extends Modal {
 	private checkedPaths = new Set<string>();
 	private searchTimer: number | null = null;
 	private loadingTimer: number | null = null;
+	private drillPrefixTimer: number | null = null;
 	private searchGeneration = 0;
 	private isLoading = false;
+
 	private fileSearcher: FileSearcher;
 	private headingSearcher: HeadingSearcher;
 	private commandSearcher: CommandSearcher;
@@ -72,12 +80,13 @@ export class SpotlightModal extends Modal {
 	private editorSearcher: EditorSearcher;
 	private initialQuery: string;
 	private mode: SpotlightMode;
+
 	private metadataRef: EventRef | null = null;
 	private actionContext: ResultItem | null = null;
 	private actionReturnQuery = "";
 	private actionReturnMode: SpotlightMode = "files";
 	private resultSnapshot: ResultItem[] = [];
-	// Drill-in: arrow onto a result, then type the symbols/links trigger to
+
 	// explore that file without opening it. Escape restores the outer search.
 	private drillFile: TFile | null = null;
 	private drillReturnQuery = "";
@@ -169,26 +178,41 @@ export class SpotlightModal extends Modal {
 		}
 
 		this.inputEl.addEventListener("input", () => {
+			const item = this.items[this.selectedIndex];
+			const file = item ? itemFile(item) : null;
+			const drill = getDrillPrefixMatch(this.inputEl.value, this.plugin.settings.modePrefixes);
+			if (this.drillPrefixTimer !== null) {
+				window.clearTimeout(this.drillPrefixTimer);
+				this.drillPrefixTimer = null;
+			}
+			if (this.hasNavigated && drill.mode && file?.extension === "md") {
+				this.inputEl.value = "";
+				this.drillInto(file, drill.mode);
+				return;
+			}
+			if (this.hasNavigated && drill.pending) {
+				this.drillPrefixTimer = window.setTimeout(() => {
+					this.drillPrefixTimer = null;
+					this.hasNavigated = false;
+					this.scheduleSearch();
+				}, 260);
+				return;
+			}
 			this.hasNavigated = false;
 			this.activeWorkflowId = "";
 			this.scheduleSearch();
 		});
 
-		// Drill-in: after arrowing onto a result, the symbols/links trigger key
-		// explores that result (QS++-style) instead of typing into the query.
+		// Drill-in: after arrowing onto a result, typing the symbols/links trigger
+		// Drill-in: after arrowing onto a result, typing the symbols/links trigger
+		// (including multi-character custom prefixes) explores that result
+		// instead of opening or editing it.
 		this.inputEl.addEventListener("keydown", (evt) => {
 			if (!this.hasNavigated || evt.ctrlKey || evt.metaKey || evt.altKey) return;
-			const prefixes = this.plugin.settings.modePrefixes;
-			// Compare against the first character: prefixes may be up to 4 chars
-			// (e.g. "$$") but a keydown only ever delivers one.
-			const drillMode =
-				evt.key === prefixes.symbols[0] ? "symbols" : evt.key === prefixes.links[0] ? "links" : null;
-			if (!drillMode) return;
+			if (evt.key === "Enter" || evt.key === "Tab") return;
 			const item = this.items[this.selectedIndex];
 			const file = item ? itemFile(item) : null;
 			if (!file || file.extension !== "md") return;
-			evt.preventDefault();
-			this.drillInto(file, drillMode);
 		});
 
 		this.registerScopeShortcuts();
@@ -247,6 +271,7 @@ export class SpotlightModal extends Modal {
 	private updateHint(): void {
 		const isPro = this.plugin.settings.isPro;
 		const prefixes = this.plugin.settings.modePrefixes;
+		const mod = getModifierLabel(this.containerEl.ownerDocument?.defaultView?.navigator?.platform ?? window.navigator.platform);
 		this.hintEl.empty();
 		const hints: Array<[string, string]> = [
 			["2+2", "calc"],
@@ -256,13 +281,16 @@ export class SpotlightModal extends Modal {
 			[prefixes.symbols, "outline"],
 			[prefixes.editors, "tabs"],
 			[prefixes.folders, "folders"],
-			[prefixes.content, "content"],
-			[prefixes.headings, "headings"],
-			[prefixes.links, "links"],
-			[prefixes.snippets, "snippets"],
-			["Tab", "cycle"],
-			[this.plugin.settings.escapeChar, "literal"],
 		];
+		if (isPro) {
+			hints.push(
+				[prefixes.content, "content"],
+				[prefixes.headings, "headings"],
+				[prefixes.links, "links"],
+				[prefixes.snippets, "snippets"]
+			);
+		}
+		hints.push(["Tab", "next mode"], ["Shift+Tab", "previous mode"], [this.plugin.settings.escapeChar, "literal"]);
 		hints.forEach(([code, label], index) => {
 			if (index > 0) this.hintEl.appendText(" · ");
 			this.hintEl.createEl("code", { text: code });
@@ -270,7 +298,7 @@ export class SpotlightModal extends Modal {
 		});
 		if (isPro) {
 			this.hintEl.appendText(" · ");
-			this.hintEl.createEl("code", { text: "Ctrl+D" });
+			this.hintEl.createEl("code", { text: `${mod}+D` });
 			this.hintEl.appendText(" star");
 		}
 		if (this.plugin.settings.workflowPresets.length === 0) {
@@ -1315,9 +1343,11 @@ export class SpotlightModal extends Modal {
 		}
 	}
 
-	private cycleMode(): void {
-		const idx = MODE_ORDER.indexOf(this.mode);
-		this.mode = MODE_ORDER[(idx + 1) % MODE_ORDER.length];
+	private cycleMode(direction: 1 | -1 = 1): void {
+		this.mode = cycleModeHelper(this.mode, {
+			isPro: this.plugin.settings.isPro,
+			direction,
+		});
 		// Drop a leading mode prefix so the toggled mode isn't overridden by it.
 		const detected = detectModeFromPrefix(
 			this.inputEl.value,
@@ -1993,7 +2023,10 @@ export class SpotlightModal extends Modal {
 	private updatePreview(): void {
 		if (!this.preview.isMounted) return;
 		const item = this.items[this.selectedIndex];
-		this.preview.update(item ? itemFile(item) : null, this.previewHighlightTerms(item));
+		this.preview.update(item ? itemFile(item) : null, {
+			terms: this.previewHighlightTerms(item),
+			focusText: getPreviewFocusText(item),
+		});
 	}
 
 	/** Terms to highlight in the preview for the current selection. */
@@ -2065,7 +2098,12 @@ export class SpotlightModal extends Modal {
 		});
 		this.scope.register([], "Tab", (evt) => {
 			evt.preventDefault();
-			this.cycleMode();
+			this.cycleMode(1);
+			return false;
+		});
+		this.scope.register(["Shift"], "Tab", (evt) => {
+			evt.preventDefault();
+			this.cycleMode(-1);
 			return false;
 		});
 

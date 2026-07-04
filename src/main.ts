@@ -72,7 +72,7 @@ export default class VaultSpotlightPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "run-action",
-			name: "Run action",
+			name: "Search commands",
 			callback: () => this.openSpotlight("", "commands"),
 		});
 		this.addCommand({

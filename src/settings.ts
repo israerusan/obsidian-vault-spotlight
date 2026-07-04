@@ -10,6 +10,7 @@ import {
 	normalizeEscapeChar,
 	normalizeModePrefixes,
 } from "./core/modeTriggers.mjs";
+import { getModifierLabel } from "./core/modalCopy.mjs";
 
 /** Returns `url` if it is a well-formed http(s) URL, otherwise `fallback`. */
 export function safeHttpUrl(url: string, fallback: string): string {
@@ -172,6 +173,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 
 	display(): void {
 		const { containerEl } = this;
+		const mod = getModifierLabel(containerEl.ownerDocument?.defaultView?.navigator?.platform ?? window.navigator.platform);
 		containerEl.empty();
 
 		new Setting(containerEl)
@@ -363,7 +365,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Open in new tab by default")
-			.setDesc("Enter opens results in a new tab. Ctrl+Enter then opens in the current tab instead.")
+			.setDesc(`Enter opens results in a new tab. ${mod}+Enter then opens in the current tab instead.`)
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.defaultNewTab).onChange((value) => {
 					this.plugin.settings.defaultNewTab = value;
@@ -587,9 +589,9 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName("Starred files (Pro)").setHeading();
 		const starredList = containerEl.createDiv();
 		if (!this.plugin.settings.isPro) {
-			starredList.createEl("p", { text: "Pin important files with Ctrl+D in the spotlight." });
+			starredList.createEl("p", { text: `Pin important files with ${mod}+D in the spotlight.` });
 		} else if (this.plugin.settings.starredPaths.length === 0) {
-			starredList.createEl("p", { text: "No starred files yet. Select a result and press Ctrl+D." });
+			starredList.createEl("p", { text: `No starred files yet. Select a result and press ${mod}+D.` });
 		} else {
 			for (const path of this.plugin.settings.starredPaths) {
 				const row = starredList.createDiv({ cls: "vault-spotlight-starred-row" });
@@ -630,7 +632,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 					})
 				);
 			if (this.plugin.settings.workflowPresets.length === 0) {
-				workflowList.createEl("p", { text: "No workflows yet. Save one from Spotlight with Ctrl+S, or load the starter workflows." });
+				workflowList.createEl("p", { text: `No workflows yet. Save one from Spotlight with ${mod}+S, or load the starter workflows.` });
 			} else {
 				for (const workflow of this.plugin.settings.workflowPresets) {
 					const row = workflowList.createDiv({ cls: "vault-spotlight-starred-row" });
@@ -697,7 +699,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 		if (!this.plugin.settings.isPro) {
 			customList.createEl("p", { text: "Unlock Pro to save custom search commands." });
 		} else if (this.plugin.settings.customSearches.length === 0) {
-			customList.createEl("p", { text: "No custom searches yet. Create one from the spotlight with Ctrl+S." });
+			customList.createEl("p", { text: `No custom searches yet. Create one from the spotlight with ${mod}+S.` });
 		} else {
 			for (const search of this.plugin.settings.customSearches) {
 				const row = customList.createDiv({ cls: "vault-spotlight-starred-row" });

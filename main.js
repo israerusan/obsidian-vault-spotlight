@@ -2551,6 +2551,137 @@ function previousFilePath(recentPaths, activePath) {
   return null;
 }
 
+// src/core/modalCopy.mjs
+var PRO_ONLY_MODE_SET = /* @__PURE__ */ new Set(["content", "headings", "links", "snippets"]);
+var MODE_ORDER = ["files", "content", "headings", "symbols", "commands", "links", "editors", "folders", "capture", "snippets"];
+function normalizeHeading(heading) {
+  return String(heading != null ? heading : "").replace(/^#+\s*/, "").trim();
+}
+function unique(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+function getModifierLabel(platform = "") {
+  return /mac|iphone|ipad|ipod/i.test(String(platform)) ? "Cmd" : "Ctrl";
+}
+function describeCaptureTarget({ hasText, targetLabel, mode = "append", heading = "" }) {
+  if (!hasText) return "Type a note, then press Enter to capture";
+  const cleanHeading = normalizeHeading(heading);
+  if (cleanHeading) return `Capture under ${cleanHeading} in ${targetLabel}`;
+  return `${mode === "prepend" ? "Prepend to" : "Append to"} ${targetLabel}`;
+}
+function getAvailableModeOrder({ isPro = false } = {}) {
+  return MODE_ORDER.filter((mode) => isPro || !PRO_ONLY_MODE_SET.has(mode));
+}
+function cycleMode(currentMode, { isPro = false, direction = 1 } = {}) {
+  const available = getAvailableModeOrder({ isPro });
+  if (available.length === 0) return currentMode;
+  const startIndex = available.indexOf(currentMode);
+  const index = startIndex === -1 ? 0 : startIndex;
+  const step = direction >= 0 ? 1 : -1;
+  return available[(index + step + available.length) % available.length];
+}
+function getDrillPrefixMatch(rawQuery, prefixes) {
+  const query = String(rawQuery != null ? rawQuery : "");
+  if (!query) return { mode: null, pending: false };
+  const candidates = unique([prefixes == null ? void 0 : prefixes.symbols, prefixes == null ? void 0 : prefixes.links]);
+  for (const prefix of candidates) {
+    if (query === prefix) {
+      return {
+        mode: prefix === (prefixes == null ? void 0 : prefixes.symbols) ? "symbols" : prefix === (prefixes == null ? void 0 : prefixes.links) ? "links" : null,
+        pending: false
+      };
+    }
+  }
+  const pending = candidates.some((prefix) => typeof prefix === "string" && prefix.startsWith(query));
+  return { mode: null, pending };
+}
+function getPreviewFocusText(item) {
+  var _a, _b, _c;
+  if (!item) return "";
+  if (item.kind === "content") return String((_a = item.snippet) != null ? _a : "");
+  if (item.kind === "heading") return String((_b = item.heading) != null ? _b : "");
+  if (item.kind === "symbol") return String((_c = item.text) != null ? _c : "");
+  return "";
+}
+function getShortcutHints({ itemKind = null, defaultNewTab = false, isPro = false, modifierLabel = "Ctrl" }) {
+  const hints = [
+    { keys: ["\u2191", "\u2193"], label: "navigate" },
+    { keys: ["Tab"], label: "next mode" },
+    { keys: ["Shift", "Tab"], label: "previous mode" }
+  ];
+  const openTarget = defaultNewTab ? "same tab" : "new tab";
+  const openLikeKinds = /* @__PURE__ */ new Set(["file", "content", "heading", "symbol", "editor"]);
+  const actionPaletteKinds = /* @__PURE__ */ new Set([
+    "file",
+    "content",
+    "heading",
+    "symbol",
+    "editor",
+    "folder",
+    "command",
+    "collection",
+    "profile",
+    "workflow",
+    "calc",
+    "datejump",
+    "capture",
+    "snippet",
+    "create"
+  ]);
+  if (openLikeKinds.has(itemKind)) {
+    hints.splice(
+      1,
+      0,
+      { keys: ["\u21B5"], label: "open" },
+      { keys: [modifierLabel, "\u21B5"], label: openTarget },
+      { keys: ["Shift", "\u21B5"], label: "new note" }
+    );
+  } else if (itemKind === "folder") {
+    hints.splice(1, 0, { keys: ["\u21B5"], label: "browse" });
+  } else if (itemKind === "history") {
+    hints.splice(1, 0, { keys: ["\u21B5"], label: "search again" });
+  } else if (itemKind === "collection" || itemKind === "profile" || itemKind === "workflow") {
+    hints.splice(1, 0, { keys: ["\u21B5"], label: "apply" });
+  } else if (itemKind === "action" || itemKind === "command") {
+    hints.splice(1, 0, { keys: ["\u21B5"], label: "run" });
+  } else if (itemKind === "calc") {
+    hints.splice(
+      1,
+      0,
+      { keys: ["\u21B5"], label: "copy" },
+      { keys: ["Shift", "\u21B5"], label: "insert" }
+    );
+  } else if (itemKind === "datejump") {
+    hints.splice(1, 0, { keys: ["\u21B5"], label: "open daily note" });
+  } else if (itemKind === "capture") {
+    hints.splice(1, 0, { keys: ["\u21B5"], label: "capture" });
+  } else if (itemKind === "snippet") {
+    hints.splice(1, 0, { keys: ["\u21B5"], label: "insert" });
+  } else if (itemKind === "create") {
+    hints.splice(1, 0, { keys: ["\u21B5"], label: "create note" });
+  } else {
+    hints.splice(
+      1,
+      0,
+      { keys: ["\u21B5"], label: "open" },
+      { keys: [modifierLabel, "\u21B5"], label: openTarget },
+      { keys: ["Shift", "\u21B5"], label: "new note" }
+    );
+  }
+  if (itemKind && actionPaletteKinds.has(itemKind) && itemKind !== "history" && itemKind !== "action" && itemKind !== "create") {
+    hints.splice(hints.length - 2, 0, { keys: [modifierLabel, "K"], label: "actions" });
+  }
+  if (isPro && itemKind === "file") {
+    hints.splice(
+      hints.length - 2,
+      0,
+      { keys: [modifierLabel, "D"], label: "star" },
+      { keys: [modifierLabel, "Space"], label: "select" }
+    );
+  }
+  return hints;
+}
+
 // src/settings.ts
 function safeHttpUrl(url, fallback) {
   try {
@@ -2607,7 +2738,9 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
     this.plugin = plugin;
   }
   display() {
+    var _a, _b, _c, _d;
     const { containerEl } = this;
+    const mod = getModifierLabel((_d = (_c = (_b = (_a = containerEl.ownerDocument) == null ? void 0 : _a.defaultView) == null ? void 0 : _b.navigator) == null ? void 0 : _c.platform) != null ? _d : window.navigator.platform);
     containerEl.empty();
     new import_obsidian.Setting(containerEl).setName("License key").setDesc("Enter your Pro license key. Verified offline \u2014 no account or server required.").addText(
       (text) => text.setPlaceholder("payload.signature").setValue(this.plugin.settings.licenseKey).onChange((value) => {
@@ -2717,7 +2850,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
       })
     );
     new import_obsidian.Setting(containerEl).setName("Opening & mode triggers").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Open in new tab by default").setDesc("Enter opens results in a new tab. Ctrl+Enter then opens in the current tab instead.").addToggle(
+    new import_obsidian.Setting(containerEl).setName("Open in new tab by default").setDesc(`Enter opens results in a new tab. ${mod}+Enter then opens in the current tab instead.`).addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.defaultNewTab).onChange((value) => {
         this.plugin.settings.defaultNewTab = value;
         void this.plugin.saveSettings();
@@ -2901,9 +3034,9 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
     new import_obsidian.Setting(containerEl).setName("Starred files (Pro)").setHeading();
     const starredList = containerEl.createDiv();
     if (!this.plugin.settings.isPro) {
-      starredList.createEl("p", { text: "Pin important files with Ctrl+D in the spotlight." });
+      starredList.createEl("p", { text: `Pin important files with ${mod}+D in the spotlight.` });
     } else if (this.plugin.settings.starredPaths.length === 0) {
-      starredList.createEl("p", { text: "No starred files yet. Select a result and press Ctrl+D." });
+      starredList.createEl("p", { text: `No starred files yet. Select a result and press ${mod}+D.` });
     } else {
       for (const path of this.plugin.settings.starredPaths) {
         const row = starredList.createDiv({ cls: "vault-spotlight-starred-row" });
@@ -2936,7 +3069,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
         })
       );
       if (this.plugin.settings.workflowPresets.length === 0) {
-        workflowList.createEl("p", { text: "No workflows yet. Save one from Spotlight with Ctrl+S, or load the starter workflows." });
+        workflowList.createEl("p", { text: `No workflows yet. Save one from Spotlight with ${mod}+S, or load the starter workflows.` });
       } else {
         for (const workflow of this.plugin.settings.workflowPresets) {
           const row = workflowList.createDiv({ cls: "vault-spotlight-starred-row" });
@@ -2997,7 +3130,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
     if (!this.plugin.settings.isPro) {
       customList.createEl("p", { text: "Unlock Pro to save custom search commands." });
     } else if (this.plugin.settings.customSearches.length === 0) {
-      customList.createEl("p", { text: "No custom searches yet. Create one from the spotlight with Ctrl+S." });
+      customList.createEl("p", { text: `No custom searches yet. Create one from the spotlight with ${mod}+S.` });
     } else {
       for (const search of this.plugin.settings.customSearches) {
         const row = customList.createDiv({ cls: "vault-spotlight-starred-row" });
@@ -4410,96 +4543,8 @@ function insertCapture(existing, text, options = {}) {
   return options.mode === "prepend" ? prependToTop(base, line) : appendToEnd(base, line);
 }
 
-// src/core/modalCopy.mjs
-function normalizeHeading(heading) {
-  return String(heading != null ? heading : "").replace(/^#+\s*/, "").trim();
-}
-function describeCaptureTarget({ hasText, targetLabel, mode = "append", heading = "" }) {
-  if (!hasText) return "Type a note, then press Enter to capture";
-  const cleanHeading = normalizeHeading(heading);
-  if (cleanHeading) return `Capture under ${cleanHeading} in ${targetLabel}`;
-  return `${mode === "prepend" ? "Prepend to" : "Append to"} ${targetLabel}`;
-}
-function getShortcutHints({ itemKind = null, defaultNewTab = false, isPro = false }) {
-  const hints = [
-    { keys: ["\u2191", "\u2193"], label: "navigate" },
-    { keys: ["Tab"], label: "mode" }
-  ];
-  const openTarget = defaultNewTab ? "same tab" : "new tab";
-  const openLikeKinds = /* @__PURE__ */ new Set(["file", "content", "heading", "symbol", "editor"]);
-  const actionPaletteKinds = /* @__PURE__ */ new Set([
-    "file",
-    "content",
-    "heading",
-    "symbol",
-    "editor",
-    "folder",
-    "command",
-    "collection",
-    "profile",
-    "workflow",
-    "calc",
-    "datejump",
-    "capture",
-    "snippet",
-    "create"
-  ]);
-  if (openLikeKinds.has(itemKind)) {
-    hints.splice(
-      1,
-      0,
-      { keys: ["\u21B5"], label: "open" },
-      { keys: ["Ctrl", "\u21B5"], label: openTarget },
-      { keys: ["Shift", "\u21B5"], label: "new note" }
-    );
-  } else if (itemKind === "folder") {
-    hints.splice(1, 0, { keys: ["\u21B5"], label: "browse" });
-  } else if (itemKind === "history") {
-    hints.splice(1, 0, { keys: ["\u21B5"], label: "search again" });
-  } else if (itemKind === "collection" || itemKind === "profile" || itemKind === "workflow") {
-    hints.splice(1, 0, { keys: ["\u21B5"], label: "apply" });
-  } else if (itemKind === "action" || itemKind === "command") {
-    hints.splice(1, 0, { keys: ["\u21B5"], label: "run" });
-  } else if (itemKind === "calc") {
-    hints.splice(
-      1,
-      0,
-      { keys: ["\u21B5"], label: "copy" },
-      { keys: ["Shift", "\u21B5"], label: "insert" }
-    );
-  } else if (itemKind === "datejump") {
-    hints.splice(1, 0, { keys: ["\u21B5"], label: "open daily note" });
-  } else if (itemKind === "capture") {
-    hints.splice(1, 0, { keys: ["\u21B5"], label: "capture" });
-  } else if (itemKind === "snippet") {
-    hints.splice(1, 0, { keys: ["\u21B5"], label: "insert" });
-  } else if (itemKind === "create") {
-    hints.splice(1, 0, { keys: ["\u21B5"], label: "create note" });
-  } else {
-    hints.splice(
-      1,
-      0,
-      { keys: ["\u21B5"], label: "open" },
-      { keys: ["Ctrl", "\u21B5"], label: openTarget },
-      { keys: ["Shift", "\u21B5"], label: "new note" }
-    );
-  }
-  if (itemKind && actionPaletteKinds.has(itemKind) && itemKind !== "history" && itemKind !== "action" && itemKind !== "create") {
-    hints.splice(hints.length - 1, 0, { keys: ["Ctrl", "K"], label: "actions" });
-  }
-  if (isPro && itemKind === "file") {
-    hints.splice(
-      hints.length - 1,
-      0,
-      { keys: ["Ctrl", "D"], label: "star" },
-      { keys: ["Ctrl", "Space"], label: "select" }
-    );
-  }
-  return hints;
-}
-
 // src/spotlight/resultTypes.ts
-var MODE_ORDER = [
+var MODE_ORDER2 = [
   "files",
   "content",
   "headings",
@@ -4524,6 +4569,45 @@ function capitalize(text) {
 
 // src/spotlight/PreviewPane.ts
 var import_obsidian6 = require("obsidian");
+
+// src/core/previewWindow.mjs
+function lineStart(text, index) {
+  if (index <= 0) return 0;
+  const at = text.lastIndexOf("\n", index - 1);
+  return at === -1 ? 0 : at + 1;
+}
+function lineEnd(text, index) {
+  const at = text.indexOf("\n", index);
+  return at === -1 ? text.length : at;
+}
+function firstNeedleIndex(haystack, needles) {
+  const lower = haystack.toLowerCase();
+  let best = -1;
+  for (const needle of needles) {
+    const clean = String(needle != null ? needle : "").trim().toLowerCase();
+    if (!clean) continue;
+    const at = lower.indexOf(clean);
+    if (at !== -1 && (best === -1 || at < best)) best = at;
+  }
+  return best;
+}
+function buildPreviewExcerpt(content, { focusText = "", terms = [], maxChars = 1e4, contextChars = 2500 } = {}) {
+  const text = String(content != null ? content : "");
+  if (text.length <= maxChars) return text;
+  const focusNeedles = [focusText, ...terms];
+  const hit = firstNeedleIndex(text, focusNeedles);
+  if (hit === -1) return text.slice(0, maxChars);
+  let start = Math.max(0, hit - contextChars);
+  let end = Math.min(text.length, start + maxChars);
+  if (end === text.length) start = Math.max(0, end - maxChars);
+  start = lineStart(text, start);
+  end = lineEnd(text, end);
+  const prefix = start > 0 ? "\u2026\n" : "";
+  const suffix = end < text.length ? "\n\u2026" : "";
+  return `${prefix}${text.slice(start, end).trimStart()}${suffix}`;
+}
+
+// src/spotlight/PreviewPane.ts
 var PreviewPane = class {
   constructor(app) {
     this.app = app;
@@ -4542,13 +4626,15 @@ var PreviewPane = class {
   get isMounted() {
     return this.el !== null && this.component !== null;
   }
-  /** Debounced: render `file` (markdown only) and highlight/scroll to `terms`. */
-  update(file, terms) {
+  /** Debounced: render `file` (markdown only) and highlight/scroll to the relevant passage. */
+  update(file, options = {}) {
     if (!this.el || !this.component) return;
     if (this.timer !== null) window.clearTimeout(this.timer);
     const previewEl = this.el;
     const component = this.component;
     const token = ++this.token;
+    const terms = Array.isArray(options.terms) ? options.terms : [];
+    const focusText = typeof options.focusText === "string" ? options.focusText : "";
     this.timer = window.setTimeout(() => {
       this.timer = null;
       previewEl.empty();
@@ -4567,10 +4653,11 @@ var PreviewPane = class {
       const bodyEl = previewEl.createDiv({ cls: "vault-spotlight-preview-body markdown-rendered" });
       void this.app.vault.cachedRead(file).then((content) => {
         if (this.token !== token || this.component !== component || !previewEl.isConnected) return;
-        return import_obsidian6.MarkdownRenderer.render(this.app, content.slice(0, 1e4), bodyEl, file.path, component);
+        const excerpt = buildPreviewExcerpt(content, { focusText, terms });
+        return import_obsidian6.MarkdownRenderer.render(this.app, excerpt, bodyEl, file.path, component);
       }).then(() => {
         if (this.token !== token || this.component !== component || !bodyEl.isConnected) return;
-        const hit = highlightFirstMatch(bodyEl, terms);
+        const hit = highlightFirstMatch(bodyEl, [focusText, ...terms]);
         hit == null ? void 0 : hit.scrollIntoView({ block: "center" });
       }).catch(() => {
         if (this.token !== token || !previewEl.isConnected) return;
@@ -5140,6 +5227,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     this.checkedPaths = /* @__PURE__ */ new Set();
     this.searchTimer = null;
     this.loadingTimer = null;
+    this.drillPrefixTimer = null;
     this.searchGeneration = 0;
     this.isLoading = false;
     this.metadataRef = null;
@@ -5147,7 +5235,6 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     this.actionReturnQuery = "";
     this.actionReturnMode = "files";
     this.resultSnapshot = [];
-    // Drill-in: arrow onto a result, then type the symbols/links trigger to
     // explore that file without opening it. Escape restores the outer search.
     this.drillFile = null;
     this.drillReturnQuery = "";
@@ -5222,20 +5309,36 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       link.setAttr("rel", "noopener noreferrer");
     }
     this.inputEl.addEventListener("input", () => {
+      const item = this.items[this.selectedIndex];
+      const file = item ? itemFile(item) : null;
+      const drill = getDrillPrefixMatch(this.inputEl.value, this.plugin.settings.modePrefixes);
+      if (this.drillPrefixTimer !== null) {
+        window.clearTimeout(this.drillPrefixTimer);
+        this.drillPrefixTimer = null;
+      }
+      if (this.hasNavigated && drill.mode && (file == null ? void 0 : file.extension) === "md") {
+        this.inputEl.value = "";
+        this.drillInto(file, drill.mode);
+        return;
+      }
+      if (this.hasNavigated && drill.pending) {
+        this.drillPrefixTimer = window.setTimeout(() => {
+          this.drillPrefixTimer = null;
+          this.hasNavigated = false;
+          this.scheduleSearch();
+        }, 260);
+        return;
+      }
       this.hasNavigated = false;
       this.activeWorkflowId = "";
       this.scheduleSearch();
     });
     this.inputEl.addEventListener("keydown", (evt) => {
       if (!this.hasNavigated || evt.ctrlKey || evt.metaKey || evt.altKey) return;
-      const prefixes = this.plugin.settings.modePrefixes;
-      const drillMode = evt.key === prefixes.symbols[0] ? "symbols" : evt.key === prefixes.links[0] ? "links" : null;
-      if (!drillMode) return;
+      if (evt.key === "Enter" || evt.key === "Tab") return;
       const item = this.items[this.selectedIndex];
       const file = item ? itemFile(item) : null;
       if (!file || file.extension !== "md") return;
-      evt.preventDefault();
-      this.drillInto(file, drillMode);
     });
     this.registerScopeShortcuts();
     this.metadataRef = this.app.metadataCache.on("resolved", () => {
@@ -5284,8 +5387,10 @@ var SpotlightModal = class extends import_obsidian9.Modal {
    * about comparable switcher plugins).
    */
   updateHint() {
+    var _a, _b, _c, _d;
     const isPro = this.plugin.settings.isPro;
     const prefixes = this.plugin.settings.modePrefixes;
+    const mod = getModifierLabel((_d = (_c = (_b = (_a = this.containerEl.ownerDocument) == null ? void 0 : _a.defaultView) == null ? void 0 : _b.navigator) == null ? void 0 : _c.platform) != null ? _d : window.navigator.platform);
     this.hintEl.empty();
     const hints = [
       ["2+2", "calc"],
@@ -5294,14 +5399,17 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       [prefixes.commands, "commands"],
       [prefixes.symbols, "outline"],
       [prefixes.editors, "tabs"],
-      [prefixes.folders, "folders"],
-      [prefixes.content, "content"],
-      [prefixes.headings, "headings"],
-      [prefixes.links, "links"],
-      [prefixes.snippets, "snippets"],
-      ["Tab", "cycle"],
-      [this.plugin.settings.escapeChar, "literal"]
+      [prefixes.folders, "folders"]
     ];
+    if (isPro) {
+      hints.push(
+        [prefixes.content, "content"],
+        [prefixes.headings, "headings"],
+        [prefixes.links, "links"],
+        [prefixes.snippets, "snippets"]
+      );
+    }
+    hints.push(["Tab", "next mode"], ["Shift+Tab", "previous mode"], [this.plugin.settings.escapeChar, "literal"]);
     hints.forEach(([code, label], index) => {
       if (index > 0) this.hintEl.appendText(" \xB7 ");
       this.hintEl.createEl("code", { text: code });
@@ -5309,7 +5417,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     });
     if (isPro) {
       this.hintEl.appendText(" \xB7 ");
-      this.hintEl.createEl("code", { text: "Ctrl+D" });
+      this.hintEl.createEl("code", { text: `${mod}+D` });
       this.hintEl.appendText(" star");
     }
     if (this.plugin.settings.workflowPresets.length === 0) {
@@ -6217,9 +6325,11 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       starBtn.setAttr("aria-label", item.isStarred ? "Unstar" : "Star");
     }
   }
-  cycleMode() {
-    const idx = MODE_ORDER.indexOf(this.mode);
-    this.mode = MODE_ORDER[(idx + 1) % MODE_ORDER.length];
+  cycleMode(direction = 1) {
+    this.mode = cycleMode(this.mode, {
+      isPro: this.plugin.settings.isPro,
+      direction
+    });
     const detected = detectModeFromPrefix(
       this.inputEl.value,
       this.plugin.settings.modePrefixes,
@@ -6802,7 +6912,10 @@ var SpotlightModal = class extends import_obsidian9.Modal {
   updatePreview() {
     if (!this.preview.isMounted) return;
     const item = this.items[this.selectedIndex];
-    this.preview.update(item ? itemFile(item) : null, this.previewHighlightTerms(item));
+    this.preview.update(item ? itemFile(item) : null, {
+      terms: this.previewHighlightTerms(item),
+      focusText: getPreviewFocusText(item)
+    });
   }
   /** Terms to highlight in the preview for the current selection. */
   previewHighlightTerms(item) {
@@ -6866,7 +6979,12 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     });
     this.scope.register([], "Tab", (evt) => {
       evt.preventDefault();
-      this.cycleMode();
+      this.cycleMode(1);
+      return false;
+    });
+    this.scope.register(["Shift"], "Tab", (evt) => {
+      evt.preventDefault();
+      this.cycleMode(-1);
       return false;
     });
     if (!this.plugin.settings.isPro) return;
@@ -7667,7 +7785,7 @@ var ContentSearcher = class {
 // src/main.ts
 var MAX_FRECENCY_ENTRIES = 500;
 function isSpotlightMode(value) {
-  return typeof value === "string" && MODE_ORDER.includes(value);
+  return typeof value === "string" && MODE_ORDER2.includes(value);
 }
 var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
   constructor() {
@@ -7703,7 +7821,7 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
     });
     this.addCommand({
       id: "run-action",
-      name: "Run action",
+      name: "Search commands",
       callback: () => this.openSpotlight("", "commands")
     });
     this.addCommand({

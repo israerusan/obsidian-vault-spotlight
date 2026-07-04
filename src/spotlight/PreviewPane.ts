@@ -1,4 +1,5 @@
 import { App, Component, MarkdownRenderer, TFile } from "obsidian";
+import { buildPreviewExcerpt } from "../core/previewWindow.mjs";
 
 /**
  * The Pro live-preview pane beside the results list: debounced rendering of
@@ -24,13 +25,15 @@ export class PreviewPane {
 		return this.el !== null && this.component !== null;
 	}
 
-	/** Debounced: render `file` (markdown only) and highlight/scroll to `terms`. */
-	update(file: TFile | null, terms: string[]): void {
+	/** Debounced: render `file` (markdown only) and highlight/scroll to the relevant passage. */
+	update(file: TFile | null, options: { terms?: string[]; focusText?: string } = {}): void {
 		if (!this.el || !this.component) return;
 		if (this.timer !== null) window.clearTimeout(this.timer);
 		const previewEl = this.el;
 		const component = this.component;
 		const token = ++this.token;
+		const terms = Array.isArray(options.terms) ? options.terms : [];
+		const focusText = typeof options.focusText === "string" ? options.focusText : "";
 
 		this.timer = window.setTimeout(() => {
 			this.timer = null;
@@ -52,13 +55,12 @@ export class PreviewPane {
 				.cachedRead(file)
 				.then((content) => {
 					if (this.token !== token || this.component !== component || !previewEl.isConnected) return;
-					return MarkdownRenderer.render(this.app, content.slice(0, 10000), bodyEl, file.path, component);
+					const excerpt = buildPreviewExcerpt(content, { focusText, terms });
+					return MarkdownRenderer.render(this.app, excerpt, bodyEl, file.path, component);
 				})
 				.then(() => {
 					if (this.token !== token || this.component !== component || !bodyEl.isConnected) return;
-					// Scroll the matched term into view and mark it, so a content or
-					// heading hit lands on the relevant passage instead of the top.
-					const hit = highlightFirstMatch(bodyEl, terms);
+					const hit = highlightFirstMatch(bodyEl, [focusText, ...terms]);
 					hit?.scrollIntoView({ block: "center" });
 				})
 				.catch(() => {
