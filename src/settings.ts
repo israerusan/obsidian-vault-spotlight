@@ -137,6 +137,14 @@ export interface VaultSpotlightSettings {
 	captureMode: "append" | "prepend";
 	captureHeading: string;
 	snippets: Snippet[];
+	// First-run onboarding: how many times the launcher has been opened (capped),
+	// and whether the user dismissed the first-run guidance early.
+	openCount: number;
+	onboardingDismissed: boolean;
+	// Data-model version marker. Groundwork for the future saved-search consolidation
+	// migration; unused today beyond being persisted so a later loadSettings can
+	// branch on it.
+	schemaVersion: number;
 }
 
 export const MAX_CUSTOM_SEARCHES = 50;
@@ -180,6 +188,9 @@ export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	captureMode: "append",
 	captureHeading: "",
 	snippets: [],
+	openCount: 0,
+	onboardingDismissed: false,
+	schemaVersion: 1,
 };
 
 export const MAX_RECENT_COMMANDS = 25;

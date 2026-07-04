@@ -10,6 +10,8 @@ import {
 } from "./settings";
 import { MODE_ORDER, SpotlightModal, type SpotlightMode } from "./spotlight/SpotlightModal";
 import { LicenseManager } from "./license/LicenseManager";
+import { resolveLicenseTransition } from "./core/licenseTransition.mjs";
+import { coerceOpenCount, nextOpenCount } from "./core/onboarding.mjs";
 import { ContentSearcher } from "./search/ContentSearcher";
 import { normalizeProfiles } from "./core/searchProfiles.mjs";
 import { normalizeRankingSettings } from "./core/ranking.mjs";
@@ -237,6 +239,13 @@ export default class VaultSpotlightPlugin extends Plugin {
 	}
 
 	openSpotlight(initialQuery = "", initialMode: SpotlightMode = "files"): void {
+		// Count opens (capped) to drive first-run onboarding density. The cap means a
+		// long-time user's data.json stops being rewritten once past it.
+		const next = nextOpenCount(this.settings.openCount);
+		if (next !== this.settings.openCount) {
+			this.settings.openCount = next;
+			void this.saveSettings();
+		}
 		this.activeSpotlight?.close();
 		this.activeSpotlight = new SpotlightModal(this.app, this, initialQuery, initialMode);
 		this.activeSpotlight.open();
@@ -426,26 +435,20 @@ export default class VaultSpotlightPlugin extends Plugin {
 	 * leave it false so an unchanged verification never writes data.json.
 	 */
 	async refreshLicense(persistUnchanged = false): Promise<boolean> {
-		const before = this.settings.isPro;
-		const beforeEmail = this.settings.licenseEmail;
-		if (!this.settings.licenseKey) {
-			if (!this.settings.isPro && !this.settings.licenseEmail) {
-				if (persistUnchanged) await this.saveSettings();
-				return false;
-			}
-			this.settings.isPro = false;
-			this.settings.licenseEmail = "";
-			await this.saveSettings();
-			if (before !== this.settings.isPro) this.syncCustomSearchCommands();
-			return before !== this.settings.isPro;
-		}
-		const result = LicenseManager.verify(this.settings.licenseKey);
-		this.settings.isPro = result.valid;
-		this.settings.licenseEmail = result.email ?? "";
-		const changed = before !== this.settings.isPro || beforeEmail !== this.settings.licenseEmail;
-		if (changed || persistUnchanged) await this.saveSettings();
-		if (before !== this.settings.isPro) this.syncCustomSearchCommands();
-		return changed;
+		// The decision (next state + whether to persist / resync commands) is pure
+		// and unit-tested in core/licenseTransition; this method just applies it.
+		const verifyResult = this.settings.licenseKey ? LicenseManager.verify(this.settings.licenseKey) : null;
+		const transition = resolveLicenseTransition(
+			{ isPro: this.settings.isPro, email: this.settings.licenseEmail },
+			this.settings.licenseKey,
+			verifyResult,
+			persistUnchanged
+		);
+		this.settings.isPro = transition.isPro;
+		this.settings.licenseEmail = transition.email;
+		if (transition.persist) await this.saveSettings();
+		if (transition.syncCommands) this.syncCustomSearchCommands();
+		return transition.changed;
 	}
 
 	/**
@@ -542,6 +545,11 @@ export default class VaultSpotlightPlugin extends Plugin {
 		if (typeof this.settings.captureHeading !== "string") this.settings.captureHeading = "";
 		this.settings.captureMode = this.settings.captureMode === "prepend" ? "prepend" : "append";
 		this.settings.snippets = normalizeSnippets(this.settings.snippets);
+		// Onboarding + schema marker: coerce defensively (old data.json lacks them;
+		// Object.assign already supplied the defaults, this guards corrupt values).
+		this.settings.openCount = coerceOpenCount(this.settings.openCount);
+		this.settings.onboardingDismissed = this.settings.onboardingDismissed === true;
+		this.settings.schemaVersion = Number.isInteger(this.settings.schemaVersion) ? this.settings.schemaVersion : 1;
 		this.settings.recentCommandIds = (Array.isArray(this.settings.recentCommandIds) ? this.settings.recentCommandIds : [])
 			.filter((id): id is string => typeof id === "string" && id.length > 0)
 			.slice(0, MAX_RECENT_COMMANDS);

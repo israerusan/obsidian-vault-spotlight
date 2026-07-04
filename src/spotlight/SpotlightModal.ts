@@ -20,6 +20,10 @@ import { CommandSearcher } from "../search/CommandSearcher";
 import { SymbolSearcher } from "../search/SymbolSearcher";
 import { EditorSearcher } from "../search/EditorSearcher";
 import { detectModeFromPrefix, parseHeadingQuery } from "../core/modeTriggers.mjs";
+import { clampIndex, nextSelectedIndex } from "../core/selectionReducer.mjs";
+import { resolveOpenTargets } from "../core/activationIntent.mjs";
+import { expandSearchAlias } from "../core/searchAliases.mjs";
+import { showOnboarding } from "../core/onboarding.mjs";
 import { fuzzyMatch, tokenizeQuery } from "../search/fuzzy";
 import { SaveSearchPromptModal } from "./SaveSearchPromptModal";
 import { PromptModal } from "./PromptModal";
@@ -30,9 +34,6 @@ import { detectSearchIntegrations, type SearchIntegrations } from "../core/integ
 import { findBacklinks, findOutlinks } from "../core/linkGraph.mjs";
 import { evaluateExpression, parseCurrencyRates } from "../core/calculator.mjs";
 import { parseNaturalDate } from "../core/naturalDates.mjs";
-import { insertCapture } from "../core/capture.mjs";
-import { fillDailyTemplate } from "../core/dailyTemplate.mjs";
-import { expandSnippet } from "../core/snippets.mjs";
 import {
 	describeCaptureTarget,
 	cycleMode as cycleModeHelper,
@@ -49,6 +50,7 @@ import {
 	type SpotlightMode,
 } from "./resultTypes";
 import { PreviewPane } from "./PreviewPane";
+import { CaptureController } from "./CaptureController";
 import { renderResultRow } from "./resultRow";
 import * as batchOps from "./batchOps";
 import { copyToClipboard, renameFile } from "./batchOps";
@@ -83,6 +85,7 @@ export class SpotlightModal extends Modal {
 	private resultsEl!: HTMLDivElement;
 	private bodyEl!: HTMLDivElement;
 	private preview: PreviewPane;
+	private capture: CaptureController;
 	private footerEl!: HTMLDivElement;
 	private shortcutsEl!: HTMLDivElement;
 	private statusEl!: HTMLSpanElement;
@@ -147,6 +150,14 @@ export class SpotlightModal extends Modal {
 		super(app);
 		this.shouldRestoreSelection = false;
 		this.preview = new PreviewPane(app);
+		// Delight-action side effects (daily notes, capture, snippets, calc) live in
+		// their own controller behind a tiny host (the batchOps pattern).
+		this.capture = new CaptureController({
+			app,
+			plugin: this.plugin,
+			close: () => this.close(),
+			recordSearch: () => this.recordSearch(),
+		});
 		this.fileSearcher = new FileSearcher(app);
 		this.headingSearcher = new HeadingSearcher(app);
 		this.commandSearcher = new CommandSearcher(app);
@@ -394,16 +405,25 @@ export class SpotlightModal extends Modal {
 		const prefixes = this.plugin.settings.modePrefixes;
 		const mod = this.modifierLabel;
 		this.hintEl.empty();
-		const hints: Array<[string, string]> = [
-			["2+2", "calc"],
-			[prefixes.capture, "capture"],
-			["#journal", "tag"],
-			[prefixes.commands, "commands"],
-			[prefixes.symbols, "outline"],
-			[prefixes.editors, "tabs"],
-			[prefixes.folders, "folders"],
-		];
-		if (isPro) {
+		// New users get the full trigger cheatsheet; once they've opened the launcher
+		// enough times, condense it to the essentials so the header isn't perpetually
+		// dense. showOnboarding is pure + unit-tested in core/onboarding.
+		const full = showOnboarding(this.plugin.settings.openCount, this.plugin.settings.onboardingDismissed);
+		const hints: Array<[string, string]> = full
+			? [
+					["2+2", "calc"],
+					[prefixes.capture, "capture"],
+					["#journal", "tag"],
+					[prefixes.commands, "commands"],
+					[prefixes.symbols, "outline"],
+					[prefixes.editors, "tabs"],
+					[prefixes.folders, "folders"],
+			  ]
+			: [
+					["2+2", "calc"],
+					["#journal", "tag"],
+			  ];
+		if (isPro && full) {
 			hints.push(
 				[prefixes.content, "content"],
 				[prefixes.headings, "headings"],
@@ -433,16 +453,10 @@ export class SpotlightModal extends Modal {
 	}
 
 	private expandAliases(raw: string): string {
-		if (!this.plugin.settings.isPro || !this.plugin.settings.searchAliases.trim()) return raw;
-		const parts = raw.trim().split(/\s+/);
-		if (parts.length === 0) return raw;
-		const first = parts[0].toLowerCase();
-		for (const line of this.plugin.settings.searchAliases.split("\n")) {
-			const match = line.match(/^\s*([^=]+?)\s*=\s*(.+)$/);
-			if (!match) continue;
-			if (match[1].trim().toLowerCase() === first) return [match[2].trim(), ...parts.slice(1)].join(" ");
-		}
-		return raw;
+		return expandSearchAlias(raw, {
+			isPro: this.plugin.settings.isPro,
+			aliases: this.plugin.settings.searchAliases,
+		});
 	}
 
 	private scheduleSearch(): void {
@@ -999,7 +1013,7 @@ export class SpotlightModal extends Modal {
 		if (this.plugin.settings.enableDateJump) {
 			const date = parseNaturalDate(text);
 			if (date) {
-				const { path, exists } = this.resolveDatePath(date.date);
+				const { path, exists } = this.capture.resolveDatePath(date.date);
 				return [{ kind: "datejump", date: date.date, label: date.label, path, exists }];
 			}
 		}
@@ -1022,126 +1036,9 @@ export class SpotlightModal extends Modal {
 		return [];
 	}
 
-	private copyCalcResult(item: Extract<ResultItem, { kind: "calc" }>): void {
-		void copyToClipboard(item.result, `Copied ${item.result}`);
-		this.close();
-	}
-
-	private insertCalcResult(item: Extract<ResultItem, { kind: "calc" }>): void {
-		const editor = this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
-		if (!editor) {
-			this.copyCalcResult(item);
-			return;
-		}
-		this.close();
-		editor.replaceSelection(item.result);
-		editor.focus();
-	}
-
-	/** Daily-note folder + moment format + template from core or Periodic Notes. */
-	private dailyNoteConfig(): { folder: string; format: string; template: string } {
-		const internal = (
-			this.app as unknown as {
-				internalPlugins?: {
-					getPluginById?: (
-						id: string
-					) => { instance?: { options?: { folder?: string; format?: string; template?: string } } } | null;
-				};
-			}
-		).internalPlugins;
-		const opts = internal?.getPluginById?.("daily-notes")?.instance?.options;
-		if (opts && (opts.format || opts.folder !== undefined)) {
-			return {
-				folder: (opts.folder ?? "").trim(),
-				format: (opts.format || "YYYY-MM-DD").trim(),
-				template: (opts.template ?? "").trim(),
-			};
-		}
-		const periodic = (
-			this.app as unknown as {
-				plugins?: { plugins?: Record<string, { settings?: { daily?: { folder?: string; format?: string; template?: string } } }> };
-			}
-		).plugins?.plugins?.["periodic-notes"];
-		const pd = periodic?.settings?.daily;
-		if (pd && (pd.format || pd.folder)) {
-			return {
-				folder: (pd.folder ?? "").trim(),
-				format: (pd.format || "YYYY-MM-DD").trim(),
-				template: (pd.template ?? "").trim(),
-			};
-		}
-		return { folder: "", format: "YYYY-MM-DD", template: "" };
-	}
-
-	/**
-	 * Build the initial content for a NEW daily note by expanding the user's
-	 * configured Daily Notes / Periodic Notes template (honoring {{date}},
-	 * {{time}}, {{title}} tokens). Returns "" when no template is configured or
-	 * the template file can't be read, so creation still works everywhere.
-	 */
-	private async dailyTemplateContent(ms: number): Promise<string> {
-		const { format, template } = this.dailyNoteConfig();
-		if (!template) return "";
-		const rel = template.endsWith(".md") ? template : `${template}.md`;
-		const file = this.app.vault.getAbstractFileByPath(normalizePath(rel));
-		if (!(file instanceof TFile)) return "";
-		let raw: string;
-		try {
-			raw = await this.app.vault.cachedRead(file);
-		} catch {
-			return "";
-		}
-		const when = formatMoment(ms);
-		const title = when.format(format);
-		return fillDailyTemplate(raw, (kind, fmt) => {
-			if (kind === "title") return title;
-			if (kind === "time") return when.format(fmt || "HH:mm");
-			return when.format(fmt || "YYYY-MM-DD");
-		});
-	}
-
-	private resolveDatePath(ms: number): { path: string; exists: boolean } {
-		const { folder, format } = this.dailyNoteConfig();
-		const name = formatMoment(ms).format(format);
-		const path = normalizePath(folder ? `${folder}/${name}.md` : `${name}.md`);
-		const exists = this.app.vault.getAbstractFileByPath(path) instanceof TFile;
-		return { path, exists };
-	}
-
-	/** Create the parent folder chain for `filePath` if it doesn't exist yet. */
-	private async ensureFolder(filePath: string): Promise<void> {
-		const slash = filePath.lastIndexOf("/");
-		if (slash === -1) return;
-		const dir = filePath.slice(0, slash);
-		if (!dir || this.app.vault.getAbstractFileByPath(dir)) return;
-		try {
-			await this.app.vault.createFolder(dir);
-		} catch {
-			// Already created by a concurrent op — safe to ignore.
-		}
-	}
-
-	private async openOrCreateDatedNote(ms: number): Promise<void> {
-		const { path } = this.resolveDatePath(ms);
-		try {
-			let file = this.app.vault.getAbstractFileByPath(path);
-			if (!(file instanceof TFile)) {
-				await this.ensureFolder(path);
-				file = await this.app.vault.create(path, await this.dailyTemplateContent(ms));
-			}
-			if (file instanceof TFile) {
-				await this.app.workspace.getLeaf(false).openFile(file);
-				this.plugin.trackRecent(file.path);
-			}
-		} catch (err) {
-			console.error("[VaultSpotlight] open daily note failed", err);
-			new Notice("Vault Spotlight: could not open the daily note.");
-		}
-	}
-
 	private captureItems(body: string): ResultItem[] {
 		const text = body.trim();
-		const dailyName = formatMoment().format(this.dailyNoteConfig().format);
+		const dailyName = formatMoment().format(this.capture.dailyNoteConfig().format);
 		const captureHeading = this.plugin.settings.isPro ? this.plugin.settings.captureHeading : "";
 		const captureMode = this.plugin.settings.isPro ? this.plugin.settings.captureMode : "append";
 		const items: ResultItem[] = [
@@ -1176,46 +1073,6 @@ export class SpotlightModal extends Modal {
 		return items;
 	}
 
-	private async runCapture(item: Extract<ResultItem, { kind: "capture" }>): Promise<void> {
-		const text = item.text.trim();
-		if (!text) {
-			new Notice("Vault Spotlight: type something to capture.");
-			return;
-		}
-		const settings = this.plugin.settings;
-		const now = Date.now();
-		const path =
-			item.target === "inbox"
-				? normalizePath(settings.captureInboxPath.trim())
-				: this.resolveDatePath(now).path;
-		if (!path) {
-			new Notice("Vault Spotlight: no capture target configured.");
-			return;
-		}
-		this.recordSearch();
-		this.close();
-		try {
-			await this.ensureFolder(path);
-			let file = this.app.vault.getAbstractFileByPath(path);
-			// A brand-new daily note gets the configured daily template so a capture
-			// doesn't land in a blank file where a templated note was expected.
-			const initial = item.target === "daily" ? await this.dailyTemplateContent(now) : "";
-			if (!(file instanceof TFile)) file = await this.app.vault.create(path, initial);
-			if (file instanceof TFile) {
-				const existing = await this.app.vault.read(file);
-				const updated = insertCapture(existing, text, {
-					mode: settings.isPro ? settings.captureMode : "append",
-					heading: settings.isPro ? settings.captureHeading : "",
-				});
-				await this.app.vault.modify(file, updated);
-				new Notice(`Vault Spotlight: captured to ${file.basename}.`);
-			}
-		} catch (err) {
-			console.error("[VaultSpotlight] capture failed", err);
-			new Notice("Vault Spotlight: capture failed.");
-		}
-	}
-
 	private snippetItems(query: string): ResultItem[] {
 		const q = query.trim().toLowerCase();
 		const rows: Array<{ id: string; name: string; body: string; score: number; indices: number[] }> = [];
@@ -1243,35 +1100,6 @@ export class SpotlightModal extends Modal {
 			body: row.body,
 			matchIndices: row.indices,
 		}));
-	}
-
-	private async insertSnippet(item: Extract<ResultItem, { kind: "snippet" }>): Promise<void> {
-		const editor = this.app.workspace.getActiveViewOfType(MarkdownView)?.editor ?? null;
-		const selection = editor?.getSelection() ?? "";
-		let clipboard = "";
-		if (item.body.includes("{{clipboard}}")) {
-			try {
-				clipboard = await navigator.clipboard.readText();
-			} catch {
-				clipboard = "";
-			}
-		}
-		const { text, cursorOffset } = expandSnippet(item.body, {
-			date: formatMoment().format("YYYY-MM-DD"),
-			time: formatMoment().format("HH:mm"),
-			clipboard,
-			selection,
-		});
-		this.close();
-		if (editor) {
-			const from = editor.getCursor("from");
-			editor.replaceSelection(text);
-			const caret = editor.offsetToPos(editor.posToOffset(from) + cursorOffset);
-			editor.setCursor(caret);
-			editor.focus();
-		} else {
-			void copyToClipboard(text, "Snippet copied");
-		}
 	}
 
 	private renderLoading(): void {
@@ -1524,10 +1352,9 @@ export class SpotlightModal extends Modal {
 	}
 
 	private moveSelection(delta: number): void {
-		// Clamp at the ends rather than wrapping — teleporting from the first row
-		// to a distant last row (and back) is disorienting and loses your place,
-		// which is why every premium launcher clamps.
-		this.setSelectedIndex(this.selectedIndex + delta);
+		// Clamp-at-ends navigation math lives in core/selectionReducer (unit-tested);
+		// this method keeps the DOM side effects.
+		this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "move", delta }));
 	}
 
 	/** Number of fully-visible rows, for PageUp/PageDown jumps. */
@@ -1545,7 +1372,7 @@ export class SpotlightModal extends Modal {
 		// results were still visible; only block when the list shows skeletons
 		// (no real rows to move between).
 		if (this.resultsEl.querySelector(".vault-spotlight-item") === null) return;
-		this.selectedIndex = Math.min(Math.max(index, 0), this.items.length - 1);
+		this.selectedIndex = clampIndex(index, this.items.length);
 		// A keyboard move must win over the cursor resting on the list until the
 		// pointer actually moves again.
 		this.suppressHoverSelect = true;
@@ -1561,7 +1388,7 @@ export class SpotlightModal extends Modal {
 		// creating a note titled "2+2" or the capture text.
 		const selected = this.items[this.selectedIndex];
 		if (selected?.kind === "calc") {
-			this.insertCalcResult(selected);
+			this.capture.insertCalcResult(selected);
 			return;
 		}
 		if (selected && (selected.kind === "capture" || selected.kind === "snippet" || selected.kind === "datejump")) {
@@ -1740,55 +1567,57 @@ export class SpotlightModal extends Modal {
 		}
 
 		if (selected.kind === "calc") {
-			this.copyCalcResult(selected);
+			this.capture.copyCalcResult(selected);
 			return;
 		}
 
 		if (selected.kind === "datejump") {
 			this.close();
-			await this.openOrCreateDatedNote(selected.date);
+			await this.capture.openOrCreateDatedNote(selected.date);
 			return;
 		}
 
 		if (selected.kind === "capture") {
-			await this.runCapture(selected);
+			await this.capture.runCapture(selected);
 			return;
 		}
 
 		if (selected.kind === "snippet") {
-			await this.insertSnippet(selected);
+			await this.capture.insertSnippet(selected);
 			return;
 		}
 
 		// Opening a real result means the current query was useful — remember it.
 		this.recordSearch();
 
-		let targets =
-			this.checkedPaths.size > 0
-				? this.items.filter((i) => {
-						const f = itemFile(i);
-						return f ? this.checkedPaths.has(f.path) : false;
-				  })
-				: [selected];
-
-		// The checked set can go stale when the query changes so none of the
-		// checked paths are in view any more — Enter must still open the
-		// highlighted row rather than silently doing nothing.
-		if (targets.length === 0) targets = [selected];
+		// Batch-vs-single target and pane resolution is pure and unit-tested in
+		// core/activationIntent; the modal maps the decision back to items (to keep
+		// each result's line for seekToItemLine) and performs the opens.
+		const selectedFile = itemFile(selected);
+		const decision = resolveOpenTargets({
+			selectedPath: selectedFile ? selectedFile.path : null,
+			checkedPaths: Array.from(this.checkedPaths),
+			visiblePaths: this.items.map((i) => itemFile(i)?.path).filter((p): p is string => !!p),
+			paneOverride,
+			defaultNewTab: this.plugin.settings.defaultNewTab,
+		});
+		const targets: ResultItem[] = decision.isBatch
+			? this.items.filter((i) => {
+					const f = itemFile(i);
+					return !!f && decision.paths.includes(f.path);
+			  })
+			: selectedFile
+				? [selected]
+				: [];
 
 		this.checkedPaths.clear();
 		this.close();
-
-		// Batch-open always uses tabs; a single open honors the override, then
-		// the "open in new tab by default" setting.
-		const defaultTarget: PaneTarget = this.plugin.settings.defaultNewTab ? "tab" : null;
-		const target: PaneTarget = targets.length > 1 ? "tab" : paneOverride ?? defaultTarget;
 
 		for (const item of targets) {
 			const file = itemFile(item);
 			if (!file) continue;
 			try {
-				await this.openItem(item, target);
+				await this.openItem(item, decision.target);
 				this.plugin.trackRecent(file.path);
 			} catch (err) {
 				console.error("[VaultSpotlight] failed to open", file.path, err);
@@ -2066,13 +1895,13 @@ export class SpotlightModal extends Modal {
 					id: "copy-calc",
 					name: "Copy result",
 					description: `Copy ${context.result} to the clipboard.`,
-					run: () => this.copyCalcResult(context),
+					run: () => this.capture.copyCalcResult(context),
 				},
 				{
 					id: "insert-calc",
 					name: "Insert at cursor",
 					description: "Insert the result into the active note.",
-					run: () => this.insertCalcResult(context),
+					run: () => this.capture.insertCalcResult(context),
 				},
 			];
 		}
@@ -2082,7 +1911,7 @@ export class SpotlightModal extends Modal {
 					id: "open-daily",
 					name: context.exists ? "Open daily note" : "Create daily note",
 					description: context.path,
-					run: () => void this.openOrCreateDatedNote(context.date),
+					run: () => void this.capture.openOrCreateDatedNote(context.date),
 				},
 			];
 		}
@@ -2092,7 +1921,7 @@ export class SpotlightModal extends Modal {
 					id: "run-capture",
 					name: "Capture",
 					description: context.description,
-					run: () => void this.runCapture(context),
+					run: () => void this.capture.runCapture(context),
 				},
 			];
 		}
@@ -2103,7 +1932,7 @@ export class SpotlightModal extends Modal {
 					name: "Insert snippet",
 					description: "Insert this snippet at the cursor.",
 					requiresPro: true,
-					run: () => void this.insertSnippet(context),
+					run: () => void this.capture.insertSnippet(context),
 				},
 				{
 					id: "copy-snippet",
@@ -2428,25 +2257,25 @@ export class SpotlightModal extends Modal {
 		this.scope.register([], "Home", (evt) => {
 			if (evt.isComposing) return true;
 			evt.preventDefault();
-			this.setSelectedIndex(0);
+			this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "first" }));
 			return false;
 		});
 		this.scope.register([], "End", (evt) => {
 			if (evt.isComposing) return true;
 			evt.preventDefault();
-			this.setSelectedIndex(this.items.length - 1);
+			this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "last" }));
 			return false;
 		});
 		this.scope.register([], "PageDown", (evt) => {
 			if (evt.isComposing) return true;
 			evt.preventDefault();
-			this.setSelectedIndex(this.selectedIndex + this.pageSize());
+			this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "page", delta: 1, pageSize: this.pageSize() }));
 			return false;
 		});
 		this.scope.register([], "PageUp", (evt) => {
 			if (evt.isComposing) return true;
 			evt.preventDefault();
-			this.setSelectedIndex(this.selectedIndex - this.pageSize());
+			this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "page", delta: -1, pageSize: this.pageSize() }));
 			return false;
 		});
 		// Emacs-style aliases so hands never leave the home row.
