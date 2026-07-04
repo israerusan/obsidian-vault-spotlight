@@ -25,11 +25,9 @@ import { resolveOpenTargets } from "../core/activationIntent.mjs";
 import { expandSearchAlias } from "../core/searchAliases.mjs";
 import { showOnboarding } from "../core/onboarding.mjs";
 import { fuzzyMatch, tokenizeQuery } from "../search/fuzzy";
-import { SaveSearchPromptModal } from "./SaveSearchPromptModal";
-import { PromptModal } from "./PromptModal";
 import { getVaultFileKind } from "../search/vaultFiles";
-import { activeProfile, createProfileFromSettings, type CoreSearchProfile } from "../core/searchProfiles.mjs";
-import { canSaveWorkflowPreset, createWorkflowPreset, ensureStarterWorkflows, normalizeWorkflowPresets, FREE_WORKFLOW_LIMIT, MAX_WORKFLOW_PRESETS, type WorkflowPreset } from "../core/workflowPresets.mjs";
+import { activeProfile, type CoreSearchProfile } from "../core/searchProfiles.mjs";
+import { canSaveWorkflowPreset, ensureStarterWorkflows, normalizeWorkflowPresets, FREE_WORKFLOW_LIMIT, type WorkflowPreset } from "../core/workflowPresets.mjs";
 import { detectSearchIntegrations, type SearchIntegrations } from "../core/integrations.mjs";
 import { findBacklinks, findOutlinks } from "../core/linkGraph.mjs";
 import { evaluateExpression, parseCurrencyRates } from "../core/calculator.mjs";
@@ -51,6 +49,7 @@ import {
 } from "./resultTypes";
 import { PreviewPane } from "./PreviewPane";
 import { CaptureController } from "./CaptureController";
+import { WorkflowController } from "./WorkflowController";
 import { renderResultRow } from "./resultRow";
 import * as batchOps from "./batchOps";
 import { copyToClipboard, renameFile } from "./batchOps";
@@ -86,6 +85,7 @@ export class SpotlightModal extends Modal {
 	private bodyEl!: HTMLDivElement;
 	private preview: PreviewPane;
 	private capture: CaptureController;
+	private workflows: WorkflowController;
 	private footerEl!: HTMLDivElement;
 	private shortcutsEl!: HTMLDivElement;
 	private statusEl!: HTMLSpanElement;
@@ -157,6 +157,33 @@ export class SpotlightModal extends Modal {
 			plugin: this.plugin,
 			close: () => this.close(),
 			recordSearch: () => this.recordSearch(),
+		});
+		// Profile / workflow / custom-search save + apply, behind accessors so the
+		// modal keeps ownership of the live mode/query/actionContext state.
+		this.workflows = new WorkflowController({
+			app,
+			plugin: this.plugin,
+			liveMode: () => this.mode,
+			liveQuery: () => this.inputEl.value,
+			hasActionContext: () => this.actionContext !== null,
+			actionReturnMode: () => this.actionReturnMode,
+			actionReturnQuery: () => this.actionReturnQuery,
+			clearActionContext: () => {
+				this.actionContext = null;
+			},
+			setMode: (mode) => {
+				this.mode = mode;
+			},
+			setQuery: (query) => {
+				this.inputEl.value = query;
+			},
+			setActiveWorkflowId: (id) => {
+				this.activeWorkflowId = id;
+			},
+			currentProfileRankingMode: () => this.currentProfile()?.rankingMode,
+			focusInput: () => this.focusInput(),
+			runSearch: () => void this.runSearch(),
+			closeActionPalette: () => this.closeActionPalette(),
 		});
 		this.fileSearcher = new FileSearcher(app);
 		this.headingSearcher = new HeadingSearcher(app);
@@ -1527,12 +1554,12 @@ export class SpotlightModal extends Modal {
 		}
 
 		if (selected.kind === "profile") {
-			this.activateProfile(selected.id);
+			this.workflows.activateProfile(selected.id);
 			return;
 		}
 
 		if (selected.kind === "workflow") {
-			this.applyWorkflow(selected.id);
+			this.workflows.applyWorkflow(selected.id);
 			return;
 		}
 
@@ -1692,101 +1719,6 @@ export class SpotlightModal extends Modal {
 		void this.runSearch();
 	}
 
-	private activateProfile(id: string): void {
-		const profile = activeProfile(this.plugin.settings.searchProfiles, id);
-		if (!profile) return;
-		this.plugin.settings.activeProfileId = profile.id;
-		void this.plugin.saveSettings();
-		this.actionContext = null;
-		this.mode = profile.defaultMode;
-		this.inputEl.value = profile.defaultQuery;
-		this.focusInput();
-		void this.runSearch();
-	}
-
-	private clearProfile(): void {
-		this.plugin.settings.activeProfileId = "";
-		void this.plugin.saveSettings();
-		this.actionContext = null;
-		this.inputEl.value = "";
-		this.mode = "files";
-		void this.runSearch();
-	}
-
-	private applyWorkflow(id: string): void {
-		const workflows = ensureStarterWorkflows(this.plugin.settings.workflowPresets);
-		const workflow = workflows.find((entry) => entry.id === id);
-		if (!workflow) return;
-		this.activeWorkflowId = workflow.id;
-		this.actionContext = null;
-		if (workflow.profileId) {
-			this.plugin.settings.activeProfileId = workflow.profileId;
-		}
-		this.mode = workflow.mode;
-		this.inputEl.value = workflow.query;
-		void this.plugin.saveSettings();
-		this.focusInput();
-		void this.runSearch();
-	}
-
-	private saveCurrentProfile(): void {
-		new PromptModal(this.app, {
-			title: "Save search profile",
-			initial: "New profile",
-			cta: "Save profile",
-			onSubmit: (name) => {
-				const mode = this.actionContext ? this.actionReturnMode : this.mode;
-				const query = this.actionContext ? this.actionReturnQuery : this.inputEl.value;
-				const profile = createProfileFromSettings(name, this.plugin.settings, mode, query);
-				const exists = this.plugin.settings.searchProfiles.some((p) => p.id === profile.id);
-				this.plugin.settings.searchProfiles = [
-					...this.plugin.settings.searchProfiles.filter((p) => p.id !== profile.id),
-					{ ...profile, id: exists ? `${profile.id}-${Date.now()}` : profile.id },
-				].slice(0, 20);
-				void this.plugin.saveSettings();
-				new Notice("Vault Spotlight: search profile saved.");
-				this.closeActionPalette();
-			},
-		}).open();
-	}
-
-	private saveCurrentWorkflow(): void {
-		// Reachable via the Mod+S shortcut whether or not the action palette is
-		// open. With the palette open the live input is cleared, so the real
-		// mode/query live in actionReturn*; otherwise they hold defaults ("files"/
-		// "") and the current mode/input are authoritative. Key off actionContext
-		// rather than a truthiness fallback — "files" is truthy, so `|| this.mode`
-		// could never reach the live mode and every save was recorded as "files".
-		const mode = this.actionContext ? this.actionReturnMode : this.mode;
-		const query = (this.actionContext ? this.actionReturnQuery : this.inputEl.value).trim();
-		if (!canSaveWorkflowPreset(this.plugin.settings.workflowPresets, this.plugin.settings.isPro)) {
-			new Notice(`Vault Spotlight: the free plan includes ${FREE_WORKFLOW_LIMIT} workflows — upgrade to Pro for unlimited.`);
-			return;
-		}
-		new PromptModal(this.app, {
-			title: "Save workflow",
-			initial: query.slice(0, 40) || "New workflow",
-			cta: "Save workflow",
-			onSubmit: (name) => {
-				const workflow = createWorkflowPreset(name, mode, query, {
-					profileId: this.plugin.settings.activeProfileId,
-					rankingMode: this.currentProfile()?.rankingMode,
-				});
-				// Two workflows whose names slugify to the same id (e.g. both
-				// "Meeting") would otherwise coexist, and settings pin/remove match
-				// by id — Remove-one would delete both. Suffix a colliding id, the
-				// same guard saveCurrentProfile uses.
-				const exists = this.plugin.settings.workflowPresets.some((w) => w.id === workflow.id);
-				if (exists) workflow.id = `${workflow.id}-${Date.now()}`;
-				this.plugin.settings.workflowPresets = [workflow, ...this.plugin.settings.workflowPresets].slice(0, MAX_WORKFLOW_PRESETS);
-				this.activeWorkflowId = workflow.id;
-				void this.plugin.saveSettings();
-				new Notice("Vault Spotlight: workflow saved.");
-				this.closeActionPalette();
-			},
-		}).open();
-	}
-
 	private installedSearchIntegrations(): SearchIntegrations {
 		const plugins = (this.app as unknown as { plugins?: { plugins?: Record<string, unknown> } }).plugins?.plugins ?? {};
 		return detectSearchIntegrations(Object.keys(plugins));
@@ -1844,14 +1776,14 @@ export class SpotlightModal extends Modal {
 					name: "Activate search profile",
 					description: `Switch to ${context.name} and run its default query.`,
 					requiresPro: true,
-					run: () => this.activateProfile(context.id),
+					run: () => this.workflows.activateProfile(context.id),
 				},
 				{
 					id: "clear-profile",
 					name: "Clear active profile",
 					description: "Return Spotlight to the global search settings.",
 					requiresPro: true,
-					run: () => this.clearProfile(),
+					run: () => this.workflows.clearProfile(),
 				},
 			];
 		}
@@ -2019,7 +1951,7 @@ export class SpotlightModal extends Modal {
 			name: "Save current setup as profile",
 			description: "Create a Pro search profile from the current mode, query, preview, file type, and folder settings.",
 			requiresPro: true,
-			run: () => this.saveCurrentProfile(),
+			run: () => this.workflows.saveCurrentProfile(),
 		});
 
 		// The batch/export block operates on files. Only offer it when the result
@@ -2160,29 +2092,6 @@ export class SpotlightModal extends Modal {
 			if (rect) menu.showAtPosition({ x: rect.left + 40, y: rect.bottom });
 			else menu.showAtPosition({ x: 100, y: 100 });
 		}
-	}
-
-	private saveCustomSearch(): void {
-		const query = this.inputEl.value.trim();
-		if (!query) return;
-
-		new SaveSearchPromptModal(this.app, (name) => {
-			const exists = this.plugin.settings.customSearches.some(
-				(s) => s.name.toLowerCase() === name.toLowerCase()
-			);
-			if (exists) {
-				new Notice("Vault Spotlight: a saved search with that name already exists.");
-				return;
-			}
-			const entry = {
-				id: typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : `cs-${Date.now()}`,
-				name,
-				query,
-			};
-			this.plugin.settings.customSearches.push(entry);
-			void this.plugin.saveSettings();
-			this.plugin.registerCustomSearchCommand(entry);
-		}).open();
 	}
 
 	private recordSearch(): void {
@@ -2365,9 +2274,9 @@ export class SpotlightModal extends Modal {
 		this.scope.register(["Mod"], "s", (evt) => {
 			evt.preventDefault();
 			if (canSaveWorkflowPreset(this.plugin.settings.workflowPresets, this.plugin.settings.isPro)) {
-				this.saveCurrentWorkflow();
+				this.workflows.saveCurrentWorkflow();
 			} else {
-				this.saveCustomSearch();
+				this.workflows.saveCustomSearch();
 			}
 			return false;
 		});
