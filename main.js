@@ -2330,8 +2330,8 @@ var PROFILE_MODES = /* @__PURE__ */ new Set([
 ]);
 function normalizeProfiles(rawProfiles) {
   if (!Array.isArray(rawProfiles)) return [];
-  return rawProfiles.filter((profile) => profile && typeof profile === "object").map((profile) => ({
-    id: cleanId(profile.id) || `profile-${Date.now()}`,
+  return rawProfiles.filter((profile) => profile && typeof profile === "object").map((profile, index) => ({
+    id: cleanId(profile.id) || `profile-${Date.now()}-${index}`,
     name: String(profile.name || "Untitled profile").trim() || "Untitled profile",
     defaultMode: PROFILE_MODES.has(profile.defaultMode) ? profile.defaultMode : "files",
     defaultQuery: String(profile.defaultQuery || ""),
@@ -3649,9 +3649,11 @@ var FileSearcher = class {
       } else if (ranking.preferRecentFiles && recentRank !== void 0) {
         score += 1e3 - recentRank * 10;
       } else if (isBrowseMode) {
-        score += Math.max(0, boosts.browseMtimeHours - Math.floor((Date.now() - file.stat.mtime) / 36e5));
+        const ageHours = Math.floor(Math.max(0, Date.now() - file.stat.mtime) / 36e5);
+        score += Math.max(0, boosts.browseMtimeHours - ageHours);
       } else {
-        score += Math.max(0, boosts.queryMtimeDays - Math.floor((Date.now() - file.stat.mtime) / 864e5));
+        const ageDays = Math.floor(Math.max(0, Date.now() - file.stat.mtime) / 864e5);
+        score += Math.max(0, boosts.queryMtimeDays - ageDays);
       }
       if (ranking.preferOpenFiles && ((_f = options.openPaths) == null ? void 0 : _f.has(file.path))) score += 400;
       const fr = (_g = options.frecency) == null ? void 0 : _g[file.path];
@@ -6646,7 +6648,12 @@ var SpotlightModal = class extends import_obsidian9.Modal {
         new import_obsidian9.Notice("Vault Spotlight: Pro required for this action.");
         return;
       }
-      await selected.action.run();
+      try {
+        await selected.action.run();
+      } catch (err) {
+        console.error("[VaultSpotlight] action failed", err);
+        new import_obsidian9.Notice("Vault Spotlight: action failed.");
+      }
       return;
     }
     if (selected.kind === "command") {
@@ -6786,7 +6793,9 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       initial: "New profile",
       cta: "Save profile",
       onSubmit: (name) => {
-        const profile = createProfileFromSettings(name, this.plugin.settings, this.actionReturnMode || this.mode, this.actionReturnQuery || this.inputEl.value);
+        const mode = this.actionContext ? this.actionReturnMode : this.mode;
+        const query = this.actionContext ? this.actionReturnQuery : this.inputEl.value;
+        const profile = createProfileFromSettings(name, this.plugin.settings, mode, query);
         const exists = this.plugin.settings.searchProfiles.some((p) => p.id === profile.id);
         this.plugin.settings.searchProfiles = [
           ...this.plugin.settings.searchProfiles.filter((p) => p.id !== profile.id),
@@ -6799,8 +6808,8 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     }).open();
   }
   saveCurrentWorkflow() {
-    const mode = this.actionReturnMode || this.mode;
-    const query = (this.actionReturnQuery || this.inputEl.value).trim();
+    const mode = this.actionContext ? this.actionReturnMode : this.mode;
+    const query = (this.actionContext ? this.actionReturnQuery : this.inputEl.value).trim();
     if (!canSaveWorkflowPreset(this.plugin.settings.workflowPresets, this.plugin.settings.isPro)) {
       new import_obsidian9.Notice("Vault Spotlight: workflows require Pro and a non-empty search.");
       return;
@@ -7261,11 +7270,13 @@ var SpotlightModal = class extends import_obsidian9.Modal {
   }
   registerScopeShortcuts() {
     this.scope.register([], "ArrowDown", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       this.moveSelection(1);
       return false;
     });
     this.scope.register([], "ArrowUp", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       this.moveSelection(-1);
       return false;
@@ -7301,6 +7312,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       return false;
     });
     this.scope.register([], "Enter", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       void this.activateSelection();
       return false;
@@ -7332,6 +7344,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       return false;
     });
     this.scope.register([], "Escape", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       if (this.actionContext) this.closeActionPalette();
       else if (this.drillFile) this.exitDrill();
@@ -7339,11 +7352,13 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       return false;
     });
     this.scope.register([], "Tab", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       this.cycleMode(1);
       return false;
     });
     this.scope.register(["Shift"], "Tab", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       this.cycleMode(-1);
       return false;
@@ -7500,6 +7515,8 @@ var RipgrepSearcher = class {
     this.command = command;
     /** The command that answered `--version`, or null when none did. */
     this.resolvedCommand = void 0;
+    /** In-flight probe, shared so fast typing doesn't launch duplicate cascades. */
+    this.resolvePromise = null;
     this.currentChild = null;
   }
   async isAvailable() {
@@ -7509,33 +7526,39 @@ var RipgrepSearcher = class {
    * Try the configured command, then well-known install locations, caching
    * whichever answers `--version` first.
    */
-  async resolveCommand() {
-    if (this.resolvedCommand !== void 0) return this.resolvedCommand;
-    const cp = getChildProcess();
-    if (!cp) {
+  resolveCommand() {
+    if (this.resolvedCommand !== void 0) return Promise.resolve(this.resolvedCommand);
+    if (this.resolvePromise) return this.resolvePromise;
+    this.resolvePromise = (async () => {
+      const cp = getChildProcess();
+      if (!cp) {
+        this.resolvedCommand = null;
+        return null;
+      }
+      for (const candidate of candidateCommands(this.command)) {
+        const ok = await new Promise((resolve) => {
+          try {
+            cp.execFile(
+              candidate,
+              ["--version"],
+              { timeout: 3e3, windowsHide: true },
+              (error) => resolve(!error)
+            );
+          } catch (e) {
+            resolve(false);
+          }
+        });
+        if (ok) {
+          this.resolvedCommand = candidate;
+          return candidate;
+        }
+      }
       this.resolvedCommand = null;
       return null;
-    }
-    for (const candidate of candidateCommands(this.command)) {
-      const ok = await new Promise((resolve) => {
-        try {
-          cp.execFile(
-            candidate,
-            ["--version"],
-            { timeout: 3e3, windowsHide: true },
-            (error) => resolve(!error)
-          );
-        } catch (e) {
-          resolve(false);
-        }
-      });
-      if (ok) {
-        this.resolvedCommand = candidate;
-        return candidate;
-      }
-    }
-    this.resolvedCommand = null;
-    return null;
+    })().finally(() => {
+      this.resolvePromise = null;
+    });
+    return this.resolvePromise;
   }
   /**
    * Returns matches, or `null` when ripgrep could not run at all (missing
@@ -7590,7 +7613,7 @@ var RipgrepSearcher = class {
     ];
     for (const folder of (_a = options.excludeFolders) != null ? _a : []) {
       const f = folder.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-      if (f) args.push("-g", `!${f}/**`);
+      if (f) args.push("--iglob", `!${f}/**`);
     }
     args.push("--", anchor, ".");
     const needAll = multi ? tokens.map((t) => t.toLowerCase()) : null;
@@ -7637,6 +7660,17 @@ var RipgrepSearcher = class {
       }
       this.currentChild = child;
     });
+  }
+  /** Kill any in-flight rg process (plugin unload, or command change). */
+  dispose() {
+    if (this.currentChild) {
+      this.currentChild.superseded = true;
+      try {
+        this.currentChild.kill();
+      } catch (e) {
+      }
+      this.currentChild = null;
+    }
   }
   parseOutput(output, limit, needAll) {
     const results = [];
@@ -8010,6 +8044,7 @@ var ContentSearcher = class {
     this.workerIndex = null;
   }
   setRipgrepCommand(command) {
+    this.ripgrep.dispose();
     this.ripgrep = new RipgrepSearcher(this.app, command);
   }
   async search(query, options) {
@@ -8136,6 +8171,7 @@ var ContentSearcher = class {
   dispose() {
     var _a;
     this.disposed = true;
+    this.ripgrep.dispose();
     (_a = this.workerIndex) == null ? void 0 : _a.dispose();
     this.workerIndex = null;
   }
@@ -8553,8 +8589,10 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
     } else {
       this.settings.recentSearches = this.settings.recentSearches.filter((s) => typeof s === "string" && s.trim().length > 0).slice(0, MAX_RECENT_SEARCHES);
     }
-    if (this.settings.fileFrecency === null || typeof this.settings.fileFrecency !== "object") {
+    if (this.settings.fileFrecency === null || typeof this.settings.fileFrecency !== "object" || Array.isArray(this.settings.fileFrecency)) {
       this.settings.fileFrecency = {};
+    } else {
+      this.settings.fileFrecency = { ...this.settings.fileFrecency };
     }
     this.settings.modePrefixes = normalizeModePrefixes(this.settings.modePrefixes);
     this.settings.escapeChar = normalizeEscapeChar(this.settings.escapeChar);

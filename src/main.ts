@@ -475,8 +475,14 @@ export default class VaultSpotlightPlugin extends Plugin {
 				.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
 				.slice(0, MAX_RECENT_SEARCHES);
 		}
-		if (this.settings.fileFrecency === null || typeof this.settings.fileFrecency !== "object") {
+		// Clone unconditionally: Object.assign above is shallow, so when data.json
+		// has no fileFrecency this field still points at DEFAULT_SETTINGS' shared
+		// object. bumpFrecency() mutates it in place, which would otherwise leak
+		// one session's frecency into the module singleton on disable/re-enable.
+		if (this.settings.fileFrecency === null || typeof this.settings.fileFrecency !== "object" || Array.isArray(this.settings.fileFrecency)) {
 			this.settings.fileFrecency = {};
+		} else {
+			this.settings.fileFrecency = { ...this.settings.fileFrecency };
 		}
 		this.settings.modePrefixes = normalizeModePrefixes(this.settings.modePrefixes);
 		this.settings.escapeChar = normalizeEscapeChar(this.settings.escapeChar);
