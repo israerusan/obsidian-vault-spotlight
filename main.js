@@ -2239,22 +2239,22 @@ var require_nacl_fast = __commonJS({
         randombytes = fn;
       };
       (function() {
-        var crypto2 = typeof self !== "undefined" ? self.crypto || self.msCrypto : null;
-        if (crypto2 && crypto2.getRandomValues) {
+        var crypto = typeof self !== "undefined" ? self.crypto || self.msCrypto : null;
+        if (crypto && crypto.getRandomValues) {
           var QUOTA = 65536;
           nacl2.setPRNG(function(x, n) {
             var i, v = new Uint8Array(n);
             for (i = 0; i < n; i += QUOTA) {
-              crypto2.getRandomValues(v.subarray(i, i + Math.min(n - i, QUOTA)));
+              crypto.getRandomValues(v.subarray(i, i + Math.min(n - i, QUOTA)));
             }
             for (i = 0; i < n; i++) x[i] = v[i];
             cleanup(v);
           });
         } else if (typeof require !== "undefined") {
-          crypto2 = require_crypto();
-          if (crypto2 && crypto2.randomBytes) {
+          crypto = require_crypto();
+          if (crypto && crypto.randomBytes) {
             nacl2.setPRNG(function(x, n) {
-              var i, v = crypto2.randomBytes(n);
+              var i, v = crypto.randomBytes(n);
               for (i = 0; i < n; i++) x[i] = v[i];
               cleanup(v);
             });
@@ -2271,7 +2271,7 @@ __export(main_exports, {
   default: () => VaultSpotlightPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian14 = require("obsidian");
+var import_obsidian13 = require("obsidian");
 
 // src/settings.ts
 var import_obsidian = require("obsidian");
@@ -3261,13 +3261,13 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
         }
       }
     }
-    this.proHeading("Custom searches");
-    const customList = containerEl.createDiv();
-    if (!this.plugin.settings.isPro) {
-      customList.createEl("p", { cls: "vault-spotlight-hint-text", text: "Unlock Pro to save custom search commands." });
-    } else if (this.plugin.settings.customSearches.length === 0) {
-      customList.createEl("p", { text: `No custom searches yet. Create one from the spotlight with ${mod}+S.` });
-    } else {
+    if (this.plugin.settings.customSearches.length > 0) {
+      this.proHeading("Custom searches");
+      const customList = containerEl.createDiv();
+      customList.createEl("p", {
+        cls: "vault-spotlight-hint-text",
+        text: `Legacy saved searches that also run as commands (bindable under Settings \u2192 Hotkeys). New saved searches are now Workflows \u2014 press ${mod}+S on any search. Remove one here to retire it.`
+      });
       for (const search of this.plugin.settings.customSearches) {
         const row = customList.createDiv({ cls: "vault-spotlight-starred-row" });
         const pinned = this.plugin.settings.pinnedCustomSearchIds.includes(search.id);
@@ -3290,7 +3290,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
 };
 
 // src/spotlight/SpotlightModal.ts
-var import_obsidian11 = require("obsidian");
+var import_obsidian10 = require("obsidian");
 
 // src/core/advancedQuery.mjs
 function parseAdvancedQuery(raw) {
@@ -5460,48 +5460,7 @@ var CaptureController = class {
 };
 
 // src/spotlight/WorkflowController.ts
-var import_obsidian9 = require("obsidian");
-
-// src/spotlight/SaveSearchPromptModal.ts
 var import_obsidian8 = require("obsidian");
-var SaveSearchPromptModal = class extends import_obsidian8.Modal {
-  constructor(app, onSubmit) {
-    super(app);
-    this.onSubmit = onSubmit;
-  }
-  onOpen() {
-    const { contentEl } = this;
-    contentEl.empty();
-    new import_obsidian8.Setting(contentEl).setName("Name this search").setHeading();
-    new import_obsidian8.Setting(contentEl).setName("Search name").addText((text) => {
-      this.inputEl = text.inputEl;
-      text.setPlaceholder("Weekly review notes").onChange(() => {
-      });
-    }).addButton(
-      (btn) => btn.setButtonText("Save").setCta().onClick(() => {
-        const name = this.inputEl.value.trim();
-        if (!name) return;
-        this.onSubmit(name);
-        this.close();
-      })
-    );
-    this.inputEl.focus();
-    this.inputEl.addEventListener("keydown", (evt) => {
-      if (evt.key === "Enter") {
-        evt.preventDefault();
-        const name = this.inputEl.value.trim();
-        if (!name) return;
-        this.onSubmit(name);
-        this.close();
-      }
-    });
-  }
-  onClose() {
-    this.contentEl.empty();
-  }
-};
-
-// src/spotlight/WorkflowController.ts
 var WorkflowController = class {
   constructor(host) {
     this.host = host;
@@ -5554,7 +5513,7 @@ var WorkflowController = class {
         const profile = createProfileFromSettings(name, this.settings, mode, query, this.settings.searchProfiles.map((p) => p.id));
         this.settings.searchProfiles = [...this.settings.searchProfiles, profile].slice(0, MAX_SEARCH_PROFILES);
         void this.host.plugin.saveSettings();
-        new import_obsidian9.Notice("Vault Spotlight: search profile saved.");
+        new import_obsidian8.Notice("Vault Spotlight: search profile saved.");
         this.host.closeActionPalette();
       }
     }).open();
@@ -5563,7 +5522,7 @@ var WorkflowController = class {
     const mode = this.host.hasActionContext() ? this.host.actionReturnMode() : this.host.liveMode();
     const query = (this.host.hasActionContext() ? this.host.actionReturnQuery() : this.host.liveQuery()).trim();
     if (!canSaveWorkflowPreset(this.settings.workflowPresets, this.settings.isPro)) {
-      new import_obsidian9.Notice(`Vault Spotlight: the free plan includes ${FREE_WORKFLOW_LIMIT} workflows \u2014 upgrade to Pro for unlimited.`);
+      new import_obsidian8.Notice(`Vault Spotlight: the free plan includes ${FREE_WORKFLOW_LIMIT} workflows \u2014 upgrade to Pro for unlimited.`);
       return;
     }
     new PromptModal(this.host.app, {
@@ -5580,34 +5539,15 @@ var WorkflowController = class {
         this.settings.workflowPresets = [workflow, ...this.settings.workflowPresets].slice(0, MAX_WORKFLOW_PRESETS);
         this.host.setActiveWorkflowId(workflow.id);
         void this.host.plugin.saveSettings();
-        new import_obsidian9.Notice("Vault Spotlight: workflow saved.");
+        new import_obsidian8.Notice("Vault Spotlight: workflow saved.");
         this.host.closeActionPalette();
       }
-    }).open();
-  }
-  saveCustomSearch() {
-    const query = this.host.liveQuery().trim();
-    if (!query) return;
-    new SaveSearchPromptModal(this.host.app, (name) => {
-      const exists = this.settings.customSearches.some((s) => s.name.toLowerCase() === name.toLowerCase());
-      if (exists) {
-        new import_obsidian9.Notice("Vault Spotlight: a saved search with that name already exists.");
-        return;
-      }
-      const entry = {
-        id: typeof (crypto == null ? void 0 : crypto.randomUUID) === "function" ? crypto.randomUUID() : `cs-${Date.now()}`,
-        name,
-        query
-      };
-      this.settings.customSearches.push(entry);
-      void this.host.plugin.saveSettings();
-      this.host.plugin.registerCustomSearchCommand(entry);
     }).open();
   }
 };
 
 // src/spotlight/resultRow.ts
-var import_obsidian10 = require("obsidian");
+var import_obsidian9 = require("obsidian");
 
 // src/core/resultDecorators.mjs
 function buildFileDecorations({
@@ -5648,7 +5588,7 @@ function renderResultRow(row, item, options) {
   const titleRow = body.createDiv({ cls: "vault-spotlight-item-title-row" });
   const title = titleRow.createDiv({ cls: "vault-spotlight-item-title" });
   if (item.kind === "file") {
-    (0, import_obsidian10.setIcon)(iconWrap, iconForFileKind(item.fileKind));
+    (0, import_obsidian9.setIcon)(iconWrap, iconForFileKind(item.fileKind));
     row.toggleClass("is-starred", item.isStarred);
     renderHighlightedText(title, item.file.basename, item.matchIndices);
     const decorations = buildFileDecorations({
@@ -5674,7 +5614,7 @@ function renderResultRow(row, item, options) {
     }
     body.createDiv({ cls: "vault-spotlight-item-meta", text: decorations.meta });
   } else if (item.kind === "content") {
-    (0, import_obsidian10.setIcon)(
+    (0, import_obsidian9.setIcon)(
       iconWrap,
       item.file.extension === "canvas" ? "layout-dashboard" : item.file.extension === "base" ? "database" : "text"
     );
@@ -5685,17 +5625,17 @@ function renderResultRow(row, item, options) {
     renderHighlightedText(snippetEl, item.snippet, item.matchIndices);
     body.createDiv({ cls: "vault-spotlight-item-meta", text: item.file.path });
   } else if (item.kind === "heading") {
-    (0, import_obsidian10.setIcon)(iconWrap, "heading");
+    (0, import_obsidian9.setIcon)(iconWrap, "heading");
     renderHighlightedText(title, item.heading, item.matchIndices);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: `H${item.level}` });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.file.basename} \xB7 L${item.line}` });
   } else if (item.kind === "command") {
-    (0, import_obsidian10.setIcon)(iconWrap, "terminal-square");
+    (0, import_obsidian9.setIcon)(iconWrap, "terminal-square");
     renderHighlightedText(title, item.name, item.matchIndices);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isRecent ? "Recent" : "Command" });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: "Run command" });
   } else if (item.kind === "symbol") {
-    (0, import_obsidian10.setIcon)(iconWrap, iconForSymbolType(item.symbolType));
+    (0, import_obsidian9.setIcon)(iconWrap, iconForSymbolType(item.symbolType));
     if (item.symbolType === "heading" && item.level > 1) {
       row.addClass(`vault-spotlight-indent-${Math.min(item.level, 6)}`);
     }
@@ -5706,7 +5646,7 @@ function renderResultRow(row, item, options) {
     });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: `L${item.line}` });
   } else if (item.kind === "editor") {
-    (0, import_obsidian10.setIcon)(iconWrap, item.file ? iconForFileKind(getVaultFileKind(item.file)) : "layout");
+    (0, import_obsidian9.setIcon)(iconWrap, item.file ? iconForFileKind(getVaultFileKind(item.file)) : "layout");
     renderHighlightedText(title, item.title, item.matchIndices);
     if (item.isActive) {
       titleRow.createSpan({ cls: "vault-spotlight-item-badge is-active", text: "Active" });
@@ -5718,7 +5658,7 @@ function renderResultRow(row, item, options) {
     }
     body.createDiv({ cls: "vault-spotlight-item-meta", text: item.file ? item.file.path : "Open editor" });
   } else if (item.kind === "folder") {
-    (0, import_obsidian10.setIcon)(iconWrap, "folder");
+    (0, import_obsidian9.setIcon)(iconWrap, "folder");
     renderHighlightedText(title, item.folder.name, item.matchIndices);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Folder" });
     body.createDiv({
@@ -5726,22 +5666,22 @@ function renderResultRow(row, item, options) {
       text: `${item.folder.path} \xB7 ${item.folder.children.length} item${item.folder.children.length === 1 ? "" : "s"}`
     });
   } else if (item.kind === "history") {
-    (0, import_obsidian10.setIcon)(iconWrap, "history");
+    (0, import_obsidian9.setIcon)(iconWrap, "history");
     title.setText(item.query);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Recent search" });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: "Press \u21B5 to search again" });
   } else if (item.kind === "collection") {
-    (0, import_obsidian10.setIcon)(iconWrap, item.isPinned ? "star" : "search");
+    (0, import_obsidian9.setIcon)(iconWrap, item.isPinned ? "star" : "search");
     title.setText(item.name);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isPinned ? "Pinned collection" : "Smart collection" });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: item.query });
   } else if (item.kind === "profile") {
-    (0, import_obsidian10.setIcon)(iconWrap, item.isActive ? "check-circle" : "sliders-horizontal");
+    (0, import_obsidian9.setIcon)(iconWrap, item.isActive ? "check-circle" : "sliders-horizontal");
     title.setText(item.name);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isActive ? "Active profile" : "Search profile" });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.defaultMode}${item.defaultQuery ? ` \xB7 ${item.defaultQuery}` : ""}` });
   } else if (item.kind === "workflow") {
-    (0, import_obsidian10.setIcon)(iconWrap, item.isPinned ? "sparkles" : "play-circle");
+    (0, import_obsidian9.setIcon)(iconWrap, item.isPinned ? "sparkles" : "play-circle");
     title.setText(item.name);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isStarter ? "Starter workflow" : "Workflow" });
     if (item.rankingMode) {
@@ -5749,19 +5689,19 @@ function renderResultRow(row, item, options) {
     }
     body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.mode}${item.query ? ` \xB7 ${item.query}` : ""}` });
   } else if (item.kind === "action") {
-    (0, import_obsidian10.setIcon)(iconWrap, item.action.requiresPro ? "sparkles" : "bolt");
+    (0, import_obsidian9.setIcon)(iconWrap, item.action.requiresPro ? "sparkles" : "bolt");
     title.setText(item.action.name);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.action.requiresPro ? "Pro action" : "Action" });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: item.action.description });
   } else if (item.kind === "calc") {
     row.addClass("is-calc");
-    (0, import_obsidian10.setIcon)(iconWrap, "calculator");
+    (0, import_obsidian9.setIcon)(iconWrap, "calculator");
     title.addClass("vault-spotlight-calc-result");
     title.setText(item.result);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge is-action", text: "\u21B5 Copy" });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.expression} \xB7 ${item.detail}` });
   } else if (item.kind === "datejump") {
-    (0, import_obsidian10.setIcon)(iconWrap, "calendar-days");
+    (0, import_obsidian9.setIcon)(iconWrap, "calendar-days");
     title.setText(item.label);
     titleRow.createSpan({
       cls: item.exists ? "vault-spotlight-item-badge is-active" : "vault-spotlight-item-badge is-action",
@@ -5769,18 +5709,18 @@ function renderResultRow(row, item, options) {
     });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: item.path });
   } else if (item.kind === "capture") {
-    (0, import_obsidian10.setIcon)(iconWrap, "plus-circle");
+    (0, import_obsidian9.setIcon)(iconWrap, "plus-circle");
     title.setText(item.text || "Type something to capture\u2026");
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.label });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: item.description });
   } else if (item.kind === "snippet") {
-    (0, import_obsidian10.setIcon)(iconWrap, "clipboard-type");
+    (0, import_obsidian9.setIcon)(iconWrap, "clipboard-type");
     renderHighlightedText(title, item.name, item.matchIndices);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Snippet" });
     body.createDiv({ cls: "vault-spotlight-item-snippet", text: item.body.replace(/\s+/g, " ").slice(0, 120) });
   } else {
     row.addClass("is-emphasis");
-    (0, import_obsidian10.setIcon)(iconWrap, "file-plus");
+    (0, import_obsidian9.setIcon)(iconWrap, "file-plus");
     title.setText(`Create \u201C${item.name}\u201D`);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge is-action", text: "New" });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: "Create a new note" });
@@ -5788,14 +5728,14 @@ function renderResultRow(row, item, options) {
 }
 
 // src/spotlight/SpotlightModal.ts
-var formatMoment2 = import_obsidian11.moment;
+var formatMoment2 = import_obsidian10.moment;
 var SEARCH_DEBOUNCE_MS = 60;
 var RESULT_LIMIT = 60;
 var FILE_QUERY_LIMIT = 50;
 var FILE_BROWSE_LIMIT = 40;
 var SYMBOL_LIMIT = 100;
 var COMMAND_BROWSE_LIMIT = 1e3;
-var SpotlightModal = class extends import_obsidian11.Modal {
+var SpotlightModal = class extends import_obsidian10.Modal {
   constructor(app, plugin, initialQuery = "", initialMode = "files") {
     super(app);
     this.plugin = plugin;
@@ -5890,7 +5830,7 @@ var SpotlightModal = class extends import_obsidian11.Modal {
     this.mode = initialMode;
   }
   onOpen() {
-    this.modifierLabel = getModifierLabel(import_obsidian11.Platform.isMacOS || import_obsidian11.Platform.isIosApp ? "mac" : "");
+    this.modifierLabel = getModifierLabel(import_obsidian10.Platform.isMacOS || import_obsidian10.Platform.isIosApp ? "mac" : "");
     this.containerEl.addClass("vault-spotlight-container");
     this.titleEl.empty();
     const { contentEl } = this;
@@ -5906,7 +5846,7 @@ var SpotlightModal = class extends import_obsidian11.Modal {
     });
     const inputWrap = header.createDiv({ cls: "vault-spotlight-input-wrap" });
     const searchIcon = inputWrap.createSpan({ cls: "vault-spotlight-search-icon" });
-    (0, import_obsidian11.setIcon)(searchIcon, "search");
+    (0, import_obsidian10.setIcon)(searchIcon, "search");
     searchIcon.setAttr("aria-hidden", "true");
     this.inputEl = inputWrap.createEl("input", {
       type: "text",
@@ -5957,7 +5897,7 @@ var SpotlightModal = class extends import_obsidian11.Modal {
       evt.stopPropagation();
       if ((item == null ? void 0 : item.kind) === "file") {
         item.isStarred = this.plugin.toggleStar(item.file.path);
-        (0, import_obsidian11.setIcon)(starBtn, item.isStarred ? "star" : "star-off");
+        (0, import_obsidian10.setIcon)(starBtn, item.isStarred ? "star" : "star-off");
         const row = starBtn.closest(".vault-spotlight-item");
         row == null ? void 0 : row.toggleClass("is-starred", item.isStarred);
       }
@@ -5992,7 +5932,7 @@ var SpotlightModal = class extends import_obsidian11.Modal {
       const cta = contentEl.createDiv({ cls: "vault-spotlight-pro-cta" });
       const lead = cta.createDiv({ cls: "vault-spotlight-pro-cta-lead" });
       const ctaIcon = lead.createDiv({ cls: "vault-spotlight-pro-cta-icon" });
-      (0, import_obsidian11.setIcon)(ctaIcon, "sparkles");
+      (0, import_obsidian10.setIcon)(ctaIcon, "sparkles");
       ctaIcon.setAttr("aria-hidden", "true");
       lead.createDiv({
         cls: "vault-spotlight-pro-cta-text",
@@ -6587,7 +6527,7 @@ var SpotlightModal = class extends import_obsidian11.Modal {
     const q = query.trim();
     const rows = [];
     for (const abstract of this.app.vault.getAllLoadedFiles()) {
-      if (!(abstract instanceof import_obsidian11.TFolder) || abstract.isRoot()) continue;
+      if (!(abstract instanceof import_obsidian10.TFolder) || abstract.isRoot()) continue;
       if (q.length === 0) {
         rows.push({ folder: abstract, score: 1, indices: [] });
         continue;
@@ -6725,7 +6665,7 @@ var SpotlightModal = class extends import_obsidian11.Modal {
     this.resultsEl.removeClass("is-searching");
     const empty = this.resultsEl.createDiv({ cls: "vault-spotlight-empty" });
     const iconWrap = empty.createDiv({ cls: "vault-spotlight-empty-icon" });
-    (0, import_obsidian11.setIcon)(iconWrap, icon);
+    (0, import_obsidian10.setIcon)(iconWrap, icon);
     iconWrap.setAttr("aria-hidden", "true");
     empty.createDiv({ cls: "vault-spotlight-empty-title", text: title });
     empty.createDiv({ cls: "vault-spotlight-empty-desc", text: desc });
@@ -6776,7 +6716,7 @@ var SpotlightModal = class extends import_obsidian11.Modal {
         const check = row.createDiv({ cls: "vault-spotlight-check" });
         check.setAttr("aria-hidden", "true");
         if (this.checkedPaths.has(file.path)) {
-          (0, import_obsidian11.setIcon)(check, "check");
+          (0, import_obsidian10.setIcon)(check, "check");
         }
       }
       renderResultRow(row, item, {
@@ -6790,7 +6730,7 @@ var SpotlightModal = class extends import_obsidian11.Modal {
           cls: "vault-spotlight-star-btn",
           attr: { type: "button", tabindex: "-1", "aria-hidden": "true" }
         });
-        (0, import_obsidian11.setIcon)(starBtn, starItem.isStarred ? "star" : "star-off");
+        (0, import_obsidian10.setIcon)(starBtn, starItem.isStarred ? "star" : "star-off");
       }
     });
     this.renderedSelectedIndex = this.selectedIndex;
@@ -6971,7 +6911,7 @@ var SpotlightModal = class extends import_obsidian11.Modal {
     row == null ? void 0 : row.toggleClass("is-starred", item.isStarred);
     const starBtn = row == null ? void 0 : row.querySelector(".vault-spotlight-star-btn");
     if (starBtn) {
-      (0, import_obsidian11.setIcon)(starBtn, item.isStarred ? "star" : "star-off");
+      (0, import_obsidian10.setIcon)(starBtn, item.isStarred ? "star" : "star-off");
       starBtn.setAttr("aria-label", item.isStarred ? "Unstar" : "Star");
     }
   }
@@ -7001,7 +6941,7 @@ var SpotlightModal = class extends import_obsidian11.Modal {
   safeActivate(paneOverride = null) {
     this.activateSelection(paneOverride).catch((err) => {
       console.error("[VaultSpotlight] activation failed", err);
-      new import_obsidian11.Notice("Vault Spotlight: could not complete that action.");
+      new import_obsidian10.Notice("Vault Spotlight: could not complete that action.");
     });
   }
   async activateSelection(paneOverride = null) {
@@ -7046,14 +6986,14 @@ var SpotlightModal = class extends import_obsidian11.Modal {
     }
     if (selected.kind === "action") {
       if (selected.action.requiresPro && !this.plugin.settings.isPro) {
-        new import_obsidian11.Notice("Vault Spotlight: Pro required for this action.");
+        new import_obsidian10.Notice("Vault Spotlight: Pro required for this action.");
         return;
       }
       try {
         await selected.action.run();
       } catch (err) {
         console.error("[VaultSpotlight] action failed", err);
-        new import_obsidian11.Notice("Vault Spotlight: action failed.");
+        new import_obsidian10.Notice("Vault Spotlight: action failed.");
       }
       return;
     }
@@ -7131,7 +7071,7 @@ var SpotlightModal = class extends import_obsidian11.Modal {
     const line = item.kind === "content" || item.kind === "heading" || item.kind === "symbol" ? item.line : null;
     if (line === null) return;
     const file = itemFile(item);
-    if (!file || file.extension !== "md" || !(leaf.view instanceof import_obsidian11.MarkdownView)) return;
+    if (!file || file.extension !== "md" || !(leaf.view instanceof import_obsidian10.MarkdownView)) return;
     const editor = leaf.view.editor;
     const targetLine = Math.max(0, Math.min(line - 1, editor.lastLine()));
     const pos = { line: targetLine, ch: 0 };
@@ -7146,14 +7086,14 @@ var SpotlightModal = class extends import_obsidian11.Modal {
         (_b = (_a = this.app.workspace.getActiveFile()) == null ? void 0 : _a.path) != null ? _b : ""
       );
       const dir = parent.path ? `${parent.path}/` : "";
-      const path = (0, import_obsidian11.normalizePath)(`${dir}${cleaned}.md`);
+      const path = (0, import_obsidian10.normalizePath)(`${dir}${cleaned}.md`);
       const existing = this.app.vault.getAbstractFileByPath(path);
-      const file = existing instanceof import_obsidian11.TFile ? existing : await this.app.vault.create(path, "");
+      const file = existing instanceof import_obsidian10.TFile ? existing : await this.app.vault.create(path, "");
       await this.app.workspace.getLeaf(false).openFile(file);
       this.plugin.trackRecent(file.path);
     } catch (err) {
       console.error("[VaultSpotlight] create note failed", err);
-      new import_obsidian11.Notice("Vault Spotlight: could not create note.");
+      new import_obsidian10.Notice("Vault Spotlight: could not create note.");
     }
   }
   openActionPalette(context = ((_a) => (_a = this.items[this.selectedIndex]) != null ? _a : null)()) {
@@ -7182,7 +7122,7 @@ var SpotlightModal = class extends import_obsidian11.Modal {
   runIntegrationCommand(name) {
     const command = this.commandSearcher.search(name, 20).find((cmd) => cmd.id.toLowerCase().includes(name.replace(" ", "-")) || cmd.name.toLowerCase().includes(name));
     if (!command || !this.commandSearcher.execute(command.id)) {
-      new import_obsidian11.Notice(`Vault Spotlight: ${name} command not found.`);
+      new import_obsidian10.Notice(`Vault Spotlight: ${name} command not found.`);
       return;
     }
     this.close();
@@ -7195,14 +7135,14 @@ var SpotlightModal = class extends import_obsidian11.Modal {
   async handoffBaseToPowerPack(view, basePath) {
     const api = this.basesPowerPackApi();
     if (!(api == null ? void 0 : api.openView)) {
-      new import_obsidian11.Notice("Vault Spotlight: update Bases Power Pack to 1.2.0+ to use this action.");
+      new import_obsidian10.Notice("Vault Spotlight: update Bases Power Pack to 1.2.0+ to use this action.");
       return;
     }
     try {
       if (await api.openView(view, basePath)) this.close();
     } catch (err) {
       console.error("[VaultSpotlight] Bases Power Pack handoff failed", err);
-      new import_obsidian11.Notice("Vault Spotlight: could not open the base in Bases Power Pack.");
+      new import_obsidian10.Notice("Vault Spotlight: could not open the base in Bases Power Pack.");
     }
   }
   availableActions(context) {
@@ -7446,7 +7386,7 @@ var SpotlightModal = class extends import_obsidian11.Modal {
     var _a;
     const file = itemFile(item);
     if (!file) return;
-    const menu = new import_obsidian11.Menu();
+    const menu = new import_obsidian10.Menu();
     const openIn = (paneType) => {
       this.close();
       void (async () => {
@@ -7637,6 +7577,12 @@ var SpotlightModal = class extends import_obsidian11.Modal {
       this.cycleMode(-1);
       return false;
     });
+    this.scope.register(["Mod"], "s", (evt) => {
+      if (evt.isComposing) return true;
+      evt.preventDefault();
+      this.workflows.saveCurrentWorkflow();
+      return false;
+    });
     if (!this.plugin.settings.isPro) return;
     this.scope.register(["Mod"], " ", (evt) => {
       if (evt.isComposing) return true;
@@ -7648,16 +7594,6 @@ var SpotlightModal = class extends import_obsidian11.Modal {
       if (evt.isComposing) return true;
       evt.preventDefault();
       this.toggleStarSelected();
-      return false;
-    });
-    this.scope.register(["Mod"], "s", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      if (canSaveWorkflowPreset(this.plugin.settings.workflowPresets, this.plugin.settings.isPro)) {
-        this.workflows.saveCurrentWorkflow();
-      } else {
-        this.workflows.saveCustomSearch();
-      }
       return false;
     });
   }
@@ -7762,10 +7698,10 @@ function resolveLicenseTransition(before, licenseKey, verifyResult, persistUncha
 }
 
 // src/search/ContentSearcher.ts
-var import_obsidian13 = require("obsidian");
+var import_obsidian12 = require("obsidian");
 
 // src/search/RipgrepSearcher.ts
-var import_obsidian12 = require("obsidian");
+var import_obsidian11 = require("obsidian");
 function getChildProcess() {
   try {
     const req = window.require;
@@ -7892,15 +7828,26 @@ var RipgrepSearcher = class {
       // (Hidden/dot folders stay skipped — matching Obsidian's indexing.)
       "--no-ignore",
       "--max-count",
-      // A multi-word query needs more anchor hits per file to survive the
-      // all-tokens filter below; a single word keeps the tight cap.
-      multi ? "40" : "4",
+      // Per-file match cap. It exists only to bound the pipe (a common word in
+      // a huge vault), NOT to diversify results — so it must be generous enough
+      // that a single dense file isn't truncated below the requested `limit`
+      // (the in-process fallback has no per-file cap, so a tight cap here made rg
+      // return fewer results for the same query). A multi-word query needs even
+      // more anchor hits per file because the all-tokens filter below discards
+      // anchor-only lines — so the multi cap mirrors the in-process fallback's
+      // own working-set bound (softCap = max(limit*10, 500) in ContentSearcher),
+      // meaning a file would need more anchor hits than the fallback ever
+      // considers before rg could return fewer results. maxBuffer overflow is
+      // handled gracefully downstream.
+      multi ? String(Math.max(options.limit * 10, 500)) : String(options.limit),
       // Cap line length so a minified/one-line file can't blow maxBuffer.
-      // `--max-columns-preview` still prints a usable prefix of an
-      // over-long line instead of an "omitted" notice, so the AND filter
-      // and snippet below see real text rather than a byte-count message.
+      // `--max-columns-preview` still prints a usable prefix of an over-long line
+      // instead of an "omitted" notice, so the AND filter and snippet below see
+      // real text. Kept equal to MAX_INDEXED_LINE_LEN (the fallback/worker line
+      // cap) so a match in columns 501–2000 doesn't exist on mobile/fallback yet
+      // vanish under ripgrep.
       "--max-columns",
-      "500",
+      String(MAX_INDEXED_LINE_LEN),
       "--max-columns-preview",
       // Markdown only. Canvas (single-line JSON) and Bases (YAML) are
       // searched by their structure-aware searchers in ContentSearcher, not
@@ -7995,7 +7942,7 @@ var RipgrepSearcher = class {
         engine: "ripgrep"
       });
     }
-    return results.sort((a, b) => b.score - a.score).slice(0, limit);
+    return results.sort(compareContentRows).slice(0, limit);
   }
   /**
    * Parse one `path:line:content` rg output line into a resolved file + line +
@@ -8015,7 +7962,7 @@ var RipgrepSearcher = class {
       const normalized = rawPath.replace(/\\/g, "/").replace(/^\.\//, "");
       let file;
       const direct = this.app.vault.getAbstractFileByPath(normalized);
-      if (direct instanceof import_obsidian12.TFile) {
+      if (direct instanceof import_obsidian11.TFile) {
         file = direct;
       } else {
         file = this.findFileBySuffix(getSuffixMap(), normalized);
@@ -8491,7 +8438,7 @@ var ContentSearcher = class {
         const results2 = [];
         for (const row of rows) {
           const file = this.app.vault.getAbstractFileByPath(row.path);
-          if (!(file instanceof import_obsidian13.TFile)) continue;
+          if (!(file instanceof import_obsidian12.TFile)) continue;
           results2.push({
             file,
             line: row.line,
@@ -8622,7 +8569,7 @@ var MAX_FRECENCY_ENTRIES = 500;
 function isSpotlightMode(value) {
   return typeof value === "string" && MODE_ORDER2.includes(value);
 }
-var VaultSpotlightPlugin = class extends import_obsidian14.Plugin {
+var VaultSpotlightPlugin = class extends import_obsidian13.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
@@ -8709,12 +8656,12 @@ var VaultSpotlightPlugin = class extends import_obsidian14.Plugin {
     });
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
-        if (this.layoutReady && file instanceof import_obsidian14.TFile) void this.contentSearcher.updateFile(file);
+        if (this.layoutReady && file instanceof import_obsidian13.TFile) void this.contentSearcher.updateFile(file);
       })
     );
     this.registerEvent(
       this.app.vault.on("create", (file) => {
-        if (this.layoutReady && file instanceof import_obsidian14.TFile) void this.contentSearcher.updateFile(file);
+        if (this.layoutReady && file instanceof import_obsidian13.TFile) void this.contentSearcher.updateFile(file);
       })
     );
     this.registerEvent(
@@ -8728,7 +8675,7 @@ var VaultSpotlightPlugin = class extends import_obsidian14.Plugin {
       this.app.vault.on("rename", (file, oldPath) => {
         if (!this.layoutReady) return;
         this.contentSearcher.removeFile(oldPath);
-        if (file instanceof import_obsidian14.TFile) void this.contentSearcher.updateFile(file);
+        if (file instanceof import_obsidian13.TFile) void this.contentSearcher.updateFile(file);
         this.renamePath(oldPath, file.path);
       })
     );
@@ -8846,8 +8793,8 @@ var VaultSpotlightPlugin = class extends import_obsidian14.Plugin {
     const active = this.app.workspace.getActiveFile();
     const path = previousFilePath(this.settings.recentPaths, (_a = active == null ? void 0 : active.path) != null ? _a : "");
     const file = path ? this.app.vault.getAbstractFileByPath(path) : null;
-    if (!(file instanceof import_obsidian14.TFile)) {
-      new import_obsidian14.Notice("Vault Spotlight: no previous file yet.");
+    if (!(file instanceof import_obsidian13.TFile)) {
+      new import_obsidian13.Notice("Vault Spotlight: no previous file yet.");
       return;
     }
     try {
@@ -8855,7 +8802,7 @@ var VaultSpotlightPlugin = class extends import_obsidian14.Plugin {
       this.trackRecent(file.path);
     } catch (err) {
       console.error("[VaultSpotlight] switch to last file failed", err);
-      new import_obsidian14.Notice("Vault Spotlight: could not open the previous file.");
+      new import_obsidian13.Notice("Vault Spotlight: could not open the previous file.");
     }
   }
   /** Record an executed command so it resurfaces on an empty command query. */

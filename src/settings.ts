@@ -855,13 +855,18 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			}
 		}
 
-		this.proHeading("Custom searches");
-		const customList = containerEl.createDiv();
-		if (!this.plugin.settings.isPro) {
-			customList.createEl("p", { cls: "vault-spotlight-hint-text", text: "Unlock Pro to save custom search commands." });
-		} else if (this.plugin.settings.customSearches.length === 0) {
-			customList.createEl("p", { text: `No custom searches yet. Create one from the spotlight with ${mod}+S.` });
-		} else {
+		// Custom searches are a LEGACY concept now consolidated into Workflows: there
+		// is no create path anymore (Mod+S saves a workflow for every tier). Only
+		// surface the section for users who already have some, so they can keep
+		// running and managing them; hide it entirely otherwise rather than advertise
+		// a retired feature.
+		if (this.plugin.settings.customSearches.length > 0) {
+			this.proHeading("Custom searches");
+			const customList = containerEl.createDiv();
+			customList.createEl("p", {
+				cls: "vault-spotlight-hint-text",
+				text: `Legacy saved searches that also run as commands (bindable under Settings → Hotkeys). New saved searches are now Workflows — press ${mod}+S on any search. Remove one here to retire it.`,
+			});
 			for (const search of this.plugin.settings.customSearches) {
 				const row = customList.createDiv({ cls: "vault-spotlight-starred-row" });
 				const pinned = this.plugin.settings.pinnedCustomSearchIds.includes(search.id);

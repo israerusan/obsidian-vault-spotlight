@@ -1,7 +1,6 @@
 import { App, Notice } from "obsidian";
 import type VaultSpotlightPlugin from "../main";
 import { PromptModal } from "./PromptModal";
-import { SaveSearchPromptModal } from "./SaveSearchPromptModal";
 import { activeProfile, createProfileFromSettings, MAX_SEARCH_PROFILES } from "../core/searchProfiles.mjs";
 import { canSaveWorkflowPreset, createWorkflowPreset, ensureStarterWorkflows, FREE_WORKFLOW_LIMIT, MAX_WORKFLOW_PRESETS } from "../core/workflowPresets.mjs";
 import type { RankingMode } from "../core/ranking.mjs";
@@ -139,24 +138,4 @@ export class WorkflowController {
 		}).open();
 	}
 
-	saveCustomSearch(): void {
-		const query = this.host.liveQuery().trim();
-		if (!query) return;
-
-		new SaveSearchPromptModal(this.host.app, (name) => {
-			const exists = this.settings.customSearches.some((s) => s.name.toLowerCase() === name.toLowerCase());
-			if (exists) {
-				new Notice("Vault Spotlight: a saved search with that name already exists.");
-				return;
-			}
-			const entry = {
-				id: typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : `cs-${Date.now()}`,
-				name,
-				query,
-			};
-			this.settings.customSearches.push(entry);
-			void this.host.plugin.saveSettings();
-			this.host.plugin.registerCustomSearchCommand(entry);
-		}).open();
-	}
 }

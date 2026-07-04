@@ -66,7 +66,7 @@ export function compareContentRows(a: ContentSearchResult, b: ContentSearchResul
  * MUST stay identical to the cap inlined in core/workerSource.mjs so the worker
  * and in-process indexes retain (and match) the exact same text.
  */
-const MAX_INDEXED_LINE_LEN = 2000;
+export const MAX_INDEXED_LINE_LEN = 2000;
 
 /** Consecutive worker-scan timeouts tolerated before the worker is retired. */
 const MAX_WORKER_TIMEOUTS = 3;

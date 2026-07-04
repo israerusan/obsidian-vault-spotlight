@@ -1,5 +1,5 @@
 import { App, TFile } from "obsidian";
-import type { ContentSearchResult } from "./ContentSearcher";
+import { compareContentRows, MAX_INDEXED_LINE_LEN, type ContentSearchResult } from "./ContentSearcher";
 
 interface ChildProcessModule {
 	execFile: (
@@ -160,15 +160,26 @@ export class RipgrepSearcher {
 			// (Hidden/dot folders stay skipped — matching Obsidian's indexing.)
 			"--no-ignore",
 			"--max-count",
-			// A multi-word query needs more anchor hits per file to survive the
-			// all-tokens filter below; a single word keeps the tight cap.
-			multi ? "40" : "4",
+			// Per-file match cap. It exists only to bound the pipe (a common word in
+			// a huge vault), NOT to diversify results — so it must be generous enough
+			// that a single dense file isn't truncated below the requested `limit`
+			// (the in-process fallback has no per-file cap, so a tight cap here made rg
+			// return fewer results for the same query). A multi-word query needs even
+			// more anchor hits per file because the all-tokens filter below discards
+			// anchor-only lines — so the multi cap mirrors the in-process fallback's
+			// own working-set bound (softCap = max(limit*10, 500) in ContentSearcher),
+			// meaning a file would need more anchor hits than the fallback ever
+			// considers before rg could return fewer results. maxBuffer overflow is
+			// handled gracefully downstream.
+			multi ? String(Math.max(options.limit * 10, 500)) : String(options.limit),
 			// Cap line length so a minified/one-line file can't blow maxBuffer.
-			// `--max-columns-preview` still prints a usable prefix of an
-			// over-long line instead of an "omitted" notice, so the AND filter
-			// and snippet below see real text rather than a byte-count message.
+			// `--max-columns-preview` still prints a usable prefix of an over-long line
+			// instead of an "omitted" notice, so the AND filter and snippet below see
+			// real text. Kept equal to MAX_INDEXED_LINE_LEN (the fallback/worker line
+			// cap) so a match in columns 501–2000 doesn't exist on mobile/fallback yet
+			// vanish under ripgrep.
 			"--max-columns",
-			"500",
+			String(MAX_INDEXED_LINE_LEN),
 			"--max-columns-preview",
 			// Markdown only. Canvas (single-line JSON) and Bases (YAML) are
 			// searched by their structure-aware searchers in ContentSearcher, not
@@ -309,7 +320,11 @@ export class RipgrepSearcher {
 			});
 		}
 
-		return results.sort((a, b) => b.score - a.score).slice(0, limit);
+		// Same deterministic (score, path, line) comparator the worker and in-process
+		// fallback use — so when no Canvas/Base rows are merged (mergeResults would
+		// otherwise re-sort), tied ripgrep rows are ordered identically to the
+		// fallback rather than by rg's file-walk order.
+		return results.sort(compareContentRows).slice(0, limit);
 	}
 
 	/**

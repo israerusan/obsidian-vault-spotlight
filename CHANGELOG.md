@@ -8,6 +8,23 @@ All notable changes to Vault Spotlight are documented here. This project follows
 A robustness and polish pass driven by a full multi-agent audit of the plugin.
 
 ### Fixed
+- **Free users can actually save a workflow now.** `Mod+S` was registered only
+  after the Pro gate in the modal, so pressing it did nothing on the free tier even
+  though Settings advertised it — the free "save up to two workflows" feature was
+  unreachable. `Mod+S` now saves a workflow for every tier (the free limit is
+  enforced with an upgrade notice), and it always saves a *workflow* rather than
+  falling through to a dead custom-search branch.
+- **Content search no longer drops legitimate matches under ripgrep.** The per-file
+  match cap was as low as four results, so a dense note could be truncated below the
+  requested result count — ripgrep returned fewer matches than the in-process
+  fallback for the same query. The cap is now sized to the requested limit.
+- **Search results are identical whether or not ripgrep truncates long lines.**
+  ripgrep's column cap is aligned to the in-process/worker line cap (2000), so a
+  match in columns 501–2000 no longer exists on mobile/fallback yet vanishes with
+  ripgrep installed.
+- Tie-broken content ordering is now truly engine-independent: ripgrep sorts by the
+  same (score, path, line) comparator as the worker and in-process paths, so equal
+  scores order identically even when no Canvas/Base results are merged.
 - **Rename now works on the free tier.** The action palette locked "Rename" behind
   Pro while the right-click / Alt+Enter menu offered it ungated — the two paths are
   now consistent and rename is free everywhere (it's a basic file operation).
@@ -45,7 +62,16 @@ A robustness and polish pass driven by a full multi-agent audit of the plugin.
   the off-thread and in-process indexes, mirroring ripgrep's column cap. This most
   helps mobile, where the in-process index is the only content-search path.
 
+### Changed
+- Saved-search concepts are being consolidated toward **Workflows**. Creating new
+  *custom searches* is retired (it overlapped heavily with workflows and its only
+  entry point was broken); existing custom searches keep running as commands and are
+  still managed in Settings. `Mod+S` saves a workflow.
+
 ### Internal
+- Repository hygiene: a `.gitattributes` pins line endings to LF so a Windows clone
+  can't produce phantom CRLF churn, and `npm run lint` now fails on any ESLint
+  warning (`--max-warnings 0`) instead of letting warnings ship green.
 - Settings load is hardened further: an oversized `fileFrecency` map is pruned to its
   cap on load, the remaining boolean toggles are coerced against corrupt values, and
   the recent/starred caps are clamped to a sane maximum.

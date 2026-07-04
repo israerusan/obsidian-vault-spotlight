@@ -2,6 +2,7 @@ import assert from "assert";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { canSaveWorkflowPreset } from "../src/core/workflowPresets.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
@@ -40,6 +41,25 @@ assert.ok(settings.includes("searchAliases"), "settings should persist Pro query
 assert.ok(spotlight.includes('"links"'), "spotlight should include Pro links mode");
 assert.ok(spotlight.includes("linkModeItems"), "spotlight should resolve backlinks/outlinks in links mode");
 assert.ok(spotlight.includes("Search in Omnisearch"), "spotlight should expose Omnisearch handoff when installed");
+// Regression (critique #1): the free "save a workflow" path must be reachable.
+// A prior version registered Mod+S only AFTER `if (!isPro) return` in the modal,
+// so pressing Mod+S did nothing for free users despite Settings advertising it.
+const modalSrc = fs.readFileSync(path.join(spotlightDir, "SpotlightModal.ts"), "utf8");
+const modSaveIdx = modalSrc.indexOf('this.scope.register(["Mod"], "s"');
+// Mod+Space (toggle multi-select check) is the FIRST shortcut registered after the
+// keybinding Pro gate, so Mod+S appearing before it proves Mod+S is in the ungated
+// region. (Anchoring on the isPro gate string directly is unreliable — it appears
+// elsewhere in the file too.)
+const proShortcutIdx = modalSrc.indexOf('this.scope.register(["Mod"], " "');
+assert.ok(modSaveIdx !== -1 && proShortcutIdx !== -1, "modal should register Mod+S and the Pro-only Mod+Space shortcut");
+assert.ok(modSaveIdx < proShortcutIdx, "Mod+S (save workflow) must be registered before the Pro-only shortcuts so free users can save workflows");
+assert.equal(canSaveWorkflowPreset([], false), true, "free tier can save its first workflow");
+assert.equal(canSaveWorkflowPreset([{}, {}], false), false, "free tier is capped at the free workflow limit");
+assert.equal(canSaveWorkflowPreset([], true), true, "Pro can always save a workflow");
+// Regression (critique #2): the orphaned custom-search create path is retired,
+// not silently dead — Mod+S saves a workflow for everyone instead.
+assert.ok(!spotlight.includes("saveCustomSearch"), "the dead saveCustomSearch path should be removed, not left unreachable");
+
 assert.ok(readme.includes("Keyboard action palette"), "README should document the action palette");
 assert.ok(readme.includes("Smart collections"), "README should document smart collections");
 assert.ok(readme.includes("Export results"), "README should document result export");

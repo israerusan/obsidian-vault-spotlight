@@ -27,7 +27,7 @@ import { showOnboarding } from "../core/onboarding.mjs";
 import { fuzzyMatch, tokenizeQuery } from "../search/fuzzy";
 import { getVaultFileKind } from "../search/vaultFiles";
 import { activeProfile, type CoreSearchProfile } from "../core/searchProfiles.mjs";
-import { canSaveWorkflowPreset, ensureStarterWorkflows, normalizeWorkflowPresets, FREE_WORKFLOW_LIMIT, type WorkflowPreset } from "../core/workflowPresets.mjs";
+import { ensureStarterWorkflows, normalizeWorkflowPresets, FREE_WORKFLOW_LIMIT, type WorkflowPreset } from "../core/workflowPresets.mjs";
 import { detectSearchIntegrations, type SearchIntegrations } from "../core/integrations.mjs";
 import { findBacklinks, findOutlinks } from "../core/linkGraph.mjs";
 import { evaluateExpression, parseCurrencyRates } from "../core/calculator.mjs";
@@ -2296,6 +2296,19 @@ export class SpotlightModal extends Modal {
 			return false;
 		});
 
+		// Mod+S saves the current search as a workflow — registered for ALL tiers,
+		// NOT behind the Pro gate below. Workflows are free up to FREE_WORKFLOW_LIMIT,
+		// and saveCurrentWorkflow() itself shows the upgrade notice when a free user is
+		// already at the limit. Gating this behind Pro (as it was) made the free
+		// "save a workflow" path that Settings and the changelog advertise literally
+		// unreachable — pressing Mod+S did nothing for a free user.
+		this.scope.register(["Mod"], "s", (evt) => {
+			if (evt.isComposing) return true;
+			evt.preventDefault();
+			this.workflows.saveCurrentWorkflow();
+			return false;
+		});
+
 		if (!this.plugin.settings.isPro) return;
 
 		this.scope.register(["Mod"], " ", (evt) => {
@@ -2308,16 +2321,6 @@ export class SpotlightModal extends Modal {
 			if (evt.isComposing) return true;
 			evt.preventDefault();
 			this.toggleStarSelected();
-			return false;
-		});
-		this.scope.register(["Mod"], "s", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			if (canSaveWorkflowPreset(this.plugin.settings.workflowPresets, this.plugin.settings.isPro)) {
-				this.workflows.saveCurrentWorkflow();
-			} else {
-				this.workflows.saveCustomSearch();
-			}
 			return false;
 		});
 	}
