@@ -3,7 +3,7 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.7.2] - 2026-07-04
 
 ### Changed
 - The result and preview panes now use a slim, hover-revealed scrollbar in place
