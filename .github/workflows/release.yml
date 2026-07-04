@@ -35,7 +35,7 @@ jobs:
           test -f versions.json
           node -e "const m=require('./manifest.json'); const t='${GITHUB_REF#refs/tags/}'; if(m.version!==t){console.error('manifest',m.version,'!= tag',t); process.exit(1)}; const v=require('./versions.json'); if(!v[m.version]){console.error('versions.json missing',m.version); process.exit(1)}"
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
