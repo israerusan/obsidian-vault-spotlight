@@ -6,13 +6,12 @@ All notable changes to Vault Spotlight are documented here. This project follows
 ## [Unreleased]
 
 ### Changed
-- Motion and finish polish for a smoother, more premium launcher feel: the modal
-  now settles in with a fast scale+fade entrance, mode pills cross-fade when you
-  cycle modes, and the result/preview panes use a slim, hover-revealed scrollbar
-  in place of the platform default. All motion is disabled under
-  `prefers-reduced-motion`.
-- The results and preview panes now contain their own scrolling, so reaching the
-  top or bottom no longer scrolls the vault behind the modal.
+- The result and preview panes now use a slim, hover-revealed scrollbar in place
+  of the platform default.
+
+### Fixed
+- Reaching the top or bottom of the result list or preview no longer scrolls the
+  vault behind the modal (scroll is now contained to the pane).
 
 ## [2.7.1] - 2026-07-04
 

@@ -37,21 +37,6 @@
 	overflow: hidden;
 	box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
 	border: 1px solid var(--background-modifier-border);
-	/* Settled scale+fade entrance — the signature launcher cue. Fast (160ms)
-	   so it reads as instant, on an ease-out-expo curve so it lands softly
-	   rather than snapping. Disabled under prefers-reduced-motion below. */
-	animation: vault-spotlight-modal-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@keyframes vault-spotlight-modal-in {
-	from {
-		opacity: 0;
-		transform: translateY(-8px) scale(0.985);
-	}
-	to {
-		opacity: 1;
-		transform: translateY(0) scale(1);
-	}
 }
 
 .vault-spotlight-modal {
@@ -94,9 +79,6 @@
 	background: var(--background-modifier-hover);
 	color: var(--text-muted);
 	white-space: nowrap;
-	/* Cross-fade the pill colour when cycling modes (Tab) so the badge settles
-	   into its new category instead of snapping. */
-	transition: background 0.15s ease, color 0.15s ease;
 }
 
 .vault-spotlight-mode-badge.is-pro {
@@ -852,8 +834,7 @@ input.vault-spotlight-prefix-input {
 	margin: 4px 0 12px;
 }
 
-/* Respect reduced-motion: no perpetual shimmer, no entrance animation, no
-   interaction transitions. */
+/* Respect reduced-motion: no perpetual shimmer, no interaction transitions. */
 @media (prefers-reduced-motion: reduce) {
 	.vault-spotlight-skeleton-icon,
 	.vault-spotlight-skeleton-line {
@@ -861,14 +842,8 @@ input.vault-spotlight-prefix-input {
 		background: var(--background-modifier-hover);
 	}
 
-	/* Skip the scale+fade entrance — the modal simply appears in place. */
-	.modal-container.vault-spotlight-container .modal {
-		animation: none;
-	}
-
 	.vault-spotlight-item,
 	.vault-spotlight-input-wrap,
-	.vault-spotlight-mode-badge,
 	.vault-spotlight-star-btn,
 	.vault-spotlight-check,
 	.vault-spotlight-pro-btn {
