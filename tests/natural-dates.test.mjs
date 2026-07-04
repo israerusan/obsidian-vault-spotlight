@@ -74,4 +74,10 @@ assert.equal(parse("123"), null, "a bare number is not a date");
 // --- Label ------------------------------------------------------------------
 assert.equal(labelForDate(new Date(2026, 6, 24)), "Fri, Jul 24 2026", "label format");
 
+// A zero-padded year below 100 must not be silently remapped into the 1900s:
+// new Date(50, …) yields 1950, so the ISO parser rejects the wrong-century result.
+assert.equal(parse("0050-01-01"), null, "year < 100 must not resolve to 1900+y");
+assert.equal(parse("0099-12-31"), null, "year 99 must not resolve to 1999");
+assert.ok(parse("2026-01-01"), "a normal 4-digit year still parses");
+
 console.log("natural-dates tests passed");

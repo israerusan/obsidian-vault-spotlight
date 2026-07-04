@@ -1,4 +1,4 @@
-import { App } from "obsidian";
+import { App, TFile } from "obsidian";
 import type { ContentSearchResult } from "./ContentSearcher";
 import { isPathExcluded } from "./vaultFiles";
 
@@ -9,6 +9,13 @@ interface CanvasNode {
 }
 
 export class CanvasSearcher {
+	// Parsed searchable lines per canvas file, keyed by path and invalidated by
+	// mtime. Content search runs once per debounced keystroke; without this cache
+	// every keystroke re-JSON.parsed every canvas in the vault on the main thread —
+	// pure redundant work since the files rarely change between keystrokes.
+	// cachedRead already elides the disk read; this elides the parse.
+	private cache = new Map<string, { mtime: number; lines: Array<{ line: number; text: string }> }>();
+
 	constructor(private app: App) {}
 
 	async search(tokens: string[], limit = 20, excluded: string[] = []): Promise<ContentSearchResult[]> {
@@ -18,19 +25,14 @@ export class CanvasSearcher {
 		// Prune to top-`limit` past a soft cap so a huge canvas can't grow an
 		// unbounded array, without dropping any genuinely top-scored node.
 		const softCap = Math.max(limit * 10, 500);
+		const present = new Set<string>();
 
 		for (const file of this.app.vault.getFiles()) {
 			if (file.extension !== "canvas") continue;
+			present.add(file.path);
 			if (isPathExcluded(file.path, excluded)) continue;
 
-			let raw: string;
-			try {
-				raw = await this.app.vault.cachedRead(file);
-			} catch {
-				continue;
-			}
-
-			const snippets = this.extractSearchableLines(raw);
+			const snippets = await this.getSearchableLines(file);
 			for (const { line, text } of snippets) {
 				const low = text.toLowerCase();
 				if (!needAll.every((tk) => low.includes(tk))) continue;
@@ -49,7 +51,28 @@ export class CanvasSearcher {
 			}
 		}
 
+		// Drop cache entries for canvas files that no longer exist so the map can't
+		// grow unbounded across a session of creates/deletes.
+		if (this.cache.size > present.size) {
+			for (const path of this.cache.keys()) if (!present.has(path)) this.cache.delete(path);
+		}
+
 		return results.sort((a, b) => b.score - a.score).slice(0, limit);
+	}
+
+	/** Parsed searchable lines for one canvas, served from cache unless its mtime moved. */
+	private async getSearchableLines(file: TFile): Promise<Array<{ line: number; text: string }>> {
+		const cached = this.cache.get(file.path);
+		if (cached && cached.mtime === file.stat.mtime) return cached.lines;
+		let raw: string;
+		try {
+			raw = await this.app.vault.cachedRead(file);
+		} catch {
+			return [];
+		}
+		const lines = this.extractSearchableLines(raw);
+		this.cache.set(file.path, { mtime: file.stat.mtime, lines });
+		return lines;
 	}
 
 	private extractSearchableLines(raw: string): Array<{ line: number; text: string }> {

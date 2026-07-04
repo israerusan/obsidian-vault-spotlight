@@ -3,6 +3,53 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.9.0] - 2026-07-04
+
+A premium-feel polish pass plus a batch of correctness fixes surfaced by a
+multi-agent review of the whole plugin.
+
+### Performance
+- Content search over vaults with Canvas or Bases files is smooth while typing
+  again: each `.canvas`/`.base` file is now parsed once and cached (keyed by
+  modified time) instead of being re-parsed on every keystroke.
+- Heading search bounds its working set on very large, heading-dense vaults the
+  same way content search already does, so a broad query stays responsive.
+
+### Fixed
+- The keyboard-shortcut hints in the footer now update immediately after a search
+  or a mode switch, instead of continuing to advertise the previously-selected
+  item's keys (some of which did nothing) until the first arrow press.
+- The Pro preview pane no longer keeps showing the previous note when you switch
+  into a mode with no results (e.g. Editors with no open tabs); it clears to
+  "Nothing selected" to match the list.
+- The Pro preview pane no longer flashes an empty body while arrowing between
+  results — the previous note stays visible until the next one has rendered.
+- Inline conversions of negative quantities now work (e.g. `-40 c to f`).
+- A zero-padded year below 100 in a date jump (e.g. `0050-01-01`) is no longer
+  silently shifted into the 1900s.
+- Search-result highlights stay correctly aligned for notes containing characters
+  whose lowercase form changes length (e.g. the Turkish dotted "İ").
+- Two search profiles or workflow presets whose names produce the same id no
+  longer share it — so removing or pinning one can't affect the other. Saving a
+  workflow whose name collides with an existing one now gets a distinct id.
+- Content-search results are now identical whether or not the off-thread index is
+  available, via a deterministic tie-break when scores are equal.
+- Home / End / Page Up / Page Down and Ctrl+N / Ctrl+P now defer to an active IME
+  composition, matching the arrow keys, so composing text is never interrupted.
+- The "Search aliases" setting is now shown locked (with an upgrade link) on the
+  free tier instead of as an editable field whose contents were ignored.
+- A mode-trigger prefix that collides with another trigger now snaps the field
+  back to the value that actually took effect and explains why, instead of leaving
+  a stale character on screen.
+- Vault event listeners can no longer leak if the plugin is disabled during
+  Obsidian's initial startup.
+
+### Changed
+- The launcher now has a subtle, deliberate entrance (a brief scale + fade), a
+  reserved scrollbar gutter so rows don't shift when the list becomes scrollable,
+  breathing room around the keyboard-selected row at the scroll edges, and an
+  eased mode badge. All motion is disabled under "reduce motion".
+
 ## [2.8.1] - 2026-07-04
 
 ### Fixed

@@ -13,10 +13,15 @@ export const PROFILE_MODES = new Set([
 
 export function normalizeProfiles(rawProfiles) {
 	if (!Array.isArray(rawProfiles)) return [];
+	// Re-mint colliding ids: two entries whose stored ids slugify to the same
+	// value would otherwise share an id, and the settings tab's pin/remove/activate
+	// match by id — so acting on one row would silently hit both. Mirrors the
+	// de-dup pass in normalizeSnippets.
+	const seen = new Set();
 	return rawProfiles
 		.filter((profile) => profile && typeof profile === "object")
 		.map((profile, index) => ({
-			id: cleanId(profile.id) || `profile-${Date.now()}-${index}`,
+			id: uniqueId(cleanId(profile.id) || `profile-${Date.now()}-${index}`, seen),
 			name: String(profile.name || "Untitled profile").trim() || "Untitled profile",
 			defaultMode: PROFILE_MODES.has(profile.defaultMode) ? profile.defaultMode : "files",
 			defaultQuery: String(profile.defaultQuery || ""),
@@ -55,4 +60,14 @@ export function createProfileFromSettings(name, settings, mode = "files", query 
 
 function cleanId(value) {
 	return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+/** Return `base` if free, else the first `base-2`, `base-3`, … not yet in `seen`.
+ * Records the chosen id so a later caller with the same base gets the next suffix. */
+function uniqueId(base, seen) {
+	let id = base;
+	let n = 2;
+	while (seen.has(id)) id = `${base}-${n++}`;
+	seen.add(id);
+	return id;
 }

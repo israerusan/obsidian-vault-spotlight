@@ -10,15 +10,14 @@ export function fuzzyMatch(query, text, options = {}) {
 	// character after an accent shifts). Match against the folded text but keep a
 	// folded→original index map so the highlight indices we return point at the
 	// right characters of the ORIGINAL string.
-	let t;
-	let indexMap = null;
-	if (ignoreDiacritics) {
-		const folded = foldWithMap(text);
-		t = folded.folded;
-		indexMap = folded.map;
-	} else {
-		t = String(text).toLowerCase();
-	}
+	// Both paths keep a transformed→original index map so highlight indices point
+	// at the right characters of the ORIGINAL string. Plain toLowerCase() is not
+	// length-preserving either (e.g. "İ" U+0130 lowercases to "i" + combining dot),
+	// so without a map every index after such a char would shift — and can run past
+	// the string end. lowerWithMap handles that the same way foldWithMap handles NFD.
+	const transformed = ignoreDiacritics ? foldWithMap(text) : lowerWithMap(text);
+	const t = transformed.folded;
+	const indexMap = transformed.map;
 	let qi = 0;
 	let lastMatch = -1;
 	let score = 0;
@@ -26,7 +25,7 @@ export function fuzzyMatch(query, text, options = {}) {
 
 	for (let ti = 0; ti < t.length && qi < q.length; ti++) {
 		if (t[ti] === q[qi]) {
-			indices.push(indexMap ? indexMap[ti] : ti);
+			indices.push(indexMap[ti]);
 			if (lastMatch === ti - 1) {
 				score += 8;
 			} else if (ti === 0 || /[\s\-_/]/.test(t[ti - 1] ?? "")) {
@@ -67,6 +66,28 @@ function foldWithMap(value) {
 	const map = [];
 	for (let i = 0; i < str.length; i++) {
 		const piece = stripDiacritics(str[i]).toLowerCase();
+		for (let j = 0; j < piece.length; j++) {
+			folded += piece[j];
+			map.push(i);
+		}
+	}
+	return { folded, map };
+}
+
+/**
+ * Lowercase a string one ORIGINAL code unit at a time, tracking which original
+ * index each lowercased output character came from. Same shape as foldWithMap
+ * (so callers can treat both uniformly), but without the diacritic strip. This
+ * keeps highlight indices aligned when a character's lowercase form is longer
+ * than one code unit (e.g. "İ" → "i" + U+0307), which a bulk toLowerCase() would
+ * silently shift.
+ */
+function lowerWithMap(value) {
+	const str = String(value);
+	let folded = "";
+	const map = [];
+	for (let i = 0; i < str.length; i++) {
+		const piece = str[i].toLowerCase();
 		for (let j = 0; j < piece.length; j++) {
 			folded += piece[j];
 			map.push(i);

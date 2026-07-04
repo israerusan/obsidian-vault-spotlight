@@ -17,6 +17,14 @@ assert.equal(
 	"explicit includeBases: false survives normalization"
 );
 
+// Colliding slugified ids must be re-minted unique so settings remove/activate
+// (which match by id) act on a single row, not several.
+const dupProfiles = normalizeProfiles([
+	{ id: "work", name: "Work" },
+	{ id: "Work!", name: "Work again" },
+]);
+assert.equal(new Set(dupProfiles.map((p) => p.id)).size, 2, "colliding profile ids are re-minted unique");
+
 assert.deepEqual(addTagToTags(["work"], "client"), ["work", "client"], "should append to existing frontmatter tags");
 assert.deepEqual(addTagToTags(undefined, "client"), ["client"], "should create frontmatter tags when missing");
 

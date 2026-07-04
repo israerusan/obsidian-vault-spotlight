@@ -37,12 +37,15 @@ export class PreviewPane {
 
 		this.timer = window.setTimeout(() => {
 			this.timer = null;
-			previewEl.empty();
+			// The empty/non-markdown states render instantly, so clearing up front
+			// costs no visible flash.
 			if (!file) {
+				previewEl.empty();
 				renderPreviewEmpty(previewEl, "eye", "Nothing selected", "Pick a result and its note previews here, scrolled to the match.");
 				return;
 			}
 			if (file.extension !== "md") {
+				previewEl.empty();
 				renderPreviewEmpty(
 					previewEl,
 					"file-x",
@@ -51,8 +54,14 @@ export class PreviewPane {
 				);
 				return;
 			}
-			previewEl.createDiv({ cls: "vault-spotlight-preview-title", text: file.basename });
-			const bodyEl = previewEl.createDiv({ cls: "vault-spotlight-preview-body markdown-rendered" });
+			// Stage the new preview in a DETACHED container and swap it in only once
+			// its markdown has rendered. Arrowing between notes therefore never strobes
+			// the pane empty→content — the previously-rendered note stays on screen
+			// until the replacement is ready. The token/component/isConnected guards
+			// still ensure a slower read from an older selection can't win the swap.
+			const staged = previewEl.ownerDocument.createElement("div");
+			staged.createDiv({ cls: "vault-spotlight-preview-title", text: file.basename });
+			const bodyEl = staged.createDiv({ cls: "vault-spotlight-preview-body markdown-rendered" });
 			void this.app.vault
 				.cachedRead(file)
 				.then((content) => {
@@ -61,8 +70,12 @@ export class PreviewPane {
 					return MarkdownRenderer.render(this.app, excerpt, bodyEl, file.path, component);
 				})
 				.then(() => {
-					if (this.token !== token || this.component !== component || !bodyEl.isConnected) return;
-					const hit = highlightFirstMatch(bodyEl, [focusText, ...terms]);
+					if (this.token !== token || this.component !== component || !previewEl.isConnected) return;
+					// Replacement is fully rendered — swap it in, then highlight/scroll
+					// on the now-connected nodes so scrollIntoView actually moves.
+					previewEl.empty();
+					while (staged.firstChild) previewEl.appendChild(staged.firstChild);
+					const hit = highlightFirstMatch(previewEl, [focusText, ...terms]);
 					hit?.scrollIntoView({ block: "center" });
 				})
 				.catch(() => {

@@ -11,6 +11,13 @@
  */
 export const WORKER_SOURCE = `
 const index = new Map();
+// Deterministic ordering: score desc, then path, then line. MUST stay identical
+// to compareContentRows in ContentSearcher.ts so the worker and in-process paths
+// return the same top-N for a tied query regardless of Worker availability.
+const cmp = (a, b) =>
+	(b.score - a.score) ||
+	(a.path < b.path ? -1 : a.path > b.path ? 1 : 0) ||
+	(a.line - b.line);
 self.onmessage = (evt) => {
 	const msg = evt.data || {};
 	if (msg.type === "set") {
@@ -56,12 +63,12 @@ self.onmessage = (evt) => {
 					score: Math.max(1, 100 - Math.floor(i / 10)),
 				});
 				if (results.length >= softCap) {
-					results.sort((a, b) => b.score - a.score);
+					results.sort(cmp);
 					results.length = limit;
 				}
 			}
 		}
-		results.sort((a, b) => b.score - a.score);
+		results.sort(cmp);
 		self.postMessage({ type: "results", id: msg.id, results: results.slice(0, limit) });
 	}
 };

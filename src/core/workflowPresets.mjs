@@ -13,10 +13,15 @@ export const STARTER_WORKFLOWS = [
 
 export function normalizeWorkflowPresets(raw) {
 	if (!Array.isArray(raw)) return [];
+	// Re-mint colliding ids: two presets whose stored ids slugify equal (e.g. two
+	// workflows both named "Meeting") would share an id, and the settings tab's
+	// pin/remove match by id — so Remove-one would delete both. Mirrors the de-dup
+	// pass in normalizeSnippets.
+	const seen = new Set();
 	return raw
 		.filter((workflow) => workflow && typeof workflow === "object")
 		.map((workflow, index) => ({
-			id: cleanId(workflow.id) || `workflow-${Date.now()}-${index}`,
+			id: uniqueId(cleanId(workflow.id) || `workflow-${Date.now()}-${index}`, seen),
 			name: String(workflow.name || "Untitled workflow").trim() || "Untitled workflow",
 			query: typeof workflow.query === "string" ? workflow.query : String(workflow.query || ""),
 			mode: PROFILE_MODES.has(workflow.mode) ? workflow.mode : "files",
@@ -56,4 +61,14 @@ export function createWorkflowPreset(name, mode, query, options = {}) {
 function cleanId(value) {
 	const id = String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 	return id || "";
+}
+
+/** Return `base` if free, else the first `base-2`, `base-3`, … not yet in `seen`.
+ * Records the chosen id so a later caller with the same base gets the next suffix. */
+function uniqueId(base, seen) {
+	let id = base;
+	let n = 2;
+	while (seen.has(id)) id = `${base}-${n++}`;
+	seen.add(id);
+	return id;
 }

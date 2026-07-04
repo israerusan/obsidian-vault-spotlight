@@ -45,6 +45,10 @@ export default class VaultSpotlightPlugin extends Plugin {
 	private activeSpotlight: SpotlightModal | null = null;
 	private saveTimer: number | null = null;
 	private api: VaultSpotlightApi | null = null;
+	// Flipped true by onLayoutReady. The vault listeners are registered eagerly (so
+	// onunload always cleans them up) but no-op until this is set, which suppresses
+	// the "create" flood Obsidian fires while loading the vault.
+	private layoutReady = false;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -121,41 +125,50 @@ export default class VaultSpotlightPlugin extends Plugin {
 			}
 		}
 
-		// Register vault listeners only once the workspace is ready — Obsidian
-		// fires "create" for every file during initial vault load, which would
-		// otherwise flood these handlers at startup.
+		// Ignore Obsidian's initial-load event storm until the workspace is ready
+		// (it fires "create" for every file during vault load). The listeners
+		// themselves are registered eagerly below — NOT inside this callback — so
+		// their registerEvent cleanup is always captured by onunload. Registering
+		// inside onLayoutReady risks a leak: if the plugin is disabled before layout
+		// is ready, onunload runs first and drains its cleanup list, then this
+		// callback fires and attaches listeners bound to a dead instance that are
+		// never removed.
 		this.app.workspace.onLayoutReady(() => {
-			// Maintain the content index incrementally instead of wiping it on
-			// every edit (which forced a full-vault re-read on the next search).
-			this.registerEvent(
-				this.app.vault.on("modify", (file) => {
-					if (file instanceof TFile) void this.contentSearcher.updateFile(file);
-				})
-			);
-			this.registerEvent(
-				this.app.vault.on("create", (file) => {
-					if (file instanceof TFile) void this.contentSearcher.updateFile(file);
-				})
-			);
-			this.registerEvent(
-				this.app.vault.on("delete", (file) => {
-					this.contentSearcher.removeFile(file.path);
-					this.untrackPath(file.path);
-				})
-			);
-			this.registerEvent(
-				this.app.vault.on("rename", (file, oldPath) => {
-					this.contentSearcher.removeFile(oldPath);
-					if (file instanceof TFile) void this.contentSearcher.updateFile(file);
-					this.renamePath(oldPath, file.path);
-				})
-			);
-			this.registerEvent(
-				this.app.workspace.on("file-open", (file) => {
-					if (file) this.trackRecent(file.path);
-				})
-			);
+			this.layoutReady = true;
 		});
+		// Maintain the content index incrementally instead of wiping it on every
+		// edit (which forced a full-vault re-read on the next search). Each handler
+		// no-ops until layoutReady to skip the startup flood.
+		this.registerEvent(
+			this.app.vault.on("modify", (file) => {
+				if (this.layoutReady && file instanceof TFile) void this.contentSearcher.updateFile(file);
+			})
+		);
+		this.registerEvent(
+			this.app.vault.on("create", (file) => {
+				if (this.layoutReady && file instanceof TFile) void this.contentSearcher.updateFile(file);
+			})
+		);
+		this.registerEvent(
+			this.app.vault.on("delete", (file) => {
+				if (!this.layoutReady) return;
+				this.contentSearcher.removeFile(file.path);
+				this.untrackPath(file.path);
+			})
+		);
+		this.registerEvent(
+			this.app.vault.on("rename", (file, oldPath) => {
+				if (!this.layoutReady) return;
+				this.contentSearcher.removeFile(oldPath);
+				if (file instanceof TFile) void this.contentSearcher.updateFile(file);
+				this.renamePath(oldPath, file.path);
+			})
+		);
+		this.registerEvent(
+			this.app.workspace.on("file-open", (file) => {
+				if (this.layoutReady && file) this.trackRecent(file.path);
+			})
+		);
 
 		// obsidian://vault-spotlight?vault=...&query=...&mode=content opens the
 		// modal from outside Obsidian (browser extensions, launchers, scripts).

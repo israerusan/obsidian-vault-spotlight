@@ -66,4 +66,11 @@ const r2 = parseCurrencyRates("nonsense\nEUR=0.9");
 assert.equal(r2.usd, 1, "defaults preserved");
 assert.equal(r2.eur, 0.9, "override applied");
 
+// Negative quantities must parse — temperature is the real case where sub-zero
+// values are legitimate (regression: the value regex used to reject a leading "-").
+approx(evaluateExpression("-40 c to f").value, -40, "negative C→F (the famous crossover)");
+approx(evaluateExpression("-10 c to f").value, 14, "negative Celsius converts");
+assert.equal(evaluateExpression("-40 c to f").kind, "temp", "negative conversion keeps temp kind");
+approx(evaluateExpression("-5 km to mi").value, -3.10685596, "negative linear-unit conversion");
+
 console.log("calculator tests passed");

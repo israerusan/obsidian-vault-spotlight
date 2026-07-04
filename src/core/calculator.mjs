@@ -266,7 +266,9 @@ function evaluatePercent(input) {
 function evaluateConversion(input, rates) {
 	const match = input
 		.toLowerCase()
-		.match(/^([\d.,]+)\s*([a-z°]+)\s*(?:to|in|as|=|>)\s*([a-z°]+)$/);
+		// Allow a leading minus so negative quantities parse — temperature is the
+		// common real case ("-40 c to f"), where sub-zero values are legitimate.
+		.match(/^(-?[\d.,]+)\s*([a-z°]+)\s*(?:to|in|as|=|>)\s*([a-z°]+)$/);
 	if (!match) return null;
 	const value = Number(match[1].replace(/,/g, ""));
 	if (!Number.isFinite(value)) return null;

@@ -89,7 +89,10 @@ export function parseNaturalDate(rawInput, options = {}) {
 		const day = Number(iso[3]);
 		if (mo >= 1 && mo <= 12 && day >= 1 && day <= 31) {
 			const d = new Date(y, mo - 1, day);
-			if (d.getMonth() === mo - 1 && d.getDate() === day) return build(d, "iso");
+			// Also assert the year: new Date(y, …) remaps 0–99 to 1900+y, so an
+			// input like "0050-01-01" would silently resolve to 1950. Reject the
+			// wrong-century result rather than jump the user to a bogus daily note.
+			if (d.getFullYear() === y && d.getMonth() === mo - 1 && d.getDate() === day) return build(d, "iso");
 		}
 		return null;
 	}

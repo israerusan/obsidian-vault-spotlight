@@ -1295,6 +1295,13 @@ export class SpotlightModal extends Modal {
 		iconWrap.setAttr("aria-hidden", "true");
 		empty.createDiv({ cls: "vault-spotlight-empty-title", text: title });
 		empty.createDiv({ cls: "vault-spotlight-empty-desc", text: desc });
+		// An empty state means no selection: collapse the footer to its base chips
+		// (otherwise it keeps advertising the previously-selected item's keys as dead
+		// keys) and clear the Pro preview pane (otherwise it strands the prior note
+		// beside a "nothing found" list). Both no-op via their own guards when
+		// nothing actually changed / the preview isn't mounted.
+		this.renderFooter();
+		this.updatePreview();
 	}
 
 	private renderResults(): void {
@@ -1382,6 +1389,12 @@ export class SpotlightModal extends Modal {
 		const selectedRow = this.resultsEl.querySelector<HTMLElement>(".is-selected");
 		if (selectedRow?.id) this.inputEl.setAttribute("aria-activedescendant", selectedRow.id);
 		else this.inputEl.removeAttribute("aria-activedescendant");
+
+		// Refresh the footer for the freshly-selected row. renderFooter() was only
+		// called on selection *moves*, so after a new search or a Tab mode switch the
+		// chips described the previous item's kind (e.g. file chips on a command row)
+		// until the first arrow press. The footerSig cache no-ops when unchanged.
+		this.renderFooter();
 	}
 
 	/** Resolve the result index for a delegated list event, or null if off-row. */
@@ -1921,6 +1934,12 @@ export class SpotlightModal extends Modal {
 					profileId: this.plugin.settings.activeProfileId,
 					rankingMode: this.currentProfile()?.rankingMode,
 				});
+				// Two workflows whose names slugify to the same id (e.g. both
+				// "Meeting") would otherwise coexist, and settings pin/remove match
+				// by id — Remove-one would delete both. Suffix a colliding id, the
+				// same guard saveCurrentProfile uses.
+				const exists = this.plugin.settings.workflowPresets.some((w) => w.id === workflow.id);
+				if (exists) workflow.id = `${workflow.id}-${Date.now()}`;
 				this.plugin.settings.workflowPresets = [workflow, ...this.plugin.settings.workflowPresets].slice(0, MAX_WORKFLOW_PRESETS);
 				this.activeWorkflowId = workflow.id;
 				void this.plugin.saveSettings();
@@ -2393,34 +2412,43 @@ export class SpotlightModal extends Modal {
 			this.moveSelection(-1);
 			return false;
 		});
-		// Jump-to-ends and page navigation for long result lists.
+		// Jump-to-ends and page navigation for long result lists. Like the arrow
+		// keys, these defer during IME composition (isComposing) — a CJK user paging
+		// an IME candidate window with Home/End/PageUp/PageDown must not have the
+		// keypress swallowed to drive the result list instead.
 		this.scope.register([], "Home", (evt) => {
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			this.setSelectedIndex(0);
 			return false;
 		});
 		this.scope.register([], "End", (evt) => {
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			this.setSelectedIndex(this.items.length - 1);
 			return false;
 		});
 		this.scope.register([], "PageDown", (evt) => {
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			this.setSelectedIndex(this.selectedIndex + this.pageSize());
 			return false;
 		});
 		this.scope.register([], "PageUp", (evt) => {
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			this.setSelectedIndex(this.selectedIndex - this.pageSize());
 			return false;
 		});
 		// Emacs-style aliases so hands never leave the home row.
 		this.scope.register(["Ctrl"], "n", (evt) => {
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			this.moveSelection(1);
 			return false;
 		});
 		this.scope.register(["Ctrl"], "p", (evt) => {
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			this.moveSelection(-1);
 			return false;

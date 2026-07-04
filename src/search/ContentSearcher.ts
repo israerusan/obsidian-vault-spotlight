@@ -40,6 +40,23 @@ export function snippetMatchIndices(snippet: string, tokens: string[]): number[]
 	return Array.from(marked).sort((a, b) => a - b);
 }
 
+/**
+ * Deterministic ordering shared by every content-engine sort: score desc, then
+ * path, then line. Scores are coarse buckets (many rows tie), so without a stable
+ * tiebreak the final top-N would depend on iteration order — which differs between
+ * the worker (Map insertion order) and the in-process fallback (live getMarkdownFiles
+ * order). That would make results depend on Worker availability, which the worker
+ * contract forbids. Plain `<`/`>` (not localeCompare) so it's locale-independent and
+ * matches the identical comparator inlined in workerSource.mjs.
+ */
+function compareContentRows(a: ContentSearchResult, b: ContentSearchResult): number {
+	return (
+		b.score - a.score ||
+		(a.file.path < b.file.path ? -1 : a.file.path > b.file.path ? 1 : 0) ||
+		a.line - b.line
+	);
+}
+
 export interface ContentSearchOptions {
 	useRipgrep: boolean;
 	includeCanvas: boolean;
@@ -192,13 +209,13 @@ export class ContentSearcher {
 					engine: "vault",
 				});
 				if (results.length >= softCap) {
-					results.sort((a, b) => b.score - a.score);
+					results.sort(compareContentRows);
 					results.length = limit;
 				}
 			}
 		}
 
-		return results.sort((a, b) => b.score - a.score).slice(0, limit);
+		return results.sort(compareContentRows).slice(0, limit);
 	}
 
 	private mergeResults(
@@ -209,7 +226,7 @@ export class ContentSearcher {
 		const seen = new Set<string>();
 		const merged: ContentSearchResult[] = [];
 
-		for (const result of [...a, ...b].sort((x, y) => y.score - x.score)) {
+		for (const result of [...a, ...b].sort(compareContentRows)) {
 			const key = `${result.file.path}:${result.line}:${result.snippet}`;
 			if (seen.has(key)) continue;
 			seen.add(key);

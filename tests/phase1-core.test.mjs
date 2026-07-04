@@ -22,6 +22,15 @@ assert.equal(presets[0].rankingMode, "recency", "workflow ranking overrides shou
 assert.equal(presets[1].mode, "files", "invalid workflow modes should fall back to files");
 assert.equal(presets[1].name, "Untitled workflow", "blank workflow names should be repaired");
 
+// Two presets whose ids slugify to the same value must not keep a shared id —
+// settings pin/remove match by id, so Remove-one would otherwise delete both.
+const dupWorkflows = normalizeWorkflowPresets([
+  { id: "meeting", name: "Meeting", mode: "files" },
+  { id: "Meeting!", name: "Meeting", mode: "files" },
+  { id: "meeting", name: "Meeting", mode: "files" },
+]);
+assert.equal(new Set(dupWorkflows.map((w) => w.id)).size, 3, "colliding workflow ids are re-minted unique");
+
 const starterOnly = ensureStarterWorkflows([]);
 assert.equal(starterOnly.length, STARTER_WORKFLOWS.length, "starter workflows should appear when the user has none");
 assert.equal(ensureStarterWorkflows(presets).length, presets.length, "real workflows should suppress starter examples");

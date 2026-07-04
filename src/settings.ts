@@ -473,6 +473,20 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 						this.reconcileEscapeChar(this.plugin.settings.escapeChar);
 						void this.plugin.saveSettings();
 					});
+					// Resync the field to the value that actually took effect — but only
+					// on blur, not per keystroke. normalizeModePrefixes rejects a prefix
+					// that collides with another trigger (folding it back to a default),
+					// yet the field kept showing what was typed, silently diverging from
+					// the stored value. A per-keystroke reset would instead make a
+					// multi-char prefix like ">>" unenterable (its first ">" transiently
+					// collides with content), so commit the reconcile on focusout.
+					text.inputEl.addEventListener("focusout", () => {
+						const effective = this.plugin.settings.modePrefixes[key];
+						if (text.inputEl.value !== effective) {
+							text.inputEl.value = effective;
+							new Notice(`Vault Spotlight: "${name}" set to "${effective}" so it doesn't clash with another trigger.`);
+						}
+					});
 				});
 		}
 
@@ -704,8 +718,17 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 
 		const aliasSetting = new Setting(containerEl)
 			.setName("Search aliases")
-			.setDesc("One alias per line, e.g. crm = in:Clients @type:client. Aliases expand before search.")
-			.addTextArea((area) => {
+			.setDesc("One alias per line, e.g. crm = in:Clients @type:client. Aliases expand before search.");
+		this.markPro(aliasSetting);
+		if (!this.plugin.settings.isPro) {
+			// Aliases are Pro-gated (expandAliases no-ops without Pro), so match the
+			// other Pro rows: a disabled lock + upgrade path, not an editable field
+			// whose contents are silently ignored on the free tier.
+			aliasSetting.settingEl.addClass("vault-spotlight-setting-locked");
+			aliasSetting.addExtraButton((btn) => btn.setIcon("lock").setDisabled(true).setTooltip("Pro feature"));
+			this.appendUpgrade(aliasSetting);
+		} else {
+			aliasSetting.addTextArea((area) => {
 				area.setPlaceholder("crm = in:Clients @type:client\nwaiting = #waiting");
 				area.setValue(this.plugin.settings.searchAliases);
 				area.inputEl.rows = 4;
@@ -714,7 +737,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 					void this.plugin.saveSettings();
 				});
 			});
-		this.markPro(aliasSetting);
+		}
 
 		this.proHeading("Workflow presets");
 		const workflowList = containerEl.createDiv();

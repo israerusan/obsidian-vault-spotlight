@@ -30,6 +30,11 @@ export class HeadingSearcher {
 		const q = query.trim();
 		const fileQuery = options.fileQuery?.trim() ?? "";
 		const results: HeadingResult[] = [];
+		// Bound the working set the same way the content searchers do: a broad
+		// 1–2 char query on a heading-dense vault would otherwise collect every
+		// matching heading before slicing. Anything past the cap scored below all
+		// kept rows, so pruning to the top `limit` yields an identical final list.
+		const softCap = Math.max(limit * 10, 500);
 
 		for (const file of this.app.vault.getMarkdownFiles()) {
 			if (isPathExcluded(file.path, excluded)) continue;
@@ -57,6 +62,10 @@ export class HeadingSearcher {
 					score,
 					matchIndices,
 				});
+				if (results.length >= softCap) {
+					results.sort((a, b) => b.score - a.score);
+					results.length = limit;
+				}
 			}
 		}
 

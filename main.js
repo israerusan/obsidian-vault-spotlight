@@ -2330,8 +2330,9 @@ var PROFILE_MODES = /* @__PURE__ */ new Set([
 ]);
 function normalizeProfiles(rawProfiles) {
   if (!Array.isArray(rawProfiles)) return [];
+  const seen = /* @__PURE__ */ new Set();
   return rawProfiles.filter((profile) => profile && typeof profile === "object").map((profile, index) => ({
-    id: cleanId(profile.id) || `profile-${Date.now()}-${index}`,
+    id: uniqueId(cleanId(profile.id) || `profile-${Date.now()}-${index}`, seen),
     name: String(profile.name || "Untitled profile").trim() || "Untitled profile",
     defaultMode: PROFILE_MODES.has(profile.defaultMode) ? profile.defaultMode : "files",
     defaultQuery: String(profile.defaultQuery || ""),
@@ -2367,6 +2368,13 @@ function createProfileFromSettings(name, settings, mode = "files", query = "") {
 function cleanId(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
+function uniqueId(base, seen) {
+  let id = base;
+  let n = 2;
+  while (seen.has(id)) id = `${base}-${n++}`;
+  seen.add(id);
+  return id;
+}
 
 // src/core/workflowPresets.mjs
 var FREE_WORKFLOW_LIMIT = 2;
@@ -2379,8 +2387,9 @@ var STARTER_WORKFLOWS = [
 ];
 function normalizeWorkflowPresets(raw) {
   if (!Array.isArray(raw)) return [];
+  const seen = /* @__PURE__ */ new Set();
   return raw.filter((workflow) => workflow && typeof workflow === "object").map((workflow, index) => ({
-    id: cleanId2(workflow.id) || `workflow-${Date.now()}-${index}`,
+    id: uniqueId2(cleanId2(workflow.id) || `workflow-${Date.now()}-${index}`, seen),
     name: String(workflow.name || "Untitled workflow").trim() || "Untitled workflow",
     query: typeof workflow.query === "string" ? workflow.query : String(workflow.query || ""),
     mode: PROFILE_MODES.has(workflow.mode) ? workflow.mode : "files",
@@ -2415,6 +2424,13 @@ function createWorkflowPreset(name, mode, query, options = {}) {
 function cleanId2(value) {
   const id = String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return id || "";
+}
+function uniqueId2(base, seen) {
+  let id = base;
+  let n = 2;
+  while (seen.has(id)) id = `${base}-${n++}`;
+  seen.add(id);
+  return id;
 }
 
 // src/core/snippets.mjs
@@ -2942,6 +2958,13 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
           this.reconcileEscapeChar(this.plugin.settings.escapeChar);
           void this.plugin.saveSettings();
         });
+        text.inputEl.addEventListener("focusout", () => {
+          const effective = this.plugin.settings.modePrefixes[key];
+          if (text.inputEl.value !== effective) {
+            text.inputEl.value = effective;
+            new import_obsidian.Notice(`Vault Spotlight: "${name}" set to "${effective}" so it doesn't clash with another trigger.`);
+          }
+        });
       });
     }
     new import_obsidian.Setting(containerEl).setName("Escape character").setDesc(`Start a query with this character to search trigger characters literally. Default: ${DEFAULT_ESCAPE_CHAR}`).addText((text) => {
@@ -3130,16 +3153,23 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
         });
       }
     }
-    const aliasSetting = new import_obsidian.Setting(containerEl).setName("Search aliases").setDesc("One alias per line, e.g. crm = in:Clients @type:client. Aliases expand before search.").addTextArea((area) => {
-      area.setPlaceholder("crm = in:Clients @type:client\nwaiting = #waiting");
-      area.setValue(this.plugin.settings.searchAliases);
-      area.inputEl.rows = 4;
-      area.onChange((value) => {
-        this.plugin.settings.searchAliases = value;
-        void this.plugin.saveSettings();
-      });
-    });
+    const aliasSetting = new import_obsidian.Setting(containerEl).setName("Search aliases").setDesc("One alias per line, e.g. crm = in:Clients @type:client. Aliases expand before search.");
     this.markPro(aliasSetting);
+    if (!this.plugin.settings.isPro) {
+      aliasSetting.settingEl.addClass("vault-spotlight-setting-locked");
+      aliasSetting.addExtraButton((btn) => btn.setIcon("lock").setDisabled(true).setTooltip("Pro feature"));
+      this.appendUpgrade(aliasSetting);
+    } else {
+      aliasSetting.addTextArea((area) => {
+        area.setPlaceholder("crm = in:Clients @type:client\nwaiting = #waiting");
+        area.setValue(this.plugin.settings.searchAliases);
+        area.inputEl.rows = 4;
+        area.onChange((value) => {
+          this.plugin.settings.searchAliases = value;
+          void this.plugin.saveSettings();
+        });
+      });
+    }
     this.proHeading("Workflow presets");
     const workflowList = containerEl.createDiv();
     if (!this.plugin.settings.isPro) {
@@ -3342,22 +3372,16 @@ function fuzzyMatch(query, text, options = {}) {
   }
   const ignoreDiacritics = options.ignoreDiacritics === true;
   const q = (ignoreDiacritics ? stripDiacritics(query) : String(query)).toLowerCase();
-  let t;
-  let indexMap = null;
-  if (ignoreDiacritics) {
-    const folded = foldWithMap(text);
-    t = folded.folded;
-    indexMap = folded.map;
-  } else {
-    t = String(text).toLowerCase();
-  }
+  const transformed = ignoreDiacritics ? foldWithMap(text) : lowerWithMap(text);
+  const t = transformed.folded;
+  const indexMap = transformed.map;
   let qi = 0;
   let lastMatch = -1;
   let score = 0;
   const indices = [];
   for (let ti = 0; ti < t.length && qi < q.length; ti++) {
     if (t[ti] === q[qi]) {
-      indices.push(indexMap ? indexMap[ti] : ti);
+      indices.push(indexMap[ti]);
       if (lastMatch === ti - 1) {
         score += 8;
       } else if (ti === 0 || /[\s\-_/]/.test((_a = t[ti - 1]) != null ? _a : "")) {
@@ -3383,6 +3407,19 @@ function foldWithMap(value) {
   const map = [];
   for (let i = 0; i < str.length; i++) {
     const piece = stripDiacritics(str[i]).toLowerCase();
+    for (let j = 0; j < piece.length; j++) {
+      folded += piece[j];
+      map.push(i);
+    }
+  }
+  return { folded, map };
+}
+function lowerWithMap(value) {
+  const str = String(value);
+  let folded = "";
+  const map = [];
+  for (let i = 0; i < str.length; i++) {
+    const piece = str[i].toLowerCase();
     for (let j = 0; j < piece.length; j++) {
       folded += piece[j];
       map.push(i);
@@ -3776,6 +3813,7 @@ var HeadingSearcher = class {
     const q = query.trim();
     const fileQuery = (_c = (_b = options.fileQuery) == null ? void 0 : _b.trim()) != null ? _c : "";
     const results = [];
+    const softCap = Math.max(limit * 10, 500);
     for (const file of this.app.vault.getMarkdownFiles()) {
       if (isPathExcluded(file.path, excluded)) continue;
       if (fileQuery && !fuzzyMatch(fileQuery, file.basename) && !fuzzyMatch(fileQuery, file.path)) continue;
@@ -3801,6 +3839,10 @@ var HeadingSearcher = class {
           score,
           matchIndices
         });
+        if (results.length >= softCap) {
+          results.sort((a, b) => b.score - a.score);
+          results.length = limit;
+        }
       }
     }
     return results.sort((a, b) => b.score - a.score).slice(0, limit);
@@ -4397,7 +4439,7 @@ function evaluatePercent(input) {
   return null;
 }
 function evaluateConversion(input, rates) {
-  const match = input.toLowerCase().match(/^([\d.,]+)\s*([a-z°]+)\s*(?:to|in|as|=|>)\s*([a-z°]+)$/);
+  const match = input.toLowerCase().match(/^(-?[\d.,]+)\s*([a-z°]+)\s*(?:to|in|as|=|>)\s*([a-z°]+)$/);
   if (!match) return null;
   const value = Number(match[1].replace(/,/g, ""));
   if (!Number.isFinite(value)) return null;
@@ -4525,7 +4567,7 @@ function parseNaturalDate(rawInput, options = {}) {
     const day = Number(iso[3]);
     if (mo >= 1 && mo <= 12 && day >= 1 && day <= 31) {
       const d = new Date(y, mo - 1, day);
-      if (d.getMonth() === mo - 1 && d.getDate() === day) return build(d, "iso");
+      if (d.getFullYear() === y && d.getMonth() === mo - 1 && d.getDate() === day) return build(d, "iso");
     }
     return null;
   }
@@ -4761,12 +4803,13 @@ var PreviewPane = class {
     const focusText = typeof options.focusText === "string" ? options.focusText : "";
     this.timer = window.setTimeout(() => {
       this.timer = null;
-      previewEl.empty();
       if (!file) {
+        previewEl.empty();
         renderPreviewEmpty(previewEl, "eye", "Nothing selected", "Pick a result and its note previews here, scrolled to the match.");
         return;
       }
       if (file.extension !== "md") {
+        previewEl.empty();
         renderPreviewEmpty(
           previewEl,
           "file-x",
@@ -4775,15 +4818,18 @@ var PreviewPane = class {
         );
         return;
       }
-      previewEl.createDiv({ cls: "vault-spotlight-preview-title", text: file.basename });
-      const bodyEl = previewEl.createDiv({ cls: "vault-spotlight-preview-body markdown-rendered" });
+      const staged = previewEl.ownerDocument.createElement("div");
+      staged.createDiv({ cls: "vault-spotlight-preview-title", text: file.basename });
+      const bodyEl = staged.createDiv({ cls: "vault-spotlight-preview-body markdown-rendered" });
       void this.app.vault.cachedRead(file).then((content) => {
         if (this.token !== token || this.component !== component || !previewEl.isConnected) return;
         const excerpt = buildPreviewExcerpt(content, { focusText, terms });
         return import_obsidian6.MarkdownRenderer.render(this.app, excerpt, bodyEl, file.path, component);
       }).then(() => {
-        if (this.token !== token || this.component !== component || !bodyEl.isConnected) return;
-        const hit = highlightFirstMatch(bodyEl, [focusText, ...terms]);
+        if (this.token !== token || this.component !== component || !previewEl.isConnected) return;
+        previewEl.empty();
+        while (staged.firstChild) previewEl.appendChild(staged.firstChild);
+        const hit = highlightFirstMatch(previewEl, [focusText, ...terms]);
         hit == null ? void 0 : hit.scrollIntoView({ block: "center" });
       }).catch(() => {
         if (this.token !== token || !previewEl.isConnected) return;
@@ -6425,6 +6471,8 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     iconWrap.setAttr("aria-hidden", "true");
     empty.createDiv({ cls: "vault-spotlight-empty-title", text: title });
     empty.createDiv({ cls: "vault-spotlight-empty-desc", text: desc });
+    this.renderFooter();
+    this.updatePreview();
   }
   renderResults() {
     if (this.loadingTimer !== null) {
@@ -6491,6 +6539,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     const selectedRow = this.resultsEl.querySelector(".is-selected");
     if (selectedRow == null ? void 0 : selectedRow.id) this.inputEl.setAttribute("aria-activedescendant", selectedRow.id);
     else this.inputEl.removeAttribute("aria-activedescendant");
+    this.renderFooter();
   }
   /** Resolve the result index for a delegated list event, or null if off-row. */
   rowIndexFromEvent(evt) {
@@ -6929,6 +6978,8 @@ var SpotlightModal = class extends import_obsidian9.Modal {
           profileId: this.plugin.settings.activeProfileId,
           rankingMode: (_a = this.currentProfile()) == null ? void 0 : _a.rankingMode
         });
+        const exists = this.plugin.settings.workflowPresets.some((w) => w.id === workflow.id);
+        if (exists) workflow.id = `${workflow.id}-${Date.now()}`;
         this.plugin.settings.workflowPresets = [workflow, ...this.plugin.settings.workflowPresets].slice(0, MAX_WORKFLOW_PRESETS);
         this.activeWorkflowId = workflow.id;
         void this.plugin.saveSettings();
@@ -7327,31 +7378,37 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       return false;
     });
     this.scope.register([], "Home", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       this.setSelectedIndex(0);
       return false;
     });
     this.scope.register([], "End", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       this.setSelectedIndex(this.items.length - 1);
       return false;
     });
     this.scope.register([], "PageDown", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       this.setSelectedIndex(this.selectedIndex + this.pageSize());
       return false;
     });
     this.scope.register([], "PageUp", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       this.setSelectedIndex(this.selectedIndex - this.pageSize());
       return false;
     });
     this.scope.register(["Ctrl"], "n", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       this.moveSelection(1);
       return false;
     });
     this.scope.register(["Ctrl"], "p", (evt) => {
+      if (evt.isComposing) return true;
       evt.preventDefault();
       this.moveSelection(-1);
       return false;
@@ -7770,22 +7827,24 @@ var RipgrepSearcher = class {
 var CanvasSearcher = class {
   constructor(app) {
     this.app = app;
+    // Parsed searchable lines per canvas file, keyed by path and invalidated by
+    // mtime. Content search runs once per debounced keystroke; without this cache
+    // every keystroke re-JSON.parsed every canvas in the vault on the main thread —
+    // pure redundant work since the files rarely change between keystrokes.
+    // cachedRead already elides the disk read; this elides the parse.
+    this.cache = /* @__PURE__ */ new Map();
   }
   async search(tokens, limit = 20, excluded = []) {
     const needAll = tokens.map((t) => t.toLowerCase()).filter(Boolean);
     if (needAll.length === 0) return [];
     const results = [];
     const softCap = Math.max(limit * 10, 500);
+    const present = /* @__PURE__ */ new Set();
     for (const file of this.app.vault.getFiles()) {
       if (file.extension !== "canvas") continue;
+      present.add(file.path);
       if (isPathExcluded(file.path, excluded)) continue;
-      let raw;
-      try {
-        raw = await this.app.vault.cachedRead(file);
-      } catch (e) {
-        continue;
-      }
-      const snippets = this.extractSearchableLines(raw);
+      const snippets = await this.getSearchableLines(file);
       for (const { line, text } of snippets) {
         const low = text.toLowerCase();
         if (!needAll.every((tk) => low.includes(tk))) continue;
@@ -7803,7 +7862,24 @@ var CanvasSearcher = class {
         }
       }
     }
+    if (this.cache.size > present.size) {
+      for (const path of this.cache.keys()) if (!present.has(path)) this.cache.delete(path);
+    }
     return results.sort((a, b) => b.score - a.score).slice(0, limit);
+  }
+  /** Parsed searchable lines for one canvas, served from cache unless its mtime moved. */
+  async getSearchableLines(file) {
+    const cached = this.cache.get(file.path);
+    if (cached && cached.mtime === file.stat.mtime) return cached.lines;
+    let raw;
+    try {
+      raw = await this.app.vault.cachedRead(file);
+    } catch (e) {
+      return [];
+    }
+    const lines = this.extractSearchableLines(raw);
+    this.cache.set(file.path, { mtime: file.stat.mtime, lines });
+    return lines;
   }
   extractSearchableLines(raw) {
     const lines = [];
@@ -7833,22 +7909,22 @@ var CanvasSearcher = class {
 var BaseSearcher = class {
   constructor(app) {
     this.app = app;
+    // Split lines per base file, keyed by path and invalidated by mtime — the same
+    // per-keystroke re-parse avoidance the canvas searcher uses. cachedRead elides
+    // the disk read; this elides the split on every debounced keystroke.
+    this.cache = /* @__PURE__ */ new Map();
   }
   async search(tokens, limit = 20, excluded = []) {
     const needAll = tokens.map((t) => t.toLowerCase()).filter(Boolean);
     if (needAll.length === 0) return [];
     const results = [];
     const softCap = Math.max(limit * 10, 500);
+    const present = /* @__PURE__ */ new Set();
     for (const file of this.app.vault.getFiles()) {
       if (file.extension !== "base") continue;
+      present.add(file.path);
       if (isPathExcluded(file.path, excluded)) continue;
-      let raw;
-      try {
-        raw = await this.app.vault.cachedRead(file);
-      } catch (e) {
-        continue;
-      }
-      const lines = raw.split("\n");
+      const lines = await this.getLines(file);
       for (let i = 0; i < lines.length; i++) {
         const text = lines[i].trim();
         if (!text) continue;
@@ -7869,13 +7945,37 @@ var BaseSearcher = class {
         }
       }
     }
+    if (this.cache.size > present.size) {
+      for (const path of this.cache.keys()) if (!present.has(path)) this.cache.delete(path);
+    }
     return results.sort((a, b) => b.score - a.score).slice(0, limit);
+  }
+  /** Split lines for one base file, served from cache unless its mtime moved. */
+  async getLines(file) {
+    const cached = this.cache.get(file.path);
+    if (cached && cached.mtime === file.stat.mtime) return cached.lines;
+    let raw;
+    try {
+      raw = await this.app.vault.cachedRead(file);
+    } catch (e) {
+      return [];
+    }
+    const lines = raw.split("\n");
+    this.cache.set(file.path, { mtime: file.stat.mtime, lines });
+    return lines;
   }
 };
 
 // src/core/workerSource.mjs
 var WORKER_SOURCE = `
 const index = new Map();
+// Deterministic ordering: score desc, then path, then line. MUST stay identical
+// to compareContentRows in ContentSearcher.ts so the worker and in-process paths
+// return the same top-N for a tied query regardless of Worker availability.
+const cmp = (a, b) =>
+	(b.score - a.score) ||
+	(a.path < b.path ? -1 : a.path > b.path ? 1 : 0) ||
+	(a.line - b.line);
 self.onmessage = (evt) => {
 	const msg = evt.data || {};
 	if (msg.type === "set") {
@@ -7921,12 +8021,12 @@ self.onmessage = (evt) => {
 					score: Math.max(1, 100 - Math.floor(i / 10)),
 				});
 				if (results.length >= softCap) {
-					results.sort((a, b) => b.score - a.score);
+					results.sort(cmp);
 					results.length = limit;
 				}
 			}
 		}
-		results.sort((a, b) => b.score - a.score);
+		results.sort(cmp);
 		self.postMessage({ type: "results", id: msg.id, results: results.slice(0, limit) });
 	}
 };
@@ -8074,6 +8174,9 @@ function snippetMatchIndices(snippet, tokens) {
   }
   return Array.from(marked).sort((a, b) => a - b);
 }
+function compareContentRows(a, b) {
+  return b.score - a.score || (a.file.path < b.file.path ? -1 : a.file.path > b.file.path ? 1 : 0) || a.line - b.line;
+}
 var ContentSearcher = class {
   constructor(app, ripgrepCommand = "rg") {
     this.app = app;
@@ -8181,17 +8284,17 @@ var ContentSearcher = class {
           engine: "vault"
         });
         if (results.length >= softCap) {
-          results.sort((a, b) => b.score - a.score);
+          results.sort(compareContentRows);
           results.length = limit;
         }
       }
     }
-    return results.sort((a, b) => b.score - a.score).slice(0, limit);
+    return results.sort(compareContentRows).slice(0, limit);
   }
   mergeResults(a, b, limit) {
     const seen = /* @__PURE__ */ new Set();
     const merged = [];
-    for (const result of [...a, ...b].sort((x, y) => y.score - x.score)) {
+    for (const result of [...a, ...b].sort(compareContentRows)) {
       const key = `${result.file.path}:${result.line}:${result.snippet}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -8270,6 +8373,10 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
     this.activeSpotlight = null;
     this.saveTimer = null;
     this.api = null;
+    // Flipped true by onLayoutReady. The vault listeners are registered eagerly (so
+    // onunload always cleans them up) but no-op until this is set, which suppresses
+    // the "create" flood Obsidian fires while loading the vault.
+    this.layoutReady = false;
     // Serialize writes: overlapping saveData calls (e.g. per-keystroke license
     // verification) could otherwise finish out of order, letting a stale
     // serialization win on disk.
@@ -8342,35 +8449,38 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
       }
     }
     this.app.workspace.onLayoutReady(() => {
-      this.registerEvent(
-        this.app.vault.on("modify", (file) => {
-          if (file instanceof import_obsidian12.TFile) void this.contentSearcher.updateFile(file);
-        })
-      );
-      this.registerEvent(
-        this.app.vault.on("create", (file) => {
-          if (file instanceof import_obsidian12.TFile) void this.contentSearcher.updateFile(file);
-        })
-      );
-      this.registerEvent(
-        this.app.vault.on("delete", (file) => {
-          this.contentSearcher.removeFile(file.path);
-          this.untrackPath(file.path);
-        })
-      );
-      this.registerEvent(
-        this.app.vault.on("rename", (file, oldPath) => {
-          this.contentSearcher.removeFile(oldPath);
-          if (file instanceof import_obsidian12.TFile) void this.contentSearcher.updateFile(file);
-          this.renamePath(oldPath, file.path);
-        })
-      );
-      this.registerEvent(
-        this.app.workspace.on("file-open", (file) => {
-          if (file) this.trackRecent(file.path);
-        })
-      );
+      this.layoutReady = true;
     });
+    this.registerEvent(
+      this.app.vault.on("modify", (file) => {
+        if (this.layoutReady && file instanceof import_obsidian12.TFile) void this.contentSearcher.updateFile(file);
+      })
+    );
+    this.registerEvent(
+      this.app.vault.on("create", (file) => {
+        if (this.layoutReady && file instanceof import_obsidian12.TFile) void this.contentSearcher.updateFile(file);
+      })
+    );
+    this.registerEvent(
+      this.app.vault.on("delete", (file) => {
+        if (!this.layoutReady) return;
+        this.contentSearcher.removeFile(file.path);
+        this.untrackPath(file.path);
+      })
+    );
+    this.registerEvent(
+      this.app.vault.on("rename", (file, oldPath) => {
+        if (!this.layoutReady) return;
+        this.contentSearcher.removeFile(oldPath);
+        if (file instanceof import_obsidian12.TFile) void this.contentSearcher.updateFile(file);
+        this.renamePath(oldPath, file.path);
+      })
+    );
+    this.registerEvent(
+      this.app.workspace.on("file-open", (file) => {
+        if (this.layoutReady && file) this.trackRecent(file.path);
+      })
+    );
     this.registerObsidianProtocolHandler("vault-spotlight", (params) => {
       var _a;
       const mode = isSpotlightMode(params.mode) ? params.mode : "files";

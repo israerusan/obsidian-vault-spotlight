@@ -62,6 +62,23 @@
 		0 8px 24px -12px rgba(0, 0, 0, 0.4),
 		0 0 0 1px var(--background-modifier-border);
 	border: 1px solid var(--background-modifier-border);
+	/* A brief, owned entrance — the single most-seen "feel" moment. The launcher
+	   snaps into focus with a subtle scale + lift rather than relying on the
+	   platform's generic dialog fade. Origin at top-centre so it grows from where
+	   the eye already is. Neutralised under prefers-reduced-motion below. */
+	transform-origin: center top;
+	animation: vault-spotlight-summon 0.13s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes vault-spotlight-summon {
+	from {
+		opacity: 0;
+		transform: scale(0.98) translateY(-4px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
 }
 
 .vault-spotlight-modal {
@@ -104,6 +121,9 @@
 	background: var(--background-modifier-hover);
 	color: var(--text-muted);
 	white-space: nowrap;
+	/* Ease the tint/label change when cycling modes with Tab, so the one control
+	   that changes most doesn't hard-cut against the eased rest of the modal. */
+	transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .vault-spotlight-mode-badge.is-pro {
@@ -196,6 +216,9 @@
 	/* Keep list scrolling self-contained — reaching the top/bottom must not
 	   scroll the vault behind the modal (reads as a solid, standalone surface). */
 	overscroll-behavior: contain;
+	/* Keep a keyboard-selected row off the fold: scrollIntoView({block:"nearest"})
+	   would otherwise butt the active row flush against the top/bottom edge. */
+	scroll-padding-block: var(--vs-sp-3);
 }
 
 /* Slim, theme-aware scrollbars for the scrollable panes. Calm at rest, a touch
@@ -205,6 +228,9 @@
 .vault-spotlight-preview {
 	scrollbar-width: thin;
 	scrollbar-color: color-mix(in srgb, var(--text-faint) 45%, transparent) transparent;
+	/* Reserve the scrollbar gutter so rows don't shift sideways the moment the
+	   list becomes scrollable (e.g. the skeleton→results swap, or short→long). */
+	scrollbar-gutter: stable;
 }
 
 .vault-spotlight-results::-webkit-scrollbar,
@@ -885,12 +911,18 @@ input.vault-spotlight-prefix-input {
 		background: var(--background-modifier-hover);
 	}
 
+	/* No summon entrance — the modal simply appears. */
+	.modal-container.vault-spotlight-container .modal {
+		animation: none;
+	}
+
 	.vault-spotlight-item,
 	.vault-spotlight-item::before,
 	.vault-spotlight-input-wrap,
 	.vault-spotlight-search-icon,
 	.vault-spotlight-star-btn,
 	.vault-spotlight-check,
+	.vault-spotlight-mode-badge,
 	.vault-spotlight-pro-btn {
 		transition-duration: 0.01ms;
 	}

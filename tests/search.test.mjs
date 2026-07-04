@@ -77,4 +77,16 @@ assert.deepEqual(literal.textTokens, [">foo"], "leading > must not be re-strippe
 const zeroDays = parseAdvancedQuery("notes modified:0");
 assert.equal(zeroDays.modifiedDays, 1, "modified:0 should clamp to the last 24 hours, not exclude everything");
 
+// Highlight indices must stay anchored to the ORIGINAL string even when a char's
+// lowercase form is longer than one code unit (Turkish "İ" U+0130 → "i" + U+0307).
+// A bulk toLowerCase() would shift every index after such a char (and overrun end).
+const turkishI = fuzzyMatch("stan", "İstanbul");
+assert.deepEqual(turkishI.indices, [1, 2, 3, 4], "İstanbul: 'stan' highlights s,t,a,n (not shifted right)");
+const leadingI = fuzzyMatch("a", "İa");
+assert.deepEqual(leadingI.indices, [1], "İa: 'a' highlights index 1, not an out-of-range 2");
+assert.ok(
+	fuzzyMatch("stan", "İstanbul").indices.every((i) => i < "İstanbul".length),
+	"no highlight index may exceed the original string length"
+);
+
 console.log("search tests passed");
