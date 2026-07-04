@@ -16,12 +16,23 @@ export interface WorkerIndexRow {
  */
 /** A worker scan should answer in well under a second; if nothing comes back
  * in this window the worker is presumed dead (killed without an error event —
- * e.g. OS memory pressure) and the caller falls back to the in-process index. */
-const SEARCH_TIMEOUT_MS = 15000;
+ * e.g. OS memory pressure) and the caller falls back to the in-process index.
+ *
+ * The FIRST search after a (re)build is generous: the worker may still be
+ * draining a large queue of posted "set" messages on a big vault. Once one scan
+ * has answered we know the worker is live and responsive, so subsequent searches
+ * use a much tighter deadline — a silent death then falls back in ~3s instead of
+ * freezing content mode on the loading skeleton for a full 15s. */
+const COLD_SEARCH_TIMEOUT_MS = 15000;
+const WARM_SEARCH_TIMEOUT_MS = 3000;
 
 export class WorkerIndex {
 	private built = false;
 	private buildPromise: Promise<void> | null = null;
+	// Set once a scan has answered since the last (re)build; lets steady-state
+	// searches use the tighter WARM timeout. Reset by invalidate() so the first
+	// search after a rebuild gets the generous COLD deadline again.
+	private warm = false;
 	// Bumped by invalidate(); a build that started under an older epoch must
 	// not mark the index as complete (a mid-build "clear" wiped its early files).
 	private epoch = 0;
@@ -95,10 +106,11 @@ export class WorkerIndex {
 			// the loading skeleton with the fallback path unreachable.
 			const timer = window.setTimeout(() => {
 				if (this.pending.delete(id)) reject(new Error("content index worker timed out"));
-			}, SEARCH_TIMEOUT_MS);
+			}, this.warm ? WARM_SEARCH_TIMEOUT_MS : COLD_SEARCH_TIMEOUT_MS);
 			this.pending.set(id, {
 				resolve: (rows) => {
 					window.clearTimeout(timer);
+					this.warm = true;
 					resolve(rows);
 				},
 				reject: (err) => {
@@ -138,6 +150,7 @@ export class WorkerIndex {
 	invalidate(): void {
 		this.epoch++;
 		this.built = false;
+		this.warm = false;
 		this.worker.postMessage({ type: "clear" });
 	}
 

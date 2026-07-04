@@ -52,6 +52,11 @@ function markdownFilesForBatch(ctx: BatchOpsContext): TFile[] {
 	return filesForBatch(ctx).filter((file) => file.extension === "md");
 }
 
+/** "1 note" / "12 notes" — used in batch prompts so the affected count is visible. */
+function countLabel(n: number, noun = "note"): string {
+	return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
 export function resultsAsMarkdown(ctx: BatchOpsContext): string {
 	const rows = ctx.resultItems().map((item) => {
 		const file = itemFile(item);
@@ -91,7 +96,7 @@ export function batchAddTag(ctx: BatchOpsContext): void {
 		return;
 	}
 	new PromptModal(ctx.app, {
-		title: "Add tag to selected notes",
+		title: `Add tag to ${countLabel(files.length)}`,
 		initial: "spotlight",
 		cta: "Add tag",
 		onSubmit: (raw) => {
@@ -123,7 +128,7 @@ export function batchRemoveTag(ctx: BatchOpsContext): void {
 		return;
 	}
 	new PromptModal(ctx.app, {
-		title: "Remove tag from selected notes",
+		title: `Remove tag from ${countLabel(files.length)}`,
 		initial: "spotlight",
 		cta: "Remove tag",
 		onSubmit: (raw) => {
@@ -154,7 +159,7 @@ export function batchSetProperty(ctx: BatchOpsContext): void {
 		return;
 	}
 	new PromptModal(ctx.app, {
-		title: "Set property on selected notes",
+		title: `Set property on ${countLabel(files.length)}`,
 		initial: "status=active",
 		cta: "Set property",
 		onSubmit: (raw) => {
@@ -186,7 +191,7 @@ export function batchMoveFiles(ctx: BatchOpsContext): void {
 	const files = filesForBatch(ctx);
 	if (files.length === 0) return;
 	new PromptModal(ctx.app, {
-		title: "Move selected files to folder",
+		title: `Move ${countLabel(files.length, "file")} to folder`,
 		initial: "Archive",
 		cta: "Move files",
 		onSubmit: (raw) => {

@@ -2497,6 +2497,14 @@ function normalizeEscapeChar(raw) {
   const value = typeof raw === "string" ? raw.trim() : "";
   return value.length === 1 && !/\s/.test(value) ? value : DEFAULT_ESCAPE_CHAR;
 }
+function reconcileEscapeChar(escapeChar, modePrefixes) {
+  var _a;
+  const escape = normalizeEscapeChar(escapeChar);
+  const taken = new Set(Object.values(modePrefixes || {}));
+  if (!taken.has(escape)) return escape;
+  if (!taken.has(DEFAULT_ESCAPE_CHAR)) return DEFAULT_ESCAPE_CHAR;
+  return (_a = ["\\", "|", "?", "%", "&"].find((c) => !taken.has(c))) != null ? _a : DEFAULT_ESCAPE_CHAR;
+}
 function detectModeFromPrefix(raw, prefixes = DEFAULT_MODE_PREFIXES, escapeChar = DEFAULT_ESCAPE_CHAR) {
   const trimmed = String(raw != null ? raw : "").trimStart();
   if (escapeChar && trimmed.startsWith(escapeChar)) {
@@ -2737,10 +2745,25 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
     super(app, plugin);
     this.plugin = plugin;
   }
+  /**
+   * Store the escape char, but reconcile it against the live mode prefixes
+   * first (it is matched before prefixes, so a collision would silently make a
+   * search mode unreachable — the same guard loadSettings runs at startup).
+   * When a collision forces a different character, tell the user and re-render
+   * so the field shows the value that actually took effect.
+   */
+  reconcileEscapeChar(intended) {
+    const normalized = normalizeEscapeChar(intended);
+    const reconciled = reconcileEscapeChar(intended, this.plugin.settings.modePrefixes);
+    this.plugin.settings.escapeChar = reconciled;
+    if (reconciled !== normalized) {
+      new import_obsidian.Notice(`Vault Spotlight: escape character set to "${reconciled}" so it doesn't clash with a mode trigger.`);
+      this.display();
+    }
+  }
   display() {
-    var _a, _b, _c, _d;
     const { containerEl } = this;
-    const mod = getModifierLabel((_d = (_c = (_b = (_a = containerEl.ownerDocument) == null ? void 0 : _a.defaultView) == null ? void 0 : _b.navigator) == null ? void 0 : _c.platform) != null ? _d : window.navigator.platform);
+    const mod = getModifierLabel(import_obsidian.Platform.isMacOS || import_obsidian.Platform.isIosApp ? "mac" : "");
     containerEl.empty();
     new import_obsidian.Setting(containerEl).setName("License key").setDesc("Enter your Pro license key. Verified offline \u2014 no account or server required.").addText(
       (text) => text.setPlaceholder("payload.signature").setValue(this.plugin.settings.licenseKey).onChange((value) => {
@@ -2798,10 +2821,20 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
         void this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Prefer starred, bookmarked, and recent files").setDesc("Keep pinned work and recently touched notes near the top of browse results.").addToggle(
-      (toggle) => toggle.setValue(this.plugin.settings.ranking.preferStarredFiles && this.plugin.settings.ranking.preferBookmarkedFiles && this.plugin.settings.ranking.preferRecentFiles).onChange((value) => {
+    new import_obsidian.Setting(containerEl).setName("Prefer starred files").setDesc("Boost files you've starred toward the top of browse results.").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.ranking.preferStarredFiles).onChange((value) => {
         this.plugin.settings.ranking.preferStarredFiles = value;
+        void this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Prefer bookmarked files").setDesc("Boost files bookmarked in the core Bookmarks plugin.").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.ranking.preferBookmarkedFiles).onChange((value) => {
         this.plugin.settings.ranking.preferBookmarkedFiles = value;
+        void this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Prefer recent files").setDesc("Boost recently opened notes toward the top of browse results.").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.ranking.preferRecentFiles).onChange((value) => {
         this.plugin.settings.ranking.preferRecentFiles = value;
         void this.plugin.saveSettings();
       })
@@ -2876,6 +2909,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
             ...this.plugin.settings.modePrefixes,
             [key]: value
           });
+          this.reconcileEscapeChar(this.plugin.settings.escapeChar);
           void this.plugin.saveSettings();
         });
       });
@@ -2884,7 +2918,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
       text.inputEl.maxLength = 1;
       text.inputEl.addClass("vault-spotlight-prefix-input");
       text.setValue(this.plugin.settings.escapeChar).onChange((value) => {
-        this.plugin.settings.escapeChar = normalizeEscapeChar(value);
+        this.reconcileEscapeChar(value);
         void this.plugin.saveSettings();
       });
     });
@@ -3010,6 +3044,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
           const nameInput = row.createEl("input", { type: "text", cls: "vault-spotlight-snippet-name" });
           nameInput.value = snippet.name;
           nameInput.placeholder = "Name";
+          nameInput.setAttribute("aria-label", "Snippet name");
           nameInput.addEventListener("change", () => {
             snippet.name = nameInput.value.trim() || snippet.name;
             nameInput.value = snippet.name;
@@ -3019,6 +3054,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
           bodyInput.value = snippet.body;
           bodyInput.rows = 2;
           bodyInput.placeholder = "Snippet text with {{cursor}}";
+          bodyInput.setAttribute("aria-label", "Snippet body");
           bodyInput.addEventListener("change", () => {
             snippet.body = bodyInput.value;
             void this.plugin.saveSettings();
@@ -3251,20 +3287,27 @@ function fuzzyMatch(query, text, options = {}) {
   if (!query) {
     return { score: 0, indices: [] };
   }
-  const fold = options.ignoreDiacritics === true ? stripDiacritics : identity;
-  const q = fold(query).toLowerCase();
-  const foldedText = fold(text);
-  const t = foldedText.toLowerCase();
+  const ignoreDiacritics = options.ignoreDiacritics === true;
+  const q = (ignoreDiacritics ? stripDiacritics(query) : String(query)).toLowerCase();
+  let t;
+  let indexMap = null;
+  if (ignoreDiacritics) {
+    const folded = foldWithMap(text);
+    t = folded.folded;
+    indexMap = folded.map;
+  } else {
+    t = String(text).toLowerCase();
+  }
   let qi = 0;
   let lastMatch = -1;
   let score = 0;
   const indices = [];
   for (let ti = 0; ti < t.length && qi < q.length; ti++) {
     if (t[ti] === q[qi]) {
-      indices.push(ti);
+      indices.push(indexMap ? indexMap[ti] : ti);
       if (lastMatch === ti - 1) {
         score += 8;
-      } else if (ti === 0 || /[\s\-_/]/.test((_a = foldedText[ti - 1]) != null ? _a : "")) {
+      } else if (ti === 0 || /[\s\-_/]/.test((_a = t[ti - 1]) != null ? _a : "")) {
         score += 12;
       } else {
         score += 4;
@@ -3275,11 +3318,24 @@ function fuzzyMatch(query, text, options = {}) {
     }
   }
   if (qi < q.length) {
-    return typoFallback(q, foldedText);
+    return typoFallback(q, t);
   }
   if (t.includes(q)) score += 20;
   if (t.startsWith(q)) score += 30;
   return { score, indices };
+}
+function foldWithMap(value) {
+  const str = String(value);
+  let folded = "";
+  const map = [];
+  for (let i = 0; i < str.length; i++) {
+    const piece = stripDiacritics(str[i]).toLowerCase();
+    for (let j = 0; j < piece.length; j++) {
+      folded += piece[j];
+      map.push(i);
+    }
+  }
+  return { folded, map };
 }
 function typoFallback(q, text) {
   if (q.length < 4) return null;
@@ -3317,9 +3373,6 @@ function boundedLevenshtein(a, b, max) {
 }
 function stripDiacritics(value) {
   return String(value).normalize("NFD").replace(/\p{Diacritic}+/gu, "");
-}
-function identity(value) {
-  return String(value);
 }
 
 // src/search/fuzzy.ts
@@ -4543,6 +4596,17 @@ function insertCapture(existing, text, options = {}) {
   return options.mode === "prepend" ? prependToTop(base, line) : appendToEnd(base, line);
 }
 
+// src/core/dailyTemplate.mjs
+var TOKEN = /\{\{\s*(date|time|title)\s*(?::([^}]*))?\s*\}\}/gi;
+function fillDailyTemplate(template, resolve) {
+  if (typeof template !== "string" || template.length === 0) return "";
+  if (typeof resolve !== "function") return template;
+  return template.replace(TOKEN, (match, kind, fmt) => {
+    const value = resolve(String(kind).toLowerCase(), typeof fmt === "string" ? fmt.trim() : "");
+    return typeof value === "string" ? value : match;
+  });
+}
+
 // src/spotlight/resultTypes.ts
 var MODE_ORDER2 = [
   "files",
@@ -4978,6 +5042,9 @@ async function runBatch(files, op, verb, noun = "note") {
 function markdownFilesForBatch(ctx) {
   return filesForBatch(ctx).filter((file) => file.extension === "md");
 }
+function countLabel(n, noun = "note") {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
 function resultsAsMarkdown(ctx) {
   const rows = ctx.resultItems().map((item) => {
     const file = itemFile(item);
@@ -5019,7 +5086,7 @@ function batchAddTag(ctx) {
     return;
   }
   new PromptModal(ctx.app, {
-    title: "Add tag to selected notes",
+    title: `Add tag to ${countLabel(files.length)}`,
     initial: "spotlight",
     cta: "Add tag",
     onSubmit: (raw) => {
@@ -5047,7 +5114,7 @@ function batchRemoveTag(ctx) {
     return;
   }
   new PromptModal(ctx.app, {
-    title: "Remove tag from selected notes",
+    title: `Remove tag from ${countLabel(files.length)}`,
     initial: "spotlight",
     cta: "Remove tag",
     onSubmit: (raw) => {
@@ -5075,7 +5142,7 @@ function batchSetProperty(ctx) {
     return;
   }
   new PromptModal(ctx.app, {
-    title: "Set property on selected notes",
+    title: `Set property on ${countLabel(files.length)}`,
     initial: "status=active",
     cta: "Set property",
     onSubmit: (raw) => {
@@ -5103,7 +5170,7 @@ function batchMoveFiles(ctx) {
   const files = filesForBatch(ctx);
   if (files.length === 0) return;
   new PromptModal(ctx.app, {
-    title: "Move selected files to folder",
+    title: `Move ${countLabel(files.length, "file")} to folder`,
     initial: "Archive",
     cta: "Move files",
     onSubmit: (raw) => {
@@ -5241,6 +5308,9 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     this.drillReturnMode = "files";
     this.hasNavigated = false;
     this.activeWorkflowId = "";
+    // Platform modifier label ("Cmd" on macOS, else "Ctrl"), resolved once in
+    // onOpen so the footer hints match the real Mod-key bindings and the hint bar.
+    this.modifierLabel = "Ctrl";
     this.focusTimers = [];
     this.shouldRestoreSelection = false;
     this.preview = new PreviewPane(app);
@@ -5253,6 +5323,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     this.mode = initialMode;
   }
   onOpen() {
+    this.modifierLabel = getModifierLabel(import_obsidian9.Platform.isMacOS || import_obsidian9.Platform.isIosApp ? "mac" : "");
     this.containerEl.addClass("vault-spotlight-container");
     this.titleEl.empty();
     const { contentEl } = this;
@@ -5293,6 +5364,11 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       this.containerEl.addClass("has-preview");
     }
     this.footerEl = contentEl.createDiv({ cls: "vault-spotlight-footer" });
+    this.shortcutsEl = this.footerEl.createDiv({ cls: "vault-spotlight-shortcuts" });
+    this.statusEl = this.footerEl.createSpan({
+      cls: "vault-spotlight-status",
+      attr: { role: "status", "aria-live": "polite" }
+    });
     this.renderFooter();
     if (!this.plugin.settings.isPro) {
       const cta = contentEl.createDiv({ cls: "vault-spotlight-pro-cta" });
@@ -5361,6 +5437,10 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       window.clearTimeout(this.loadingTimer);
       this.loadingTimer = null;
     }
+    if (this.drillPrefixTimer !== null) {
+      window.clearTimeout(this.drillPrefixTimer);
+      this.drillPrefixTimer = null;
+    }
     this.clearFocusTimers();
     this.preview.unload();
     this.plugin.onSpotlightClosed(this);
@@ -5387,10 +5467,9 @@ var SpotlightModal = class extends import_obsidian9.Modal {
    * about comparable switcher plugins).
    */
   updateHint() {
-    var _a, _b, _c, _d;
     const isPro = this.plugin.settings.isPro;
     const prefixes = this.plugin.settings.modePrefixes;
-    const mod = getModifierLabel((_d = (_c = (_b = (_a = this.containerEl.ownerDocument) == null ? void 0 : _a.defaultView) == null ? void 0 : _b.navigator) == null ? void 0 : _c.platform) != null ? _d : window.navigator.platform);
+    const mod = this.modifierLabel;
     this.hintEl.empty();
     const hints = [
       ["2+2", "calc"],
@@ -5912,20 +5991,54 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     editor.replaceSelection(item.result);
     editor.focus();
   }
-  /** Daily-note folder + moment format from the core or Periodic Notes plugin. */
+  /** Daily-note folder + moment format + template from core or Periodic Notes. */
   dailyNoteConfig() {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
     const internal = this.app.internalPlugins;
     const opts = (_c = (_b = (_a = internal == null ? void 0 : internal.getPluginById) == null ? void 0 : _a.call(internal, "daily-notes")) == null ? void 0 : _b.instance) == null ? void 0 : _c.options;
     if (opts && (opts.format || opts.folder !== void 0)) {
-      return { folder: ((_d = opts.folder) != null ? _d : "").trim(), format: (opts.format || "YYYY-MM-DD").trim() };
+      return {
+        folder: ((_d = opts.folder) != null ? _d : "").trim(),
+        format: (opts.format || "YYYY-MM-DD").trim(),
+        template: ((_e = opts.template) != null ? _e : "").trim()
+      };
     }
-    const periodic = (_f = (_e = this.app.plugins) == null ? void 0 : _e.plugins) == null ? void 0 : _f["periodic-notes"];
-    const pd = (_g = periodic == null ? void 0 : periodic.settings) == null ? void 0 : _g.daily;
+    const periodic = (_g = (_f = this.app.plugins) == null ? void 0 : _f.plugins) == null ? void 0 : _g["periodic-notes"];
+    const pd = (_h = periodic == null ? void 0 : periodic.settings) == null ? void 0 : _h.daily;
     if (pd && (pd.format || pd.folder)) {
-      return { folder: ((_h = pd.folder) != null ? _h : "").trim(), format: (pd.format || "YYYY-MM-DD").trim() };
+      return {
+        folder: ((_i = pd.folder) != null ? _i : "").trim(),
+        format: (pd.format || "YYYY-MM-DD").trim(),
+        template: ((_j = pd.template) != null ? _j : "").trim()
+      };
     }
-    return { folder: "", format: "YYYY-MM-DD" };
+    return { folder: "", format: "YYYY-MM-DD", template: "" };
+  }
+  /**
+   * Build the initial content for a NEW daily note by expanding the user's
+   * configured Daily Notes / Periodic Notes template (honoring {{date}},
+   * {{time}}, {{title}} tokens). Returns "" when no template is configured or
+   * the template file can't be read, so creation still works everywhere.
+   */
+  async dailyTemplateContent(ms) {
+    const { format, template } = this.dailyNoteConfig();
+    if (!template) return "";
+    const rel = template.endsWith(".md") ? template : `${template}.md`;
+    const file = this.app.vault.getAbstractFileByPath((0, import_obsidian9.normalizePath)(rel));
+    if (!(file instanceof import_obsidian9.TFile)) return "";
+    let raw;
+    try {
+      raw = await this.app.vault.cachedRead(file);
+    } catch (e) {
+      return "";
+    }
+    const when = (0, import_obsidian9.moment)(ms);
+    const title = when.format(format);
+    return fillDailyTemplate(raw, (kind, fmt) => {
+      if (kind === "title") return title;
+      if (kind === "time") return when.format(fmt || "HH:mm");
+      return when.format(fmt || "YYYY-MM-DD");
+    });
   }
   resolveDatePath(ms) {
     const { folder, format } = this.dailyNoteConfig();
@@ -5951,7 +6064,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       let file = this.app.vault.getAbstractFileByPath(path);
       if (!(file instanceof import_obsidian9.TFile)) {
         await this.ensureFolder(path);
-        file = await this.app.vault.create(path, "");
+        file = await this.app.vault.create(path, await this.dailyTemplateContent(ms));
       }
       if (file instanceof import_obsidian9.TFile) {
         await this.app.workspace.getLeaf(false).openFile(file);
@@ -6005,7 +6118,8 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       return;
     }
     const settings = this.plugin.settings;
-    const path = item.target === "inbox" ? (0, import_obsidian9.normalizePath)(settings.captureInboxPath.trim()) : this.resolveDatePath(Date.now()).path;
+    const now = Date.now();
+    const path = item.target === "inbox" ? (0, import_obsidian9.normalizePath)(settings.captureInboxPath.trim()) : this.resolveDatePath(now).path;
     if (!path) {
       new import_obsidian9.Notice("Vault Spotlight: no capture target configured.");
       return;
@@ -6015,7 +6129,8 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     try {
       await this.ensureFolder(path);
       let file = this.app.vault.getAbstractFileByPath(path);
-      if (!(file instanceof import_obsidian9.TFile)) file = await this.app.vault.create(path, "");
+      const initial = item.target === "daily" ? await this.dailyTemplateContent(now) : "";
+      if (!(file instanceof import_obsidian9.TFile)) file = await this.app.vault.create(path, initial);
       if (file instanceof import_obsidian9.TFile) {
         const existing = await this.app.vault.read(file);
         const updated = insertCapture(existing, text, {
@@ -6219,21 +6334,18 @@ var SpotlightModal = class extends import_obsidian9.Modal {
   }
   renderFooter() {
     var _a, _b;
-    this.footerEl.empty();
-    const shortcuts = this.footerEl.createDiv({ cls: "vault-spotlight-shortcuts" });
+    const shortcuts = this.shortcutsEl;
+    shortcuts.empty();
     const selected = (_a = this.items[this.selectedIndex]) != null ? _a : null;
     for (const hint of getShortcutHints({
       itemKind: (_b = selected == null ? void 0 : selected.kind) != null ? _b : null,
       defaultNewTab: this.plugin.settings.defaultNewTab,
-      isPro: this.plugin.settings.isPro
+      isPro: this.plugin.settings.isPro,
+      modifierLabel: this.modifierLabel
     })) {
       this.addShortcut(shortcuts, hint.keys, hint.label);
     }
     if ((selected == null ? void 0 : selected.kind) !== "calc") this.addShortcut(shortcuts, ["Alt", "\u21B5"], "menu");
-    this.statusEl = this.footerEl.createSpan({
-      cls: "vault-spotlight-status",
-      attr: { role: "status", "aria-live": "polite" }
-    });
   }
   addShortcut(container, keys, label) {
     const wrap = container.createSpan({ cls: "vault-spotlight-shortcut" });
@@ -6242,8 +6354,29 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     }
     wrap.appendText(` ${label}`);
   }
+  /**
+   * Drop checked paths that are no longer among the visible results. The
+   * multi-select set is keyed by path and survives query changes; without this
+   * the footer would report "N selected" for files that have scrolled out of
+   * the result set, and a batch action (which falls back to "all results" when
+   * the checked intersection is empty) could silently mutate the WRONG files.
+   * Skipped while the action palette is open, where `items` holds actions, not
+   * results, and the checked set must survive into the batch operation.
+   */
+  pruneCheckedToVisible() {
+    if (this.checkedPaths.size === 0) return;
+    const visible = /* @__PURE__ */ new Set();
+    for (const item of this.items) {
+      const file = itemFile(item);
+      if (file) visible.add(file.path);
+    }
+    for (const path of Array.from(this.checkedPaths)) {
+      if (!visible.has(path)) this.checkedPaths.delete(path);
+    }
+  }
   updateStatus(count) {
     var _a;
+    if (!this.actionContext) this.pruneCheckedToVisible();
     (_a = this.inputEl) == null ? void 0 : _a.setAttribute("aria-expanded", count > 0 ? "true" : "false");
     if (!this.statusEl) return;
     if (this.checkedPaths.size > 0) {
@@ -7485,7 +7618,8 @@ self.onmessage = (evt) => {
 `;
 
 // src/search/WorkerIndex.ts
-var SEARCH_TIMEOUT_MS = 15e3;
+var COLD_SEARCH_TIMEOUT_MS = 15e3;
+var WARM_SEARCH_TIMEOUT_MS = 3e3;
 var WorkerIndex = class _WorkerIndex {
   constructor(app, worker, blobUrl) {
     this.app = app;
@@ -7493,6 +7627,10 @@ var WorkerIndex = class _WorkerIndex {
     this.blobUrl = blobUrl;
     this.built = false;
     this.buildPromise = null;
+    // Set once a scan has answered since the last (re)build; lets steady-state
+    // searches use the tighter WARM timeout. Reset by invalidate() so the first
+    // search after a rebuild gets the generous COLD deadline again.
+    this.warm = false;
     // Bumped by invalidate(); a build that started under an older epoch must
     // not mark the index as complete (a mid-build "clear" wiped its early files).
     this.epoch = 0;
@@ -7551,10 +7689,11 @@ var WorkerIndex = class _WorkerIndex {
       const id = this.nextId++;
       const timer = window.setTimeout(() => {
         if (this.pending.delete(id)) reject(new Error("content index worker timed out"));
-      }, SEARCH_TIMEOUT_MS);
+      }, this.warm ? WARM_SEARCH_TIMEOUT_MS : COLD_SEARCH_TIMEOUT_MS);
       this.pending.set(id, {
         resolve: (rows) => {
           window.clearTimeout(timer);
+          this.warm = true;
           resolve(rows);
         },
         reject: (err) => {
@@ -7589,6 +7728,7 @@ var WorkerIndex = class _WorkerIndex {
   invalidate() {
     this.epoch++;
     this.built = false;
+    this.warm = false;
     this.worker.postMessage({ type: "clear" });
   }
   dispose() {
@@ -7821,7 +7961,7 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
     });
     this.addCommand({
       id: "run-action",
-      name: "Search commands",
+      name: "Run action",
       callback: () => this.openSpotlight("", "commands")
     });
     this.addCommand({
@@ -8122,6 +8262,7 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
       this.settings.isPro = false;
       this.settings.licenseEmail = "";
       await this.saveSettings();
+      if (before !== this.settings.isPro) this.syncCustomSearchCommands();
       return before !== this.settings.isPro;
     }
     const result = LicenseManager.verify(this.settings.licenseKey);
@@ -8129,10 +8270,28 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
     this.settings.licenseEmail = (_a = result.email) != null ? _a : "";
     const changed = before !== this.settings.isPro || beforeEmail !== this.settings.licenseEmail;
     if (changed || persistUnchanged) await this.saveSettings();
+    if (before !== this.settings.isPro) this.syncCustomSearchCommands();
     return changed;
   }
-  async loadSettings() {
+  /**
+   * Custom-search commands are Pro-only and are registered once at startup
+   * (onload). When the license flips at runtime, reconcile them without a
+   * restart: register them when Pro turns on, revoke them when it lapses — so a
+   * lapsed license can't leave a live Pro command (and its hotkey) in the
+   * palette, and a freshly-entered key resurfaces saved searches immediately.
+   */
+  syncCustomSearchCommands() {
     var _a;
+    if (this.settings.isPro) {
+      for (const search of this.settings.customSearches) this.registerCustomSearchCommand(search);
+      return;
+    }
+    const commands = this.app.commands;
+    for (const search of this.settings.customSearches) {
+      (_a = commands == null ? void 0 : commands.removeCommand) == null ? void 0 : _a.call(commands, `${this.manifest.id}:custom-search-${search.id}`);
+    }
+  }
+  async loadSettings() {
     const data = await this.loadData();
     const loaded = data !== null && typeof data === "object" ? data : {};
     this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
@@ -8157,10 +8316,7 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
     }
     this.settings.modePrefixes = normalizeModePrefixes(this.settings.modePrefixes);
     this.settings.escapeChar = normalizeEscapeChar(this.settings.escapeChar);
-    const takenPrefixes = new Set(Object.values(this.settings.modePrefixes));
-    if (takenPrefixes.has(this.settings.escapeChar)) {
-      this.settings.escapeChar = takenPrefixes.has(DEFAULT_ESCAPE_CHAR) ? (_a = ["\\", "|", "?", "%", "&"].find((c) => !takenPrefixes.has(c))) != null ? _a : DEFAULT_ESCAPE_CHAR : DEFAULT_ESCAPE_CHAR;
-    }
+    this.settings.escapeChar = reconcileEscapeChar(this.settings.escapeChar, this.settings.modePrefixes);
     this.settings.defaultNewTab = this.settings.defaultNewTab === true;
     this.settings.enableCalculator = this.settings.enableCalculator !== false;
     this.settings.enableDateJump = this.settings.enableDateJump !== false;

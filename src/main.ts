@@ -16,11 +16,11 @@ import { normalizeRankingSettings } from "./core/ranking.mjs";
 import { normalizeWorkflowPresets } from "./core/workflowPresets.mjs";
 import { normalizeSnippets } from "./core/snippets.mjs";
 import {
-	DEFAULT_ESCAPE_CHAR,
 	normalizeEscapeChar,
 	normalizeModePrefixes,
 	previousFilePath,
 	pushRecentCommand,
+	reconcileEscapeChar,
 } from "./core/modeTriggers.mjs";
 
 const MAX_FRECENCY_ENTRIES = 500;
@@ -72,7 +72,7 @@ export default class VaultSpotlightPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "run-action",
-			name: "Search commands",
+			name: "Run action",
 			callback: () => this.openSpotlight("", "commands"),
 		});
 		this.addCommand({
@@ -414,6 +414,7 @@ export default class VaultSpotlightPlugin extends Plugin {
 			this.settings.isPro = false;
 			this.settings.licenseEmail = "";
 			await this.saveSettings();
+			if (before !== this.settings.isPro) this.syncCustomSearchCommands();
 			return before !== this.settings.isPro;
 		}
 		const result = LicenseManager.verify(this.settings.licenseKey);
@@ -421,7 +422,28 @@ export default class VaultSpotlightPlugin extends Plugin {
 		this.settings.licenseEmail = result.email ?? "";
 		const changed = before !== this.settings.isPro || beforeEmail !== this.settings.licenseEmail;
 		if (changed || persistUnchanged) await this.saveSettings();
+		if (before !== this.settings.isPro) this.syncCustomSearchCommands();
 		return changed;
+	}
+
+	/**
+	 * Custom-search commands are Pro-only and are registered once at startup
+	 * (onload). When the license flips at runtime, reconcile them without a
+	 * restart: register them when Pro turns on, revoke them when it lapses — so a
+	 * lapsed license can't leave a live Pro command (and its hotkey) in the
+	 * palette, and a freshly-entered key resurfaces saved searches immediately.
+	 */
+	private syncCustomSearchCommands(): void {
+		if (this.settings.isPro) {
+			for (const search of this.settings.customSearches) this.registerCustomSearchCommand(search);
+			return;
+		}
+		const commands = (
+			this.app as unknown as { commands?: { removeCommand?: (id: string) => void } }
+		).commands;
+		for (const search of this.settings.customSearches) {
+			commands?.removeCommand?.(`${this.manifest.id}:custom-search-${search.id}`);
+		}
 	}
 
 	async loadSettings(): Promise<void> {
@@ -456,12 +478,7 @@ export default class VaultSpotlightPlugin extends Plugin {
 		// The escape char is checked before mode prefixes, so if it equals one it
 		// would silently make that mode unreachable. Reconcile to the default (or
 		// a free spare) when the user's escape char collides with a live prefix.
-		const takenPrefixes = new Set<string>(Object.values(this.settings.modePrefixes));
-		if (takenPrefixes.has(this.settings.escapeChar)) {
-			this.settings.escapeChar = takenPrefixes.has(DEFAULT_ESCAPE_CHAR)
-				? ["\\", "|", "?", "%", "&"].find((c) => !takenPrefixes.has(c)) ?? DEFAULT_ESCAPE_CHAR
-				: DEFAULT_ESCAPE_CHAR;
-		}
+		this.settings.escapeChar = reconcileEscapeChar(this.settings.escapeChar, this.settings.modePrefixes);
 		this.settings.defaultNewTab = this.settings.defaultNewTab === true;
 		// Delight-layer settings: coerce to safe shapes.
 		this.settings.enableCalculator = this.settings.enableCalculator !== false;

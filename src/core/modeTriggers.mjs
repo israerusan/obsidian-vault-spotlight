@@ -43,6 +43,21 @@ export function normalizeEscapeChar(raw) {
 }
 
 /**
+ * The escape char is checked BEFORE mode prefixes (see detectModeFromPrefix), so
+ * if it collides with a live prefix that mode becomes unreachable. Resolve a
+ * normalized escape char against the current prefix map: keep it if free, else
+ * fall back to the default, else the first free spare. Shared by loadSettings
+ * and the settings tab so a live edit can never silently kill a search mode.
+ */
+export function reconcileEscapeChar(escapeChar, modePrefixes) {
+	const escape = normalizeEscapeChar(escapeChar);
+	const taken = new Set(Object.values(modePrefixes || {}));
+	if (!taken.has(escape)) return escape;
+	if (!taken.has(DEFAULT_ESCAPE_CHAR)) return DEFAULT_ESCAPE_CHAR;
+	return ["\\", "|", "?", "%", "&"].find((c) => !taken.has(c)) ?? DEFAULT_ESCAPE_CHAR;
+}
+
+/**
  * Detect the search mode a raw query selects via its leading prefix.
  * Returns { mode, body, escaped }:
  * - escaped: query started with the escape char → treat the rest literally in files mode

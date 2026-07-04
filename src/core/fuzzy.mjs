@@ -3,10 +3,22 @@ export function fuzzyMatch(query, text, options = {}) {
 		return { score: 0, indices: [] };
 	}
 
-	const fold = options.ignoreDiacritics === true ? stripDiacritics : identity;
-	const q = fold(query).toLowerCase();
-	const foldedText = fold(text);
-	const t = foldedText.toLowerCase();
+	const ignoreDiacritics = options.ignoreDiacritics === true;
+	const q = (ignoreDiacritics ? stripDiacritics(query) : String(query)).toLowerCase();
+	// When folding diacritics, positions in the folded string no longer line up
+	// with the original (decomposed NFD combining marks collapse away, so every
+	// character after an accent shifts). Match against the folded text but keep a
+	// folded→original index map so the highlight indices we return point at the
+	// right characters of the ORIGINAL string.
+	let t;
+	let indexMap = null;
+	if (ignoreDiacritics) {
+		const folded = foldWithMap(text);
+		t = folded.folded;
+		indexMap = folded.map;
+	} else {
+		t = String(text).toLowerCase();
+	}
 	let qi = 0;
 	let lastMatch = -1;
 	let score = 0;
@@ -14,10 +26,10 @@ export function fuzzyMatch(query, text, options = {}) {
 
 	for (let ti = 0; ti < t.length && qi < q.length; ti++) {
 		if (t[ti] === q[qi]) {
-			indices.push(ti);
+			indices.push(indexMap ? indexMap[ti] : ti);
 			if (lastMatch === ti - 1) {
 				score += 8;
-			} else if (ti === 0 || /[\s\-_/]/.test(foldedText[ti - 1] ?? "")) {
+			} else if (ti === 0 || /[\s\-_/]/.test(t[ti - 1] ?? "")) {
 				score += 12;
 			} else {
 				score += 4;
@@ -33,13 +45,34 @@ export function fuzzyMatch(query, text, options = {}) {
 		// so a small typo ("dashbaord" → "dashboard") still matches. Compare the
 		// query against each word of the text; keep it cheap by only trying when
 		// the query is long enough to make a typo meaningful.
-		return typoFallback(q, foldedText);
+		return typoFallback(q, t);
 	}
 
 	if (t.includes(q)) score += 20;
 	if (t.startsWith(q)) score += 30;
 
 	return { score, indices };
+}
+
+/**
+ * Diacritic-fold + lowercase a string one ORIGINAL code unit at a time, tracking
+ * which original index each folded output character came from. A decomposed
+ * accent (base char + combining mark) collapses to a single folded char, and a
+ * bare combining mark folds to nothing — both stay correctly mapped so match
+ * indices can be translated back to the original string for highlighting.
+ */
+function foldWithMap(value) {
+	const str = String(value);
+	let folded = "";
+	const map = [];
+	for (let i = 0; i < str.length; i++) {
+		const piece = stripDiacritics(str[i]).toLowerCase();
+		for (let j = 0; j < piece.length; j++) {
+			folded += piece[j];
+			map.push(i);
+		}
+	}
+	return { folded, map };
 }
 
 /**
@@ -90,8 +123,4 @@ export function boundedLevenshtein(a, b, max) {
 
 function stripDiacritics(value) {
 	return String(value).normalize("NFD").replace(/\p{Diacritic}+/gu, "");
-}
-
-function identity(value) {
-	return String(value);
 }

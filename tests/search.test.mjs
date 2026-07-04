@@ -25,6 +25,39 @@ assert.equal(shortTypo, null, "short queries get no typo tolerance");
 const empty = fuzzyMatch("", "Anything");
 assert.deepEqual(empty, { score: 0, indices: [] }, "empty query matches everything at score 0");
 
+// --- diacritic folding keeps highlight indices aligned to the ORIGINAL string ---
+// Accented strings are assembled from char codes so the precomposed vs
+// decomposed distinction is unambiguous in source (an editor could otherwise
+// silently normalize a literal accent and defeat the point of the test).
+const ACUTE_E = String.fromCharCode(0x00e9); // precomposed "é"
+const COMBINING_ACUTE = String.fromCharCode(0x0301); // combining accent
+
+// Precomposed: "caf" + é + " note". Folding the accent to "e" is
+// length-preserving, but the returned indices must still index the ORIGINAL
+// string ("note" at 5..8).
+const precomposedText = "caf" + ACUTE_E + " note";
+const precomposed = fuzzyMatch("note", precomposedText, { ignoreDiacritics: true });
+assert.ok(precomposed && precomposed.score > 0, "precomposed accent matches when folding");
+assert.deepEqual(precomposed.indices, [5, 6, 7, 8], "indices map onto the original precomposed string");
+
+// Decomposed: "cafe" + combining acute + " note". The mark collapses away when
+// folded, so a naive folded index is off by one; the map must land the
+// highlight on "note" (original offsets 6..9), NOT the shifted " not". This is
+// the macOS-supplied (NFD) filename case from the review.
+const decomposedText = "cafe" + COMBINING_ACUTE + " note";
+const decomposed = fuzzyMatch("note", decomposedText, { ignoreDiacritics: true });
+assert.ok(decomposed && decomposed.score > 0, "decomposed accent matches when folding");
+assert.deepEqual(decomposed.indices, [6, 7, 8, 9], "folded->original index map corrects the NFD shift");
+assert.deepEqual(
+	decomposed.indices.map((i) => decomposedText[i]),
+	["n", "o", "t", "e"],
+	"highlights the real characters, not shifted ones"
+);
+
+// The non-folded path is unchanged: an accented query matches its own text.
+const noFold = fuzzyMatch("caf" + ACUTE_E, precomposedText);
+assert.ok(noFold && noFold.score > 0, "non-folded path unaffected");
+
 // --- parseAdvancedQuery (backs tokenizeQuery; prefixes are stripped upstream) ---
 
 const parsed = parseAdvancedQuery("project #work @status:done");

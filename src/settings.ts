@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type VaultSpotlightPlugin from "./main";
 import { createProfileFromSettings } from "./core/searchProfiles.mjs";
 import { DEFAULT_RANKING_SETTINGS } from "./core/ranking.mjs";
@@ -9,6 +9,7 @@ import {
 	DEFAULT_MODE_PREFIXES,
 	normalizeEscapeChar,
 	normalizeModePrefixes,
+	reconcileEscapeChar,
 } from "./core/modeTriggers.mjs";
 import { getModifierLabel } from "./core/modalCopy.mjs";
 
@@ -171,9 +172,26 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
+	/**
+	 * Store the escape char, but reconcile it against the live mode prefixes
+	 * first (it is matched before prefixes, so a collision would silently make a
+	 * search mode unreachable — the same guard loadSettings runs at startup).
+	 * When a collision forces a different character, tell the user and re-render
+	 * so the field shows the value that actually took effect.
+	 */
+	private reconcileEscapeChar(intended: string): void {
+		const normalized = normalizeEscapeChar(intended);
+		const reconciled = reconcileEscapeChar(intended, this.plugin.settings.modePrefixes);
+		this.plugin.settings.escapeChar = reconciled;
+		if (reconciled !== normalized) {
+			new Notice(`Vault Spotlight: escape character set to "${reconciled}" so it doesn't clash with a mode trigger.`);
+			this.display();
+		}
+	}
+
 	display(): void {
 		const { containerEl } = this;
-		const mod = getModifierLabel(containerEl.ownerDocument?.defaultView?.navigator?.platform ?? window.navigator.platform);
+		const mod = getModifierLabel(Platform.isMacOS || Platform.isIosApp ? "mac" : "");
 		containerEl.empty();
 
 		new Setting(containerEl)
@@ -279,12 +297,30 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Prefer starred, bookmarked, and recent files")
-			.setDesc("Keep pinned work and recently touched notes near the top of browse results.")
+			.setName("Prefer starred files")
+			.setDesc("Boost files you've starred toward the top of browse results.")
 			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.ranking.preferStarredFiles && this.plugin.settings.ranking.preferBookmarkedFiles && this.plugin.settings.ranking.preferRecentFiles).onChange((value) => {
+				toggle.setValue(this.plugin.settings.ranking.preferStarredFiles).onChange((value) => {
 					this.plugin.settings.ranking.preferStarredFiles = value;
+					void this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Prefer bookmarked files")
+			.setDesc("Boost files bookmarked in the core Bookmarks plugin.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.ranking.preferBookmarkedFiles).onChange((value) => {
 					this.plugin.settings.ranking.preferBookmarkedFiles = value;
+					void this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Prefer recent files")
+			.setDesc("Boost recently opened notes toward the top of browse results.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.ranking.preferRecentFiles).onChange((value) => {
 					this.plugin.settings.ranking.preferRecentFiles = value;
 					void this.plugin.saveSettings();
 				})
@@ -396,6 +432,9 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 							...this.plugin.settings.modePrefixes,
 							[key]: value,
 						});
+						// A newly-set prefix may now collide with the escape char,
+						// which is matched first and would make this mode unreachable.
+						this.reconcileEscapeChar(this.plugin.settings.escapeChar);
 						void this.plugin.saveSettings();
 					});
 				});
@@ -408,7 +447,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 				text.inputEl.maxLength = 1;
 				text.inputEl.addClass("vault-spotlight-prefix-input");
 				text.setValue(this.plugin.settings.escapeChar).onChange((value) => {
-					this.plugin.settings.escapeChar = normalizeEscapeChar(value);
+					this.reconcileEscapeChar(value);
 					void this.plugin.saveSettings();
 				});
 			});
@@ -562,6 +601,9 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 					const nameInput = row.createEl("input", { type: "text", cls: "vault-spotlight-snippet-name" });
 					nameInput.value = snippet.name;
 					nameInput.placeholder = "Name";
+					// Placeholders vanish once populated and aren't a reliable
+					// accessible name, so label the fields explicitly for screen readers.
+					nameInput.setAttribute("aria-label", "Snippet name");
 					nameInput.addEventListener("change", () => {
 						snippet.name = nameInput.value.trim() || snippet.name;
 						// Resync the field so a whitespace-only entry doesn't leave the
@@ -573,6 +615,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 					bodyInput.value = snippet.body;
 					bodyInput.rows = 2;
 					bodyInput.placeholder = "Snippet text with {{cursor}}";
+					bodyInput.setAttribute("aria-label", "Snippet body");
 					bodyInput.addEventListener("change", () => {
 						snippet.body = bodyInput.value;
 						void this.plugin.saveSettings();

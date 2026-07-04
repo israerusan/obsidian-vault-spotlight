@@ -5,6 +5,7 @@ import {
 	Menu,
 	Notice,
 	Modal,
+	Platform,
 	TFile,
 	TFolder,
 	moment,
@@ -29,6 +30,7 @@ import { findBacklinks, findOutlinks } from "../core/linkGraph.mjs";
 import { evaluateExpression, parseCurrencyRates } from "../core/calculator.mjs";
 import { parseNaturalDate } from "../core/naturalDates.mjs";
 import { insertCapture } from "../core/capture.mjs";
+import { fillDailyTemplate } from "../core/dailyTemplate.mjs";
 import { expandSnippet } from "../core/snippets.mjs";
 import {
 	describeCaptureTarget,
@@ -61,6 +63,7 @@ export class SpotlightModal extends Modal {
 	private resultsEl!: HTMLDivElement;
 	private preview: PreviewPane;
 	private footerEl!: HTMLDivElement;
+	private shortcutsEl!: HTMLDivElement;
 	private statusEl!: HTMLSpanElement;
 	private modeBadgeEl!: HTMLSpanElement;
 	private hintEl!: HTMLDivElement;
@@ -93,6 +96,9 @@ export class SpotlightModal extends Modal {
 	private drillReturnMode: SpotlightMode = "files";
 	private hasNavigated = false;
 	private activeWorkflowId = "";
+	// Platform modifier label ("Cmd" on macOS, else "Ctrl"), resolved once in
+	// onOpen so the footer hints match the real Mod-key bindings and the hint bar.
+	private modifierLabel = "Ctrl";
 
 	constructor(
 		app: App,
@@ -113,6 +119,9 @@ export class SpotlightModal extends Modal {
 	}
 
 	onOpen(): void {
+		// Obsidian's Platform API instead of navigator.* for OS detection (per the
+		// community review guidelines and popout-window safety).
+		this.modifierLabel = getModifierLabel(Platform.isMacOS || Platform.isIosApp ? "mac" : "");
 		this.containerEl.addClass("vault-spotlight-container");
 		this.titleEl.empty();
 		const { contentEl } = this;
@@ -160,6 +169,15 @@ export class SpotlightModal extends Modal {
 		}
 
 		this.footerEl = contentEl.createDiv({ cls: "vault-spotlight-footer" });
+		// The shortcut chips are rebuilt per selection, but the aria-live status
+		// node is created ONCE and kept stable — assistive tech only announces
+		// mutations to a live region that already existed in the a11y tree, so
+		// recreating it on every keystroke would swallow "N results"/"N selected".
+		this.shortcutsEl = this.footerEl.createDiv({ cls: "vault-spotlight-shortcuts" });
+		this.statusEl = this.footerEl.createSpan({
+			cls: "vault-spotlight-status",
+			attr: { role: "status", "aria-live": "polite" },
+		});
 		this.renderFooter();
 
 		if (!this.plugin.settings.isPro) {
@@ -241,6 +259,13 @@ export class SpotlightModal extends Modal {
 			window.clearTimeout(this.loadingTimer);
 			this.loadingTimer = null;
 		}
+		// The drill-prefix timer fires scheduleSearch() 260ms later; if left armed
+		// it would run a full search against the now-detached modal (and re-arm
+		// untracked timers), so release it alongside the others.
+		if (this.drillPrefixTimer !== null) {
+			window.clearTimeout(this.drillPrefixTimer);
+			this.drillPrefixTimer = null;
+		}
 		this.clearFocusTimers();
 		this.preview.unload();
 		this.plugin.onSpotlightClosed(this);
@@ -271,7 +296,7 @@ export class SpotlightModal extends Modal {
 	private updateHint(): void {
 		const isPro = this.plugin.settings.isPro;
 		const prefixes = this.plugin.settings.modePrefixes;
-		const mod = getModifierLabel(this.containerEl.ownerDocument?.defaultView?.navigator?.platform ?? window.navigator.platform);
+		const mod = this.modifierLabel;
 		this.hintEl.empty();
 		const hints: Array<[string, string]> = [
 			["2+2", "calc"],
@@ -865,31 +890,66 @@ export class SpotlightModal extends Modal {
 		editor.focus();
 	}
 
-	/** Daily-note folder + moment format from the core or Periodic Notes plugin. */
-	private dailyNoteConfig(): { folder: string; format: string } {
+	/** Daily-note folder + moment format + template from core or Periodic Notes. */
+	private dailyNoteConfig(): { folder: string; format: string; template: string } {
 		const internal = (
 			this.app as unknown as {
 				internalPlugins?: {
 					getPluginById?: (
 						id: string
-					) => { instance?: { options?: { folder?: string; format?: string } } } | null;
+					) => { instance?: { options?: { folder?: string; format?: string; template?: string } } } | null;
 				};
 			}
 		).internalPlugins;
 		const opts = internal?.getPluginById?.("daily-notes")?.instance?.options;
 		if (opts && (opts.format || opts.folder !== undefined)) {
-			return { folder: (opts.folder ?? "").trim(), format: (opts.format || "YYYY-MM-DD").trim() };
+			return {
+				folder: (opts.folder ?? "").trim(),
+				format: (opts.format || "YYYY-MM-DD").trim(),
+				template: (opts.template ?? "").trim(),
+			};
 		}
 		const periodic = (
 			this.app as unknown as {
-				plugins?: { plugins?: Record<string, { settings?: { daily?: { folder?: string; format?: string } } }> };
+				plugins?: { plugins?: Record<string, { settings?: { daily?: { folder?: string; format?: string; template?: string } } }> };
 			}
 		).plugins?.plugins?.["periodic-notes"];
 		const pd = periodic?.settings?.daily;
 		if (pd && (pd.format || pd.folder)) {
-			return { folder: (pd.folder ?? "").trim(), format: (pd.format || "YYYY-MM-DD").trim() };
+			return {
+				folder: (pd.folder ?? "").trim(),
+				format: (pd.format || "YYYY-MM-DD").trim(),
+				template: (pd.template ?? "").trim(),
+			};
 		}
-		return { folder: "", format: "YYYY-MM-DD" };
+		return { folder: "", format: "YYYY-MM-DD", template: "" };
+	}
+
+	/**
+	 * Build the initial content for a NEW daily note by expanding the user's
+	 * configured Daily Notes / Periodic Notes template (honoring {{date}},
+	 * {{time}}, {{title}} tokens). Returns "" when no template is configured or
+	 * the template file can't be read, so creation still works everywhere.
+	 */
+	private async dailyTemplateContent(ms: number): Promise<string> {
+		const { format, template } = this.dailyNoteConfig();
+		if (!template) return "";
+		const rel = template.endsWith(".md") ? template : `${template}.md`;
+		const file = this.app.vault.getAbstractFileByPath(normalizePath(rel));
+		if (!(file instanceof TFile)) return "";
+		let raw: string;
+		try {
+			raw = await this.app.vault.cachedRead(file);
+		} catch {
+			return "";
+		}
+		const when = moment(ms);
+		const title = when.format(format);
+		return fillDailyTemplate(raw, (kind, fmt) => {
+			if (kind === "title") return title;
+			if (kind === "time") return when.format(fmt || "HH:mm");
+			return when.format(fmt || "YYYY-MM-DD");
+		});
 	}
 
 	private resolveDatePath(ms: number): { path: string; exists: boolean } {
@@ -919,7 +979,7 @@ export class SpotlightModal extends Modal {
 			let file = this.app.vault.getAbstractFileByPath(path);
 			if (!(file instanceof TFile)) {
 				await this.ensureFolder(path);
-				file = await this.app.vault.create(path, "");
+				file = await this.app.vault.create(path, await this.dailyTemplateContent(ms));
 			}
 			if (file instanceof TFile) {
 				await this.app.workspace.getLeaf(false).openFile(file);
@@ -975,10 +1035,11 @@ export class SpotlightModal extends Modal {
 			return;
 		}
 		const settings = this.plugin.settings;
+		const now = Date.now();
 		const path =
 			item.target === "inbox"
 				? normalizePath(settings.captureInboxPath.trim())
-				: this.resolveDatePath(Date.now()).path;
+				: this.resolveDatePath(now).path;
 		if (!path) {
 			new Notice("Vault Spotlight: no capture target configured.");
 			return;
@@ -988,7 +1049,10 @@ export class SpotlightModal extends Modal {
 		try {
 			await this.ensureFolder(path);
 			let file = this.app.vault.getAbstractFileByPath(path);
-			if (!(file instanceof TFile)) file = await this.app.vault.create(path, "");
+			// A brand-new daily note gets the configured daily template so a capture
+			// doesn't land in a blank file where a templated note was expected.
+			const initial = item.target === "daily" ? await this.dailyTemplateContent(now) : "";
+			if (!(file instanceof TFile)) file = await this.app.vault.create(path, initial);
 			if (file instanceof TFile) {
 				const existing = await this.app.vault.read(file);
 				const updated = insertCapture(existing, text, {
@@ -1213,25 +1277,19 @@ export class SpotlightModal extends Modal {
 	}
 
 	private renderFooter(): void {
-		this.footerEl.empty();
-		const shortcuts = this.footerEl.createDiv({ cls: "vault-spotlight-shortcuts" });
+		const shortcuts = this.shortcutsEl;
+		shortcuts.empty();
 		const selected = this.items[this.selectedIndex] ?? null;
 
 		for (const hint of getShortcutHints({
 			itemKind: selected?.kind ?? null,
 			defaultNewTab: this.plugin.settings.defaultNewTab,
 			isPro: this.plugin.settings.isPro,
+			modifierLabel: this.modifierLabel,
 		})) {
 			this.addShortcut(shortcuts, hint.keys, hint.label);
 		}
 		if (selected?.kind !== "calc") this.addShortcut(shortcuts, ["Alt", "↵"], "menu");
-
-		// Announce the result count / empty state to screen readers as the user
-		// types (aria-live), without stealing focus.
-		this.statusEl = this.footerEl.createSpan({
-			cls: "vault-spotlight-status",
-			attr: { role: "status", "aria-live": "polite" },
-		});
 	}
 
 	private addShortcut(container: HTMLElement, keys: string[], label: string): void {
@@ -1242,7 +1300,29 @@ export class SpotlightModal extends Modal {
 		wrap.appendText(` ${label}`);
 	}
 
+	/**
+	 * Drop checked paths that are no longer among the visible results. The
+	 * multi-select set is keyed by path and survives query changes; without this
+	 * the footer would report "N selected" for files that have scrolled out of
+	 * the result set, and a batch action (which falls back to "all results" when
+	 * the checked intersection is empty) could silently mutate the WRONG files.
+	 * Skipped while the action palette is open, where `items` holds actions, not
+	 * results, and the checked set must survive into the batch operation.
+	 */
+	private pruneCheckedToVisible(): void {
+		if (this.checkedPaths.size === 0) return;
+		const visible = new Set<string>();
+		for (const item of this.items) {
+			const file = itemFile(item);
+			if (file) visible.add(file.path);
+		}
+		for (const path of Array.from(this.checkedPaths)) {
+			if (!visible.has(path)) this.checkedPaths.delete(path);
+		}
+	}
+
 	private updateStatus(count: number): void {
+		if (!this.actionContext) this.pruneCheckedToVisible();
 		// Reflect real listbox state for assistive tech instead of a hardcoded
 		// "expanded" — the combobox is only expanded when options are showing.
 		this.inputEl?.setAttribute("aria-expanded", count > 0 ? "true" : "false");

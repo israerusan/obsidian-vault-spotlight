@@ -1,7 +1,7 @@
 {
 	"id": "vault-spotlight",
 	"name": "Vault Spotlight",
-	"version": "2.6.2",
+	"version": "2.6.3",
 	"minAppVersion": "1.5.0",
 	"description": "Spotlight-style launcher: fuzzy file search, commands, headings, ripgrep-fast content search, an inline calculator/converter, natural-language date jump, quick capture, snippets, and batch actions.",
 	"author": "iavil",

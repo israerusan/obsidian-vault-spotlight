@@ -16,6 +16,7 @@ export const DEFAULT_ESCAPE_CHAR: string;
 
 export function normalizeModePrefixes(raw: unknown): ModePrefixMap;
 export function normalizeEscapeChar(raw: unknown): string;
+export function reconcileEscapeChar(escapeChar: unknown, modePrefixes: Partial<ModePrefixMap> | null | undefined): string;
 
 export function detectModeFromPrefix(
 	raw: string,

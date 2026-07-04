@@ -8,6 +8,7 @@ import {
 	parseHeadingQuery,
 	previousFilePath,
 	pushRecentCommand,
+	reconcileEscapeChar,
 } from "../src/core/modeTriggers.mjs";
 import { parseAdvancedQuery } from "../src/core/advancedQuery.mjs";
 
@@ -54,6 +55,22 @@ assert.equal(collide.commands, DEFAULT_MODE_PREFIXES.commands, "cannot steal con
 assert.equal(normalizeEscapeChar("?"), "?");
 assert.equal(normalizeEscapeChar(""), DEFAULT_ESCAPE_CHAR);
 assert.equal(normalizeEscapeChar("ab"), DEFAULT_ESCAPE_CHAR);
+
+// --- reconcileEscapeChar (escape char must never equal a live mode prefix) ---
+
+// No collision → the (normalized) intended char is kept
+assert.equal(reconcileEscapeChar("?", DEFAULT_MODE_PREFIXES), "?");
+assert.equal(reconcileEscapeChar("!", DEFAULT_MODE_PREFIXES), "!");
+// Escape char equals the content trigger ">" → falls back to the default "!"
+assert.equal(reconcileEscapeChar(">", DEFAULT_MODE_PREFIXES), DEFAULT_ESCAPE_CHAR);
+// Collision AND the default "!" is itself taken as a prefix → first free spare
+const escapeTaken = { ...DEFAULT_MODE_PREFIXES, content: ">", folders: "!" };
+const spare = reconcileEscapeChar(">", escapeTaken);
+assert.notEqual(spare, ">", "must not stay on the colliding char");
+assert.notEqual(spare, "!", "must not pick a char already used as a prefix");
+assert.ok(!Object.values(escapeTaken).includes(spare), "spare is free of all prefixes");
+// Blank/garbage input normalizes first, then reconciles
+assert.equal(reconcileEscapeChar("", DEFAULT_MODE_PREFIXES), DEFAULT_ESCAPE_CHAR);
 
 // --- parseHeadingQuery ---
 
