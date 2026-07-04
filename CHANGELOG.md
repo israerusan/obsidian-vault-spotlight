@@ -3,6 +3,16 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.7.2] - 2026-07-04
+
+### Changed
+- The result and preview panes now use a slim, hover-revealed scrollbar in place
+  of the platform default.
+
+### Fixed
+- Reaching the top or bottom of the result list or preview no longer scrolls the
+  vault behind the modal (scroll is now contained to the pane).
+
 ## [2.7.1] - 2026-07-04
 
 ### Fixed

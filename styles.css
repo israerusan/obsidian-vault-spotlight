@@ -160,6 +160,44 @@
 	min-height: 240px;
 	overflow-y: auto;
 	padding: 8px 10px 12px;
+	/* Keep list scrolling self-contained — reaching the top/bottom must not
+	   scroll the vault behind the modal (reads as a solid, standalone surface). */
+	overscroll-behavior: contain;
+}
+
+/* Slim, theme-aware scrollbars for the scrollable panes. Calm at rest, a touch
+   stronger on hover — the refined finish premium launchers use in place of the
+   platform default. */
+.vault-spotlight-results,
+.vault-spotlight-preview {
+	scrollbar-width: thin;
+	scrollbar-color: color-mix(in srgb, var(--text-faint) 45%, transparent) transparent;
+}
+
+.vault-spotlight-results::-webkit-scrollbar,
+.vault-spotlight-preview::-webkit-scrollbar {
+	width: 10px;
+}
+
+.vault-spotlight-results::-webkit-scrollbar-track,
+.vault-spotlight-preview::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.vault-spotlight-results::-webkit-scrollbar-thumb,
+.vault-spotlight-preview::-webkit-scrollbar-thumb {
+	/* padding-box + transparent border insets the thumb so it reads as a slim
+	   pill floating in the gutter rather than filling it. */
+	background: color-mix(in srgb, var(--text-faint) 40%, transparent);
+	background-clip: padding-box;
+	border: 3px solid transparent;
+	border-radius: 999px;
+}
+
+.vault-spotlight-results:hover::-webkit-scrollbar-thumb,
+.vault-spotlight-preview:hover::-webkit-scrollbar-thumb {
+	background: color-mix(in srgb, var(--text-muted) 55%, transparent);
+	background-clip: padding-box;
 }
 
 /* A slow re-query keeps the prior rows visible but dims them, rather than
@@ -700,6 +738,7 @@
 	flex: 1;
 	min-width: 0;
 	overflow-y: auto;
+	overscroll-behavior: contain;
 	padding: 14px 18px;
 	background: var(--background-primary);
 }
