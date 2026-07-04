@@ -263,22 +263,37 @@ export function appendLinksToActiveNote(ctx: BatchOpsContext): void {
 	}
 	const markdown = resultsAsMarkdown(ctx);
 	if (!markdown) return;
-	void ctx.app.vault.process(active, (content) => `${content.trimEnd()}\n\n${markdown}\n`).then(() => new Notice("Vault Spotlight: links appended."));
+	void ctx.app.vault
+		.process(active, (content) => `${content.trimEnd()}\n\n${markdown}\n`)
+		.then(() => new Notice("Vault Spotlight: links appended."))
+		.catch((err) => {
+			console.error("[VaultSpotlight] append links failed", err);
+			new Notice("Vault Spotlight: append failed.");
+		});
 }
 
 async function createExportNote(ctx: BatchOpsContext, filename: string, note: string, message: string): Promise<void> {
-	const dir = "Vault Spotlight Exports";
-	if (!ctx.app.vault.getAbstractFileByPath(dir)) await ctx.app.vault.createFolder(dir);
-	let path = normalizePath(`${dir}/${filename}`);
-	let counter = 2;
-	while (ctx.app.vault.getAbstractFileByPath(path)) {
-		path = normalizePath(`${dir}/${filename.replace(/\.md$/, ` ${counter}.md`)}`);
-		counter++;
+	// Mirror the error-reporting the other vault-write helpers use (runBatch,
+	// batchMoveFiles, renameFile): a failed write must surface a Notice, never a
+	// silent unhandled rejection. Reached via `void`/`await` from MOC/export.
+	try {
+		const dir = "Vault Spotlight Exports";
+		const existing = ctx.app.vault.getAbstractFileByPath(dir);
+		if (!existing) await ctx.app.vault.createFolder(dir);
+		let path = normalizePath(`${dir}/${filename}`);
+		let counter = 2;
+		while (ctx.app.vault.getAbstractFileByPath(path)) {
+			path = normalizePath(`${dir}/${filename.replace(/\.md$/, ` ${counter}.md`)}`);
+			counter++;
+		}
+		const file = await ctx.app.vault.create(path, note);
+		ctx.close();
+		await ctx.app.workspace.getLeaf(false).openFile(file);
+		new Notice(`Vault Spotlight: ${message}.`);
+	} catch (err) {
+		console.error("[VaultSpotlight] export failed", err);
+		new Notice("Vault Spotlight: export failed.");
 	}
-	const file = await ctx.app.vault.create(path, note);
-	ctx.close();
-	await ctx.app.workspace.getLeaf(false).openFile(file);
-	new Notice(`Vault Spotlight: ${message}.`);
 }
 
 export function copyToClipboard(text: string, okMessage: string): void {

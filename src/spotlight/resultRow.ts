@@ -17,6 +17,8 @@ export function renderResultRow(
 	options: ResultRowOptions
 ): void {
 	const iconWrap = row.createDiv({ cls: "vault-spotlight-item-icon-wrap" });
+	// The glyph is decorative; the row's title/badges/meta carry the meaning.
+	iconWrap.setAttr("aria-hidden", "true");
 	const body = row.createDiv({ cls: "vault-spotlight-item-body" });
 	const titleRow = body.createDiv({ cls: "vault-spotlight-item-title-row" });
 	const title = titleRow.createDiv({ cls: "vault-spotlight-item-title" });
@@ -93,7 +95,7 @@ export function renderResultRow(
 		setIcon(iconWrap, item.file ? iconForFileKind(getVaultFileKind(item.file)) : "layout");
 		renderHighlightedText(title, item.title, item.matchIndices);
 		if (item.isActive) {
-			titleRow.createSpan({ cls: "vault-spotlight-item-badge is-star", text: "Active" });
+			titleRow.createSpan({ cls: "vault-spotlight-item-badge is-active", text: "Active" });
 		} else if (item.isPinned) {
 			titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Pinned" });
 		}
@@ -142,13 +144,13 @@ export function renderResultRow(
 		setIcon(iconWrap, "calculator");
 		title.addClass("vault-spotlight-calc-result");
 		title.setText(item.result);
-		titleRow.createSpan({ cls: "vault-spotlight-item-badge is-star", text: "↵ Copy" });
+		titleRow.createSpan({ cls: "vault-spotlight-item-badge is-action", text: "↵ Copy" });
 		body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.expression} · ${item.detail}` });
 	} else if (item.kind === "datejump") {
 		setIcon(iconWrap, "calendar-days");
 		title.setText(item.label);
 		titleRow.createSpan({
-			cls: item.exists ? "vault-spotlight-item-badge" : "vault-spotlight-item-badge is-star",
+			cls: item.exists ? "vault-spotlight-item-badge is-active" : "vault-spotlight-item-badge is-action",
 			text: item.exists ? "Daily note" : "Create daily note",
 		});
 		body.createDiv({ cls: "vault-spotlight-item-meta", text: item.path });
@@ -163,9 +165,10 @@ export function renderResultRow(
 		titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Snippet" });
 		body.createDiv({ cls: "vault-spotlight-item-snippet", text: item.body.replace(/\s+/g, " ").slice(0, 120) });
 	} else {
+		row.addClass("is-emphasis");
 		setIcon(iconWrap, "file-plus");
 		title.setText(`Create “${item.name}”`);
-		titleRow.createSpan({ cls: "vault-spotlight-item-badge is-star", text: "New" });
+		titleRow.createSpan({ cls: "vault-spotlight-item-badge is-action", text: "New" });
 		body.createDiv({ cls: "vault-spotlight-item-meta", text: "Create a new note" });
 	}
 }

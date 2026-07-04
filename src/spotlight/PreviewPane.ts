@@ -80,6 +80,9 @@ export class PreviewPane {
 			this.component.unload();
 			this.component = null;
 		}
+		// Remove the node too, so a later re-mount (e.g. a profile switch that
+		// toggles preview back on) doesn't leave an orphaned pane behind.
+		this.el?.remove();
 		this.el = null;
 	}
 }

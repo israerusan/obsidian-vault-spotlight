@@ -166,6 +166,9 @@ export const MAX_RECENT_COMMANDS = 25;
 
 export class VaultSpotlightSettingTab extends PluginSettingTab {
 	plugin: VaultSpotlightPlugin;
+	// Reference to the live escape-char field so a forced reconcile can update it
+	// in place rather than rebuilding the whole tab (which drops focus mid-type).
+	private escapeInput: HTMLInputElement | null = null;
 
 	constructor(app: App, plugin: VaultSpotlightPlugin) {
 		super(app, plugin);
@@ -176,8 +179,9 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 	 * Store the escape char, but reconcile it against the live mode prefixes
 	 * first (it is matched before prefixes, so a collision would silently make a
 	 * search mode unreachable — the same guard loadSettings runs at startup).
-	 * When a collision forces a different character, tell the user and re-render
-	 * so the field shows the value that actually took effect.
+	 * When a collision forces a different character, tell the user and update the
+	 * field in place so it shows the value that actually took effect — without
+	 * a full display() rebuild that would destroy the input the user is editing.
 	 */
 	private reconcileEscapeChar(intended: string): void {
 		const normalized = normalizeEscapeChar(intended);
@@ -185,8 +189,32 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 		this.plugin.settings.escapeChar = reconciled;
 		if (reconciled !== normalized) {
 			new Notice(`Vault Spotlight: escape character set to "${reconciled}" so it doesn't clash with a mode trigger.`);
-			this.display();
+			if (this.escapeInput) this.escapeInput.value = reconciled;
 		}
+	}
+
+	/** Append the shared accent "Pro" pill to a setting's name — one affordance
+	 * for gating everywhere, instead of ad-hoc "(Pro)" text. */
+	private markPro(setting: Setting): void {
+		setting.nameEl.createSpan({ cls: "vault-spotlight-pro-pill", text: "Pro" });
+	}
+
+	/** A section heading carrying the shared Pro pill. */
+	private proHeading(name: string): void {
+		const heading = new Setting(this.containerEl).setName(name).setHeading();
+		this.markPro(heading);
+	}
+
+	/** Inline "Upgrade to Pro" link appended to a locked row's description. */
+	private appendUpgrade(setting: Setting): void {
+		setting.descEl.appendText(" ");
+		const link = setting.descEl.createEl("a", {
+			cls: "vault-spotlight-upgrade-inline",
+			text: "Upgrade to Pro",
+			href: safeHttpUrl(this.plugin.settings.purchaseUrl, DEFAULT_SETTINGS.purchaseUrl),
+		});
+		link.setAttr("target", "_blank");
+		link.setAttr("rel", "noopener noreferrer");
 	}
 
 	display(): void {
@@ -194,12 +222,14 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 		const mod = getModifierLabel(Platform.isMacOS || Platform.isIosApp ? "mac" : "");
 		containerEl.empty();
 
+		new Setting(containerEl).setName("License").setHeading();
+
 		new Setting(containerEl)
 			.setName("License key")
 			.setDesc("Enter your Pro license key. Verified offline — no account or server required.")
 			.addText((text) =>
 				text
-					.setPlaceholder("payload.signature")
+					.setPlaceholder("Paste your license key")
 					.setValue(this.plugin.settings.licenseKey)
 					.onChange((value) => {
 						this.plugin.settings.licenseKey = value;
@@ -216,13 +246,17 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 
 		const status = containerEl.createDiv({ cls: "vault-spotlight-license-status" });
 		if (this.plugin.settings.isPro) {
+			status.addClass("is-pro");
 			status.createEl("p", {
-				text: `Pro active${this.plugin.settings.licenseEmail ? ` (${this.plugin.settings.licenseEmail})` : ""}.`,
+				text: `Pro active${this.plugin.settings.licenseEmail ? ` (${this.plugin.settings.licenseEmail})` : ""}. Thank you for supporting Vault Spotlight.`,
 			});
 		} else {
-			status.createEl("p", { text: "Free tier active. Upgrade to unlock batch open, content search, and saved commands." });
+			status.createEl("p", {
+				text: "Free tier active. Upgrade to unlock content, heading & link search, live preview, snippets, saved workflows, batch actions, and more.",
+			});
 			const link = status.createEl("a", {
-				text: "Get Pro on Buy Me a Coffee",
+				cls: "vault-spotlight-pro-btn",
+				text: "Get Vault Spotlight Pro",
 				// Only render http(s) URLs — a stored "javascript:" value would
 				// otherwise become a clickable script link (self-XSS) in the pane.
 				href: safeHttpUrl(this.plugin.settings.purchaseUrl, DEFAULT_SETTINGS.purchaseUrl),
@@ -231,21 +265,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			link.setAttr("rel", "noopener noreferrer");
 		}
 
-		new Setting(containerEl)
-			.setName("Purchase page URL")
-			.setDesc("Link shown for Pro upgrades. Defaults to Buy Me a Coffee.")
-			.addText((text) =>
-				text
-					.setPlaceholder("https://your-store.com/product")
-					.setValue(this.plugin.settings.purchaseUrl)
-					.onChange((value) => {
-						const trimmed = value.trim();
-						this.plugin.settings.purchaseUrl = trimmed
-							? safeHttpUrl(trimmed, DEFAULT_SETTINGS.purchaseUrl)
-							: DEFAULT_SETTINGS.purchaseUrl;
-						void this.plugin.saveSettings();
-					})
-			);
+		new Setting(containerEl).setName("General").setHeading();
 
 		new Setting(containerEl)
 			.setName("Show modified time")
@@ -257,6 +277,8 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 				})
 			);
 
+		new Setting(containerEl).setName("Ranking & match reasons").setHeading();
+
 		new Setting(containerEl)
 			.setName("Smart ranking (frecency)")
 			.setDesc("Rank browse/recent results by how often and how recently you open each note.")
@@ -266,8 +288,6 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 					void this.plugin.saveSettings();
 				})
 			);
-
-		new Setting(containerEl).setName("Ranking & match reasons").setHeading();
 
 		new Setting(containerEl)
 			.setName("Default ranking mode")
@@ -446,19 +466,24 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			.addText((text) => {
 				text.inputEl.maxLength = 1;
 				text.inputEl.addClass("vault-spotlight-prefix-input");
+				this.escapeInput = text.inputEl;
 				text.setValue(this.plugin.settings.escapeChar).onChange((value) => {
 					this.reconcileEscapeChar(value);
 					void this.plugin.saveSettings();
 				});
 			});
 
-		new Setting(containerEl).setName("Pro search").setHeading();
+		this.proHeading("Search & preview");
 
 		const proSearch = (name: string, desc: string, render: (setting: Setting) => void) => {
 			const setting = new Setting(containerEl).setName(name).setDesc(desc);
+			this.markPro(setting);
 			if (!this.plugin.settings.isPro) {
+				// Locked rows show a disabled control + lock, not an empty right side
+				// that reads as a rendering bug, plus a path to unlock.
 				setting.settingEl.addClass("vault-spotlight-setting-locked");
-				setting.descEl.appendText(" (Pro)");
+				setting.addExtraButton((btn) => btn.setIcon("lock").setDisabled(true).setTooltip("Pro feature"));
+				this.appendUpgrade(setting);
 				return;
 			}
 			render(setting);
@@ -576,16 +601,17 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			}
 		);
 
-		new Setting(containerEl).setName("Snippets (Pro)").setHeading();
+		this.proHeading("Snippets");
 		const snippetList = containerEl.createDiv();
 		if (!this.plugin.settings.isPro) {
 			snippetList.createEl("p", {
+				cls: "vault-spotlight-hint-text",
 				text: "Unlock Pro to insert reusable text snippets with {{date}}, {{time}}, {{clipboard}}, {{selection}}, and {{cursor}} placeholders.",
 			});
 		} else {
 			new Setting(snippetList)
-				.setName("Add snippet")
-				.setDesc("Snippets appear in snippet mode and insert at the cursor. Placeholders: {{date}} {{time}} {{clipboard}} {{selection}} {{cursor}}.")
+				.setName("Snippets")
+				.setDesc(`Snippets appear in snippet mode and insert at the cursor. Placeholders: {{date}} {{time}} {{clipboard}} {{selection}} {{cursor}}. ${this.plugin.settings.snippets.length}/${MAX_SNIPPETS} used.`)
 				.addButton((button) =>
 					button.setButtonText("Add snippet").onClick(() => {
 						const snippet = createSnippet(`Snippet ${this.plugin.settings.snippets.length + 1}`, "");
@@ -594,7 +620,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 					})
 				);
 			if (this.plugin.settings.snippets.length === 0) {
-				snippetList.createEl("p", { text: "No snippets yet. Add one to insert boilerplate, callouts, or signatures from the launcher." });
+				snippetList.createEl("p", { cls: "vault-spotlight-hint-text", text: "No snippets yet. Add one to insert boilerplate, callouts, or signatures from the launcher." });
 			} else {
 				for (const snippet of this.plugin.settings.snippets) {
 					const row = snippetList.createDiv({ cls: "vault-spotlight-snippet-row" });
@@ -620,16 +646,28 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 						snippet.body = bodyInput.value;
 						void this.plugin.saveSettings();
 					});
-					const remove = row.createEl("button", { text: "Remove" });
+					const remove = row.createEl("button", { cls: "mod-warning", text: "Remove" });
+					remove.setAttribute("aria-label", `Remove snippet ${snippet.name}`);
 					remove.addEventListener("click", () => {
-						this.plugin.settings.snippets = this.plugin.settings.snippets.filter((s) => s.id !== snippet.id);
+						const removed = snippet;
+						this.plugin.settings.snippets = this.plugin.settings.snippets.filter((s) => s.id !== removed.id);
+						// Offer a quick undo so a mis-click isn't silently destructive.
+						const notice = new Notice("", 6000);
+						notice.noticeEl.createSpan({ text: `Removed "${removed.name}". ` });
+						const undo = notice.noticeEl.createEl("a", { text: "Undo" });
+						undo.style.cursor = "pointer";
+						undo.addEventListener("click", () => {
+							this.plugin.settings.snippets = [...this.plugin.settings.snippets, removed].slice(0, MAX_SNIPPETS);
+							void this.plugin.saveSettings().then(() => this.display());
+							notice.hide();
+						});
 						void this.plugin.saveSettings().then(() => this.display());
 					});
 				}
 			}
 		}
 
-		new Setting(containerEl).setName("Starred files (Pro)").setHeading();
+		this.proHeading("Starred files");
 		const starredList = containerEl.createDiv();
 		if (!this.plugin.settings.isPro) {
 			starredList.createEl("p", { text: `Pin important files with ${mod}+D in the spotlight.` });
@@ -640,6 +678,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 				const row = starredList.createDiv({ cls: "vault-spotlight-starred-row" });
 				row.createSpan({ text: path });
 				const btn = row.createEl("button", { text: "Remove" });
+				btn.setAttribute("aria-label", `Remove starred file ${path}`);
 				btn.addEventListener("click", () => {
 					this.plugin.settings.starredPaths = this.plugin.settings.starredPaths.filter((p) => p !== path);
 					void this.plugin.saveSettings().then(() => this.display());
@@ -647,8 +686,8 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			}
 		}
 
-		new Setting(containerEl)
-			.setName("Search aliases (Pro)")
+		const aliasSetting = new Setting(containerEl)
+			.setName("Search aliases")
 			.setDesc("One alias per line, e.g. crm = in:Clients @type:client. Aliases expand before search.")
 			.addTextArea((area) => {
 				area.setPlaceholder("crm = in:Clients @type:client\nwaiting = #waiting");
@@ -659,8 +698,9 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 					void this.plugin.saveSettings();
 				});
 			});
+		this.markPro(aliasSetting);
 
-		new Setting(containerEl).setName("Workflow presets (Pro)").setHeading();
+		this.proHeading("Workflow presets");
 		const workflowList = containerEl.createDiv();
 		if (!this.plugin.settings.isPro) {
 			workflowList.createEl("p", { text: "Unlock Pro to save and run reusable workflows from Browse." });
@@ -683,6 +723,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 						text: `${workflow.pinned ? "★ " : ""}${workflow.name}: ${workflow.mode}${workflow.query ? ` · ${workflow.query}` : ""}${workflow.rankingMode ? ` · ${workflow.rankingMode}` : ""}`,
 					});
 					const pinBtn = row.createEl("button", { text: workflow.pinned ? "Unpin" : "Pin" });
+					pinBtn.setAttribute("aria-label", `${workflow.pinned ? "Unpin" : "Pin"} workflow ${workflow.name}`);
 					pinBtn.addEventListener("click", () => {
 						this.plugin.settings.workflowPresets = this.plugin.settings.workflowPresets.map((entry) =>
 							entry.id === workflow.id ? { ...entry, pinned: !entry.pinned } : entry
@@ -690,6 +731,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 						void this.plugin.saveSettings().then(() => this.display());
 					});
 					const remove = row.createEl("button", { text: workflow.starter ? "Hide" : "Remove" });
+					remove.setAttribute("aria-label", `${workflow.starter ? "Hide" : "Remove"} workflow ${workflow.name}`);
 					remove.addEventListener("click", () => {
 						this.plugin.settings.workflowPresets = this.plugin.settings.workflowPresets.filter((entry) => entry.id !== workflow.id);
 						void this.plugin.saveSettings().then(() => this.display());
@@ -698,11 +740,11 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			}
 		}
 
-		new Setting(containerEl).setName("Search profiles (Pro)").setHeading();
+		this.proHeading("Search profiles");
 		const profileList = containerEl.createDiv();
 
 		if (!this.plugin.settings.isPro) {
-			profileList.createEl("p", { text: "Unlock Pro to save workspace-style search profiles." });
+			profileList.createEl("p", { cls: "vault-spotlight-hint-text", text: "Unlock Pro to save workspace-style search profiles." });
 		} else {
 			new Setting(profileList)
 				.setName("Save current settings as profile")
@@ -723,11 +765,13 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 					row.createSpan({ text: `${active ? "✓ " : ""}${profile.name}: ${profile.defaultMode}${profile.defaultQuery ? ` · ${profile.defaultQuery}` : ""}` });
 					const activate = row.createEl("button", { text: active ? "Active" : "Activate" });
 					activate.disabled = active;
+					activate.setAttribute("aria-label", active ? `${profile.name} is the active profile` : `Activate profile ${profile.name}`);
 					activate.addEventListener("click", () => {
 						this.plugin.settings.activeProfileId = profile.id;
 						void this.plugin.saveSettings().then(() => this.display());
 					});
 					const remove = row.createEl("button", { text: "Remove" });
+					remove.setAttribute("aria-label", `Remove profile ${profile.name}`);
 					remove.addEventListener("click", () => {
 						this.plugin.settings.searchProfiles = this.plugin.settings.searchProfiles.filter((p) => p.id !== profile.id);
 						if (this.plugin.settings.activeProfileId === profile.id) this.plugin.settings.activeProfileId = "";
@@ -737,10 +781,10 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			}
 		}
 
-		new Setting(containerEl).setName("Custom searches (Pro)").setHeading();
+		this.proHeading("Custom searches");
 		const customList = containerEl.createDiv();
 		if (!this.plugin.settings.isPro) {
-			customList.createEl("p", { text: "Unlock Pro to save custom search commands." });
+			customList.createEl("p", { cls: "vault-spotlight-hint-text", text: "Unlock Pro to save custom search commands." });
 		} else if (this.plugin.settings.customSearches.length === 0) {
 			customList.createEl("p", { text: `No custom searches yet. Create one from the spotlight with ${mod}+S.` });
 		} else {
@@ -749,11 +793,13 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 				const pinned = this.plugin.settings.pinnedCustomSearchIds.includes(search.id);
 				row.createSpan({ text: `${pinned ? "★ " : ""}${search.name}: ${search.query}` });
 				const pinBtn = row.createEl("button", { text: pinned ? "Unpin" : "Pin" });
+				pinBtn.setAttribute("aria-label", `${pinned ? "Unpin" : "Pin"} custom search ${search.name}`);
 				pinBtn.addEventListener("click", () => {
 					this.plugin.togglePinnedCollection(search.id);
 					this.display();
 				});
 				const btn = row.createEl("button", { text: "Remove" });
+				btn.setAttribute("aria-label", `Remove custom search ${search.name}`);
 				btn.addEventListener("click", () => {
 					this.plugin.deleteCustomSearch(search.id);
 					this.display();

@@ -280,8 +280,13 @@ export default class VaultSpotlightPlugin extends Plugin {
 			new Notice("Vault Spotlight: no previous file yet.");
 			return;
 		}
-		await this.app.workspace.getLeaf(false).openFile(file);
-		this.trackRecent(file.path);
+		try {
+			await this.app.workspace.getLeaf(false).openFile(file);
+			this.trackRecent(file.path);
+		} catch (err) {
+			console.error("[VaultSpotlight] switch to last file failed", err);
+			new Notice("Vault Spotlight: could not open the previous file.");
+		}
 	}
 
 	/** Record an executed command so it resurfaces on an empty command query. */

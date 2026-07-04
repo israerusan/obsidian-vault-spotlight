@@ -3,6 +3,38 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.7.0] - 2026-07-04
+
+### Changed
+- Design pass across the launcher for a more polished, high-end feel: the
+  keyboard selection now clearly dominates hover, result badges use a calmer,
+  meaningful colour system, the loading skeleton mirrors real rows, and the
+  empty state and Pro upsell were refreshed. Consistent radius/type scale and a
+  single keycap style throughout.
+- Settings tab reorganised with clear **License**, **General**, and feature
+  sections, one consistent **Pro** badge on gated rows, and locked rows now show
+  a lock and an upgrade link instead of an empty control.
+
+### Added
+- More keyboard navigation: **Home/End**, **PageUp/PageDown**, and
+  **Ctrl+N / Ctrl+P** to move through results; selection now clamps at the ends
+  instead of wrapping.
+- A seeded query is selected on open, so the first keystroke replaces it.
+- Reduced-motion and Windows High Contrast support, per-row screen-reader state,
+  and result-count / "no results" announcements.
+
+### Fixed
+- Keyboard selection no longer jumps when the mouse rests over the list during
+  scrolling, and a background re-index keeps your place instead of resetting to
+  the top.
+- A slow content search keeps the previous results visible (dimmed) instead of
+  flashing to skeletons on every keystroke.
+- The action palette is now contextual: calculator/date/capture/snippet rows get
+  their own actions, and file-batch operations only appear when results contain
+  files. The footer no longer advertises a menu shortcut on rows that have none.
+- Batch export / MOC / append-links now report failures instead of failing
+  silently, and a few open-file paths gained error handling.
+
 ## [2.6.4] - 2026-07-04
 
 ### Fixed
