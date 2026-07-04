@@ -45,7 +45,10 @@ function weekdayIndex(word) {
 	for (let i = 0; i < WEEKDAYS.length; i++) {
 		if (WEEKDAYS[i].startsWith(w) && w.length >= 3) return i;
 	}
-	return WEEKDAY_ABBR[w] ?? -1;
+	// Own-property lookup only: a bracket access like WEEKDAY_ABBR["constructor"]
+	// would otherwise resolve an inherited Object.prototype member (a function),
+	// pass the `!== -1` guard, and make "next constructor" build an Invalid Date.
+	return Object.prototype.hasOwnProperty.call(WEEKDAY_ABBR, w) ? WEEKDAY_ABBR[w] : -1;
 }
 
 /** A human label like "Fri, Jul 24 2026" for the result row. */

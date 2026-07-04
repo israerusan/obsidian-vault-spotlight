@@ -3,6 +3,24 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Robustness hardening pass:
+  - A ripgrep search for a very common word on a large vault no longer silently
+    falls back to a slower full-vault scan on every keystroke; the partial
+    ripgrep output is used instead, and a larger output buffer makes the overflow
+    rarer.
+  - If the ripgrep binary is moved or uninstalled while Obsidian is open, the
+    plugin now re-discovers it on the next search instead of falling back forever.
+  - Opening a content/heading/symbol hit whose file was shortened after indexing
+    can no longer place the cursor past the end of the file.
+  - Confirming a result whose tab was closed in the background (e.g. by sync) no
+    longer fails silently — you get a clear notice instead of an unhandled error.
+  - Typing a phrase like "next constructor" no longer produces an invalid date.
+  - A corrupt or hand-edited `data.json` (malformed ranking data, unexpected
+    types) can no longer crash the plugin on file open or during load.
+
 ## [2.8.0] - 2026-07-04
 
 ### Performance

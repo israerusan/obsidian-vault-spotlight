@@ -192,7 +192,11 @@ export default class VaultSpotlightPlugin extends Plugin {
 	private createApi(): VaultSpotlightApi {
 		return {
 			open: (query = "", mode = "files") => {
-				this.openSpotlight(query, isSpotlightMode(mode) ? mode : "files");
+				// Coerce the query: external callers can pass a non-string (number,
+				// object) into this documented, stable contract, and the modal's
+				// downstream .trim()/string ops would throw on it.
+				const q = typeof query === "string" ? query : String(query ?? "");
+				this.openSpotlight(q, isSpotlightMode(mode) ? mode : "files");
 			},
 			search: async (query: string) => {
 				// Content search is a Pro feature; the API honors the same gate.
@@ -455,6 +459,15 @@ export default class VaultSpotlightPlugin extends Plugin {
 		const data: unknown = await this.loadData();
 		const loaded =
 			data !== null && typeof data === "object" ? (data as Partial<VaultSpotlightSettings>) : {};
+		// Strip a JSON-injected "__proto__" key before the assign below. JSON.parse
+		// makes it an own property, and Object.assign copies own keys via [[Set]] —
+		// which for "__proto__" invokes the prototype setter and re-points
+		// this.settings' prototype (a prototype-pollution vector on a corrupt/hostile
+		// data.json). Own DEFAULT_SETTINGS keys still shadow reads, so isPro can't be
+		// spoofed, but we don't want the tainted prototype at all.
+		if (Object.prototype.hasOwnProperty.call(loaded, "__proto__")) {
+			delete (loaded as Record<string, unknown>)["__proto__"];
+		}
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
 
 		if (!Array.isArray(this.settings.recentPaths)) this.settings.recentPaths = [];
@@ -482,7 +495,24 @@ export default class VaultSpotlightPlugin extends Plugin {
 		if (this.settings.fileFrecency === null || typeof this.settings.fileFrecency !== "object" || Array.isArray(this.settings.fileFrecency)) {
 			this.settings.fileFrecency = {};
 		} else {
-			this.settings.fileFrecency = { ...this.settings.fileFrecency };
+			// Validate each entry's SHAPE too, not just the container's. A corrupt
+			// data.json with a primitive/null value (e.g. `"a.md": 5`) would crash
+			// bumpFrecency's `entry.count += 1` (write to a number) or pruneFrecency's
+			// `[b].last` sort (deref of null) on the very next file open. Rebuild with
+			// only well-formed {count, last} entries.
+			const clean: Record<string, { count: number; last: number }> = {};
+			for (const [key, value] of Object.entries(this.settings.fileFrecency)) {
+				const entry = value as { count?: unknown; last?: unknown } | null;
+				if (
+					entry !== null &&
+					typeof entry === "object" &&
+					Number.isFinite(entry.count) &&
+					Number.isFinite(entry.last)
+				) {
+					clean[key] = { count: entry.count as number, last: entry.last as number };
+				}
+			}
+			this.settings.fileFrecency = clean;
 		}
 		this.settings.modePrefixes = normalizeModePrefixes(this.settings.modePrefixes);
 		this.settings.escapeChar = normalizeEscapeChar(this.settings.escapeChar);

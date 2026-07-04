@@ -53,6 +53,12 @@ assert.equal(parse("mon"), null, "bare 'mon' is not a date");
 assert.ok(parse("next sat") && parse("next sat").kind === "weekday", "modifier unlocks the abbreviation");
 assert.equal(parse("tom"), null, "'tom' is not tomorrow (collides with the name Tom)");
 assert.equal(parse("tod"), null, "'tod' is not today");
+// Prototype keys must not leak through the abbreviation lookup: "constructor"
+// etc. would otherwise resolve an inherited Object.prototype member and build an
+// Invalid Date (NaN) from "next constructor".
+assert.equal(parse("next constructor"), null, "prototype key is not a weekday");
+assert.equal(parse("this hasOwnProperty"), null, "prototype method is not a weekday");
+assert.equal(parse("next tostring"), null, "prototype key (lowercased) is not a weekday");
 
 // --- ISO --------------------------------------------------------------------
 assert.equal(parse("2026-07-24").date, new Date(2026, 6, 24).getTime(), "ISO date");

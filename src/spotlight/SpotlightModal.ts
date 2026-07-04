@@ -251,7 +251,7 @@ export class SpotlightModal extends Modal {
 			}
 			evt.preventDefault();
 			this.selectedIndex = index;
-			void this.activateSelection();
+			this.safeActivate();
 		});
 		this.resultsEl.addEventListener("contextmenu", (evt) => {
 			const index = this.rowIndexFromEvent(evt);
@@ -1543,7 +1543,7 @@ export class SpotlightModal extends Modal {
 			return;
 		}
 		if (selected && (selected.kind === "capture" || selected.kind === "snippet" || selected.kind === "datejump")) {
-			await this.activateSelection();
+			this.safeActivate();
 			return;
 		}
 		const { body } = this.resolveQuery(this.inputEl.value);
@@ -1621,6 +1621,21 @@ export class SpotlightModal extends Modal {
 		if (detected.mode) this.inputEl.value = detected.body;
 		this.focusInput();
 		void this.runSearch();
+	}
+
+	/**
+	 * Fire-and-forget entry point for the Enter-key handlers and row clicks.
+	 * activateSelection does post-close work (openFile, editor mutations, command
+	 * exec, snippet insert) that can reject — e.g. an editors-mode leaf closed by
+	 * sync between search and Enter, or a locked note. Because callers invoke it as
+	 * `void`, an unguarded rejection would surface as an unhandled promise rejection
+	 * with the modal already closed and nothing shown to the user. Contain it here.
+	 */
+	private safeActivate(paneOverride: PaneTarget = null): void {
+		this.activateSelection(paneOverride).catch((err) => {
+			console.error("[VaultSpotlight] activation failed", err);
+			new Notice("Vault Spotlight: could not complete that action.");
+		});
 	}
 
 	private async activateSelection(paneOverride: PaneTarget = null): Promise<void> {
@@ -1778,9 +1793,14 @@ export class SpotlightModal extends Modal {
 		if (line === null) return;
 		const file = itemFile(item);
 		if (!file || file.extension !== "md" || !(leaf.view instanceof MarkdownView)) return;
-		const pos = { line: line - 1, ch: 0 };
-		leaf.view.editor.setCursor(pos);
-		leaf.view.editor.scrollIntoView({ from: pos, to: pos }, true);
+		const editor = leaf.view.editor;
+		// Clamp to the live document: the stored 1-based line can point past EOF if
+		// the file was trimmed after it was indexed, and a searcher could hand back
+		// line 0 (→ -1 here). setCursor on an out-of-range position is unspecified.
+		const targetLine = Math.max(0, Math.min(line - 1, editor.lastLine()));
+		const pos = { line: targetLine, ch: 0 };
+		editor.setCursor(pos);
+		editor.scrollIntoView({ from: pos, to: pos }, true);
 	}
 
 	private async createAndOpen(rawName: string): Promise<void> {
@@ -2410,19 +2430,19 @@ export class SpotlightModal extends Modal {
 			// result and close the modal out from under the user's input.
 			if (evt.isComposing) return true;
 			evt.preventDefault();
-			void this.activateSelection();
+			this.safeActivate();
 			return false;
 		});
 		// Ctrl+Enter flips the default open target: new tab normally, current
 		// tab when "open in new tab by default" is on.
 		this.scope.register(["Mod"], "Enter", (evt) => {
 			evt.preventDefault();
-			void this.activateSelection(this.plugin.settings.defaultNewTab ? null : "tab");
+			this.safeActivate(this.plugin.settings.defaultNewTab ? null : "tab");
 			return false;
 		});
 		this.scope.register(["Mod", "Alt"], "Enter", (evt) => {
 			evt.preventDefault();
-			void this.activateSelection("split");
+			this.safeActivate("split");
 			return false;
 		});
 		this.scope.register(["Alt"], "Enter", (evt) => {

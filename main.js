@@ -4496,14 +4496,13 @@ function addMonths(date, n) {
   return d;
 }
 function weekdayIndex(word) {
-  var _a;
   const w = word.toLowerCase();
   const full = WEEKDAYS.indexOf(w);
   if (full !== -1) return full;
   for (let i = 0; i < WEEKDAYS.length; i++) {
     if (WEEKDAYS[i].startsWith(w) && w.length >= 3) return i;
   }
-  return (_a = WEEKDAY_ABBR[w]) != null ? _a : -1;
+  return Object.prototype.hasOwnProperty.call(WEEKDAY_ABBR, w) ? WEEKDAY_ABBR[w] : -1;
 }
 function labelForDate(date) {
   return `${WEEKDAY_SHORT[date.getDay()]}, ${MONTHS[date.getMonth()]} ${date.getDate()} ${date.getFullYear()}`;
@@ -5510,7 +5509,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       }
       evt.preventDefault();
       this.selectedIndex = index;
-      void this.activateSelection();
+      this.safeActivate();
     });
     this.resultsEl.addEventListener("contextmenu", (evt) => {
       const index = this.rowIndexFromEvent(evt);
@@ -6614,7 +6613,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       return;
     }
     if (selected && (selected.kind === "capture" || selected.kind === "snippet" || selected.kind === "datejump")) {
-      await this.activateSelection();
+      this.safeActivate();
       return;
     }
     const { body } = this.resolveQuery(this.inputEl.value);
@@ -6682,6 +6681,20 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     if (detected.mode) this.inputEl.value = detected.body;
     this.focusInput();
     void this.runSearch();
+  }
+  /**
+   * Fire-and-forget entry point for the Enter-key handlers and row clicks.
+   * activateSelection does post-close work (openFile, editor mutations, command
+   * exec, snippet insert) that can reject — e.g. an editors-mode leaf closed by
+   * sync between search and Enter, or a locked note. Because callers invoke it as
+   * `void`, an unguarded rejection would surface as an unhandled promise rejection
+   * with the modal already closed and nothing shown to the user. Contain it here.
+   */
+  safeActivate(paneOverride = null) {
+    this.activateSelection(paneOverride).catch((err) => {
+      console.error("[VaultSpotlight] activation failed", err);
+      new import_obsidian9.Notice("Vault Spotlight: could not complete that action.");
+    });
   }
   async activateSelection(paneOverride = null) {
     const selected = this.items[this.selectedIndex];
@@ -6803,9 +6816,11 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     if (line === null) return;
     const file = itemFile(item);
     if (!file || file.extension !== "md" || !(leaf.view instanceof import_obsidian9.MarkdownView)) return;
-    const pos = { line: line - 1, ch: 0 };
-    leaf.view.editor.setCursor(pos);
-    leaf.view.editor.scrollIntoView({ from: pos, to: pos }, true);
+    const editor = leaf.view.editor;
+    const targetLine = Math.max(0, Math.min(line - 1, editor.lastLine()));
+    const pos = { line: targetLine, ch: 0 };
+    editor.setCursor(pos);
+    editor.scrollIntoView({ from: pos, to: pos }, true);
   }
   async createAndOpen(rawName) {
     var _a, _b;
@@ -7344,17 +7359,17 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     this.scope.register([], "Enter", (evt) => {
       if (evt.isComposing) return true;
       evt.preventDefault();
-      void this.activateSelection();
+      this.safeActivate();
       return false;
     });
     this.scope.register(["Mod"], "Enter", (evt) => {
       evt.preventDefault();
-      void this.activateSelection(this.plugin.settings.defaultNewTab ? null : "tab");
+      this.safeActivate(this.plugin.settings.defaultNewTab ? null : "tab");
       return false;
     });
     this.scope.register(["Mod", "Alt"], "Enter", (evt) => {
       evt.preventDefault();
-      void this.activateSelection("split");
+      this.safeActivate("split");
       return false;
     });
     this.scope.register(["Alt"], "Enter", (evt) => {
@@ -7657,7 +7672,7 @@ var RipgrepSearcher = class {
           {
             cwd: vaultPath,
             timeout: 8e3,
-            maxBuffer: 16 * 1024 * 1024,
+            maxBuffer: 32 * 1024 * 1024,
             windowsHide: true
           },
           (error, stdout) => {
@@ -7674,10 +7689,16 @@ var RipgrepSearcher = class {
               resolve([]);
               return;
             }
+            if (error.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+              resolve(this.parseOutput(String(stdout != null ? stdout : ""), options.limit, needAll));
+              return;
+            }
+            if (error.code === "ENOENT") this.resolvedCommand = void 0;
             resolve(null);
           }
         );
       } catch (e) {
+        this.resolvedCommand = void 0;
         resolve(null);
         return;
       }
@@ -8376,7 +8397,8 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
   createApi() {
     return {
       open: (query = "", mode = "files") => {
-        this.openSpotlight(query, isSpotlightMode(mode) ? mode : "files");
+        const q = typeof query === "string" ? query : String(query != null ? query : "");
+        this.openSpotlight(q, isSpotlightMode(mode) ? mode : "files");
       },
       search: async (query) => {
         if (!this.settings.isPro) {
@@ -8614,6 +8636,9 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
   async loadSettings() {
     const data = await this.loadData();
     const loaded = data !== null && typeof data === "object" ? data : {};
+    if (Object.prototype.hasOwnProperty.call(loaded, "__proto__")) {
+      delete loaded["__proto__"];
+    }
     this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
     if (!Array.isArray(this.settings.recentPaths)) this.settings.recentPaths = [];
     if (!Array.isArray(this.settings.starredPaths)) this.settings.starredPaths = [];
@@ -8634,7 +8659,14 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
     if (this.settings.fileFrecency === null || typeof this.settings.fileFrecency !== "object" || Array.isArray(this.settings.fileFrecency)) {
       this.settings.fileFrecency = {};
     } else {
-      this.settings.fileFrecency = { ...this.settings.fileFrecency };
+      const clean = {};
+      for (const [key, value] of Object.entries(this.settings.fileFrecency)) {
+        const entry = value;
+        if (entry !== null && typeof entry === "object" && Number.isFinite(entry.count) && Number.isFinite(entry.last)) {
+          clean[key] = { count: entry.count, last: entry.last };
+        }
+      }
+      this.settings.fileFrecency = clean;
     }
     this.settings.modePrefixes = normalizeModePrefixes(this.settings.modePrefixes);
     this.settings.escapeChar = normalizeEscapeChar(this.settings.escapeChar);

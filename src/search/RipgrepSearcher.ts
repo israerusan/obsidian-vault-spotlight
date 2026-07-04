@@ -205,7 +205,7 @@ export class RipgrepSearcher {
 					{
 						cwd: vaultPath,
 						timeout: 8000,
-						maxBuffer: 16 * 1024 * 1024,
+						maxBuffer: 32 * 1024 * 1024,
 						windowsHide: true,
 					},
 					(error, stdout) => {
@@ -227,11 +227,29 @@ export class RipgrepSearcher {
 							resolve([]);
 							return;
 						}
+						// Buffer overflow on a very common token ("the", "note"): rg
+						// killed the pipe but the stdout we captured is real match
+						// lines, and parseOutput slices to `limit` anyway. Use the
+						// partial output instead of returning null — otherwise every
+						// keystroke for a common query rebuilds a full-vault index,
+						// exactly the work rg was meant to avoid.
+						if (error.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+							resolve(this.parseOutput(String(stdout ?? ""), options.limit, needAll));
+							return;
+						}
+						// Spawn failure (ENOENT): the cached binary moved or was
+						// uninstalled. Clear the cache so the next search re-probes the
+						// candidate locations instead of spawn-erroring on every
+						// keystroke and silently falling back forever.
+						if (error.code === "ENOENT") this.resolvedCommand = undefined;
 						// Any other failure (timeout, crash) → fall back.
 						resolve(null);
 					}
 				);
 			} catch {
+				// Synchronous spawn throw is also a "binary gone" signal — re-probe
+				// next time rather than trusting the stale resolved command.
+				this.resolvedCommand = undefined;
 				resolve(null);
 				return;
 			}
