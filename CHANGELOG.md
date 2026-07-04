@@ -18,9 +18,19 @@ All notable changes to Vault Spotlight are documented here. This project follows
 - Long snippet previews now end with an ellipsis instead of a hard mid-word cut.
 
 ### Changed
+- Premium visual pass across the launcher: a layered elevation shadow and a
+  brief settle-in entrance give the panel real depth, a frosted backdrop blurs
+  the workspace behind it, and the keyboard selection now reads as an
+  accent-gradient row that visibly lifts (soft shadow + a growing accent bar +
+  a tinted icon tile). Added a slim auto-hiding scrollbar, an accent search
+  caret and focus glow, tactile press feedback on the star/Pro controls, and a
+  refined empty-state focal tile. All motion runs on one shared easing curve and
+  is fully disabled under reduced-motion; the frosted layer is scoped so no
+  other modal is affected.
 - Design-system tidy-up: every font size in the launcher now references the
-  shared type ramp (no ad-hoc pixel values), a checked-and-selected row keeps
-  its accent selection wash, and an unused style rule was removed.
+  shared type ramp (no ad-hoc pixel values), motion uses shared easing/duration
+  tokens, a checked-and-selected row keeps its accent selection wash, and an
+  unused style rule was removed.
 
 ## [2.7.0] - 2026-07-04
 

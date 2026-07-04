@@ -22,6 +22,18 @@
 	/* Selection fill — accent-tinted, distinct from a plain hover wash. */
 	--vs-selected-bg: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary));
 	--vs-hover-bg: color-mix(in srgb, var(--background-modifier-hover) 60%, transparent);
+	/* Motion — one snappy "settle" curve and one duration, so every transition
+	   in the launcher moves as a single, deliberate system rather than a mix of
+	   ad-hoc easings. Tuned to feel immediate but not abrupt. */
+	--vs-ease: cubic-bezier(0.16, 1, 0.3, 1);
+	--vs-dur: 0.14s;
+	/* Layered elevation — three stacked shadows read as genuine depth (a soft
+	   contact shadow, a mid ambient, and a wide cast) instead of one flat blur. */
+	--vs-shadow-modal:
+		0 0 0 1px color-mix(in srgb, var(--background-modifier-border) 60%, transparent),
+		0 2px 4px rgba(0, 0, 0, 0.06),
+		0 12px 28px rgba(0, 0, 0, 0.18),
+		0 32px 64px rgba(0, 0, 0, 0.28);
 }
 
 /* Container overrides — remove default Obsidian modal padding */
@@ -39,8 +51,32 @@
 	width: min(680px, 92vw);
 	border-radius: var(--vs-radius-lg, 14px);
 	overflow: hidden;
-	box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+	box-shadow: var(--vs-shadow-modal);
 	border: 1px solid var(--background-modifier-border);
+	/* A brief, tactile entrance — the panel settles in from slightly above and
+	   under-scale, the way a native launcher does, instead of hard-cutting on. */
+	animation: vault-spotlight-open 0.2s var(--vs-ease);
+	transform-origin: center top;
+}
+
+/* Frosted backdrop: blur what's behind the launcher so the panel reads as a
+   focused surface floating above the workspace — the vibrancy that makes
+   Spotlight/Raycast feel like a layer, not a box. Scoped to our container so
+   no other modal is affected. */
+.modal-container.vault-spotlight-container .modal-bg {
+	backdrop-filter: blur(6px) saturate(1.05);
+	-webkit-backdrop-filter: blur(6px) saturate(1.05);
+}
+
+@keyframes vault-spotlight-open {
+	from {
+		opacity: 0;
+		transform: translateY(-8px) scale(0.985);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
 }
 
 .vault-spotlight-modal {
@@ -103,14 +139,16 @@
 	border-radius: var(--vs-radius-md);
 	background: var(--background-secondary);
 	border: 1px solid var(--background-modifier-border);
-	transition: border-color 0.15s ease, box-shadow 0.15s ease;
+	transition: border-color var(--vs-dur) var(--vs-ease), box-shadow var(--vs-dur) var(--vs-ease);
 }
 
 .vault-spotlight-input-wrap:focus-within {
 	border-color: var(--interactive-accent);
-	box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 18%, transparent);
 }
 
+/* The search glyph adopts the accent on focus, so the whole input reads as one
+   lit-up control rather than an icon sitting apart from its field. */
 .vault-spotlight-search-icon {
 	display: flex;
 	align-items: center;
@@ -119,6 +157,11 @@
 	height: 18px;
 	color: var(--text-muted);
 	flex-shrink: 0;
+	transition: color var(--vs-dur) var(--vs-ease);
+}
+
+.vault-spotlight-input-wrap:focus-within .vault-spotlight-search-icon {
+	color: var(--interactive-accent);
 }
 
 .vault-spotlight-input-wrap input {
@@ -131,6 +174,8 @@
 	padding: 0;
 	margin: 0;
 	min-width: 0;
+	/* Accent caret so the blinking cursor belongs to the theme, not the browser. */
+	caret-color: var(--interactive-accent);
 }
 
 .vault-spotlight-input-wrap input::placeholder {
@@ -170,7 +215,48 @@
    tearing the list down to skeletons on every keystroke. */
 .vault-spotlight-results.is-searching {
 	opacity: 0.55;
-	transition: opacity 0.15s ease;
+	transition: opacity var(--vs-dur) var(--vs-ease);
+}
+
+/* A slim, self-effacing scrollbar: invisible until the list is hovered, then a
+   soft rounded thumb — the refined scroll affordance premium launchers use in
+   place of the chunky platform default. */
+.vault-spotlight-results,
+.vault-spotlight-preview {
+	scrollbar-width: thin;
+	scrollbar-color: transparent transparent;
+	transition: scrollbar-color var(--vs-dur) var(--vs-ease);
+}
+
+.vault-spotlight-results:hover,
+.vault-spotlight-preview:hover {
+	scrollbar-color: color-mix(in srgb, var(--text-faint) 50%, transparent) transparent;
+}
+
+.vault-spotlight-results::-webkit-scrollbar,
+.vault-spotlight-preview::-webkit-scrollbar {
+	width: 10px;
+}
+
+.vault-spotlight-results::-webkit-scrollbar-thumb,
+.vault-spotlight-preview::-webkit-scrollbar-thumb {
+	background: transparent;
+	border: 3px solid transparent;
+	border-radius: 999px;
+	background-clip: padding-box;
+	transition: background var(--vs-dur) var(--vs-ease);
+}
+
+.vault-spotlight-results:hover::-webkit-scrollbar-thumb,
+.vault-spotlight-preview:hover::-webkit-scrollbar-thumb {
+	background: color-mix(in srgb, var(--text-faint) 45%, transparent);
+	background-clip: padding-box;
+}
+
+.vault-spotlight-results::-webkit-scrollbar-thumb:hover,
+.vault-spotlight-preview::-webkit-scrollbar-thumb:hover {
+	background: color-mix(in srgb, var(--text-muted) 60%, transparent);
+	background-clip: padding-box;
 }
 
 .vault-spotlight-section-label {
@@ -192,7 +278,8 @@
 	cursor: pointer;
 	border-radius: var(--vs-radius-md);
 	border: 1px solid transparent;
-	transition: background 0.12s ease, border-color 0.12s ease;
+	transition: background var(--vs-dur) var(--vs-ease), border-color var(--vs-dur) var(--vs-ease),
+		box-shadow var(--vs-dur) var(--vs-ease);
 }
 
 /* Plain hover is a subtle neutral wash — clearly secondary to the keyboard
@@ -201,11 +288,19 @@
 	background: var(--vs-hover-bg);
 }
 
-/* Keyboard/active selection dominates: accent-tinted fill + a full-height
-   accent bar on the left edge so there is never any doubt where Enter lands. */
+/* Keyboard/active selection dominates: an accent-tinted gradient fill (deeper
+   at the leading edge), a hairline accent border, and a soft contact shadow so
+   the active row visibly lifts off the list — the premium "this is where Enter
+   lands" cue. A full-height accent bar anchors the left edge. */
 .vault-spotlight-item.is-selected {
-	background: var(--vs-selected-bg);
-	border-color: color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+	background: linear-gradient(
+		90deg,
+		color-mix(in srgb, var(--interactive-accent) 16%, var(--background-primary)),
+		var(--vs-selected-bg)
+	);
+	border-color: color-mix(in srgb, var(--interactive-accent) 26%, transparent);
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06),
+		0 4px 12px color-mix(in srgb, var(--interactive-accent) 12%, transparent);
 }
 
 .vault-spotlight-item.is-selected::before {
@@ -217,6 +312,20 @@
 	width: 3px;
 	border-radius: 0 3px 3px 0;
 	background: var(--interactive-accent);
+	/* The bar grows in from its own center so selection reads as a deliberate
+	   settle, not a hard paint. */
+	animation: vault-spotlight-bar 0.18s var(--vs-ease);
+}
+
+@keyframes vault-spotlight-bar {
+	from {
+		transform: scaleY(0.3);
+		opacity: 0;
+	}
+	to {
+		transform: scaleY(1);
+		opacity: 1;
+	}
 }
 
 .vault-spotlight-item.is-checked {
@@ -228,7 +337,11 @@
    cursor stays legible) while retaining the checked row's solid accent border.
    Declared after both single-state rules so it wins the specificity tie. */
 .vault-spotlight-item.is-selected.is-checked {
-	background: var(--vs-selected-bg);
+	background: linear-gradient(
+		90deg,
+		color-mix(in srgb, var(--interactive-accent) 16%, var(--background-primary)),
+		var(--vs-selected-bg)
+	);
 	border-color: var(--interactive-accent);
 }
 
@@ -241,10 +354,14 @@
 	border-radius: var(--vs-radius-sm);
 	color: var(--text-muted);
 	flex-shrink: 0;
+	transition: color var(--vs-dur) var(--vs-ease), background var(--vs-dur) var(--vs-ease);
 }
 
+/* On the active row the glyph sits in a soft accent tile, so the selection
+   reads through the whole row — fill and icon — not just the background. */
 .vault-spotlight-item.is-selected .vault-spotlight-item-icon-wrap {
 	color: var(--interactive-accent);
+	background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
 }
 
 /* Emphasis states (calculator, create-new) keep the framed tile so they read
@@ -353,7 +470,13 @@
 	cursor: pointer;
 	/* Only paint the star on hover/selection/starred so the rail stays calm. */
 	opacity: 0;
-	transition: color 0.12s ease, background 0.12s ease, opacity 0.12s ease;
+	transition: color var(--vs-dur) var(--vs-ease), background var(--vs-dur) var(--vs-ease),
+		opacity var(--vs-dur) var(--vs-ease), transform var(--vs-dur) var(--vs-ease);
+}
+
+/* A gentle pop on press so starring feels responsive. */
+.vault-spotlight-star-btn:active {
+	transform: scale(0.86);
 }
 
 .vault-spotlight-item:hover .vault-spotlight-star-btn,
@@ -425,7 +548,8 @@
 	justify-content: center;
 	flex-shrink: 0;
 	color: transparent;
-	transition: all 0.12s ease;
+	transition: background var(--vs-dur) var(--vs-ease), border-color var(--vs-dur) var(--vs-ease),
+		color var(--vs-dur) var(--vs-ease), transform var(--vs-dur) var(--vs-ease);
 }
 
 .vault-spotlight-item.is-checked .vault-spotlight-check {
@@ -444,18 +568,39 @@
 	min-height: 200px;
 	padding: 32px 24px;
 	text-align: center;
+	/* A quiet fade-up so an empty/zero-result state arrives gracefully rather
+	   than snapping into place. */
+	animation: vault-spotlight-fade-up 0.24s var(--vs-ease);
 }
 
 .vault-spotlight-empty-icon {
-	width: 46px;
-	height: 46px;
+	width: 48px;
+	height: 48px;
 	border-radius: var(--vs-radius-lg);
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary));
+	/* A soft accent-tinted gradient tile with a hairline ring — a considered
+	   focal point instead of a flat swatch. */
+	background: linear-gradient(
+		145deg,
+		color-mix(in srgb, var(--interactive-accent) 18%, var(--background-secondary)),
+		color-mix(in srgb, var(--interactive-accent) 6%, var(--background-secondary))
+	);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 22%, transparent);
 	color: var(--interactive-accent);
 	margin-bottom: 4px;
+}
+
+@keyframes vault-spotlight-fade-up {
+	from {
+		opacity: 0;
+		transform: translateY(6px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
 }
 
 .vault-spotlight-empty-icon svg {
@@ -618,16 +763,23 @@
 	font-weight: 600;
 	text-decoration: none;
 	white-space: nowrap;
-	transition: background 0.15s ease, filter 0.15s ease, transform 0.05s ease;
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12),
+		0 2px 8px color-mix(in srgb, var(--interactive-accent) 25%, transparent);
+	transition: filter var(--vs-dur) var(--vs-ease), transform var(--vs-dur) var(--vs-ease),
+		box-shadow var(--vs-dur) var(--vs-ease);
 }
 
 .vault-spotlight-pro-btn:hover {
 	filter: brightness(1.08);
 	color: var(--text-on-accent);
+	transform: translateY(-1px);
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.14),
+		0 6px 16px color-mix(in srgb, var(--interactive-accent) 35%, transparent);
 }
 
 .vault-spotlight-pro-btn:active {
-	transform: translateY(1px);
+	transform: translateY(0);
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
 .vault-spotlight-pro-btn:focus-visible {
@@ -824,7 +976,8 @@ input.vault-spotlight-prefix-input {
 	margin: 4px 0 12px;
 }
 
-/* Respect reduced-motion: no perpetual shimmer, no interaction transitions. */
+/* Respect reduced-motion: no perpetual shimmer, no entrance/settle animations,
+   no interaction transitions. */
 @media (prefers-reduced-motion: reduce) {
 	.vault-spotlight-skeleton-icon,
 	.vault-spotlight-skeleton-line {
@@ -832,12 +985,27 @@ input.vault-spotlight-prefix-input {
 		background: var(--background-modifier-hover);
 	}
 
+	.modal-container.vault-spotlight-container .modal,
+	.vault-spotlight-item.is-selected::before,
+	.vault-spotlight-empty {
+		animation: none;
+	}
+
 	.vault-spotlight-item,
 	.vault-spotlight-input-wrap,
+	.vault-spotlight-search-icon,
 	.vault-spotlight-star-btn,
 	.vault-spotlight-check,
-	.vault-spotlight-pro-btn {
+	.vault-spotlight-pro-btn,
+	.vault-spotlight-results.is-searching {
 		transition-duration: 0.01ms;
+	}
+
+	/* Cancel the hover/press lifts so nothing translates. */
+	.vault-spotlight-pro-btn:hover,
+	.vault-spotlight-pro-btn:active,
+	.vault-spotlight-star-btn:active {
+		transform: none;
 	}
 }
 
