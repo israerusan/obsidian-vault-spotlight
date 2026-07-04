@@ -3,7 +3,7 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.8.1] - 2026-07-04
 
 ### Fixed
 - Robustness hardening pass:
