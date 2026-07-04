@@ -1,4 +1,4 @@
-import { App, Component, MarkdownRenderer, TFile } from "obsidian";
+import { App, Component, MarkdownRenderer, TFile, setIcon } from "obsidian";
 import { buildPreviewExcerpt } from "../core/previewWindow.mjs";
 
 /**
@@ -39,14 +39,16 @@ export class PreviewPane {
 			this.timer = null;
 			previewEl.empty();
 			if (!file) {
-				previewEl.createDiv({ cls: "vault-spotlight-preview-empty", text: "No preview" });
+				renderPreviewEmpty(previewEl, "eye", "Nothing selected", "Pick a result and its note previews here, scrolled to the match.");
 				return;
 			}
 			if (file.extension !== "md") {
-				previewEl.createDiv({
-					cls: "vault-spotlight-preview-empty",
-					text: `${file.extension.toUpperCase()} file — no preview`,
-				});
+				renderPreviewEmpty(
+					previewEl,
+					"file-x",
+					`No preview for ${file.extension.toUpperCase()} files`,
+					"Live preview is available for Markdown notes. Press ↵ to open this file instead."
+				);
 				return;
 			}
 			previewEl.createDiv({ cls: "vault-spotlight-preview-title", text: file.basename });
@@ -66,7 +68,7 @@ export class PreviewPane {
 				.catch(() => {
 					if (this.token !== token || !previewEl.isConnected) return;
 					previewEl.empty();
-					previewEl.createDiv({ cls: "vault-spotlight-preview-empty", text: "Preview unavailable" });
+					renderPreviewEmpty(previewEl, "alert-triangle", "Preview unavailable", "This note couldn't be read. Try selecting it again.");
 				});
 		}, 120);
 	}
@@ -85,6 +87,20 @@ export class PreviewPane {
 		this.el?.remove();
 		this.el = null;
 	}
+}
+
+/**
+ * Rich empty/error state for the preview pane, mirroring the results list's own
+ * empty state (icon tile + title + guidance) so a paid feature never shows a bare
+ * line of faint text where a note would be.
+ */
+function renderPreviewEmpty(target: HTMLElement, icon: string, title: string, desc: string): void {
+	const empty = target.createDiv({ cls: "vault-spotlight-empty" });
+	const iconWrap = empty.createDiv({ cls: "vault-spotlight-empty-icon" });
+	setIcon(iconWrap, icon);
+	iconWrap.setAttr("aria-hidden", "true");
+	empty.createDiv({ cls: "vault-spotlight-empty-title", text: title });
+	empty.createDiv({ cls: "vault-spotlight-empty-desc", text: desc });
 }
 
 /**

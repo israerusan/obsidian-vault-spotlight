@@ -22,19 +22,15 @@ export function getDrillPrefixMatch(
 ): { mode: "symbols" | "links" | null; pending: boolean };
 
 export function getShortcutHints(args: {
+	// The real ResultItem['kind'] set (all singular). The declared list had drifted
+	// to also include plural mode names (symbols/commands/links/…) that the impl
+	// never receives; those are removed here so the type matches runtime.
 	itemKind?:
 		| "file"
 		| "content"
 		| "heading"
-		| "symbols"
-		| "commands"
-		| "links"
-		| "editors"
-		| "folders"
-		| "capture"
-		| "snippets"
-		| "symbol"
 		| "command"
+		| "symbol"
 		| "editor"
 		| "folder"
 		| "history"
@@ -45,6 +41,7 @@ export function getShortcutHints(args: {
 		| "create"
 		| "calc"
 		| "datejump"
+		| "capture"
 		| "snippet"
 		| null;
 	defaultNewTab?: boolean;

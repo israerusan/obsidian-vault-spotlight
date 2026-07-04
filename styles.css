@@ -4,20 +4,39 @@
    below references these; there are no ad-hoc radii or font sizes.
    ========================================================================== */
 .vault-spotlight-modal {
-	/* Radius ramp: 3 steps only. */
+	/* Radius ramp: xs covers the 3px accents (selection bar, marks) that used to
+	   be ad-hoc; sm/md/lg are the structural steps. */
+	--vs-radius-xs: 3px;
 	--vs-radius-sm: 6px;
 	--vs-radius-md: 10px;
 	--vs-radius-lg: 14px;
-	/* Type ramp. */
+	/* Type ramp — every font-size in the modal references one of these. */
+	--vs-fz-nano: 9px;
 	--vs-fz-badge: 10px;
+	--vs-fz-micro: 11px;
 	--vs-fz-meta: 12px;
+	--vs-fz-body: 13px;
 	--vs-fz-title: 14px;
 	--vs-fz-input: 15px;
+	/* Spacing scale — the modal's paddings come from here, not ad-hoc pixels, so
+	   the vertical/horizontal rhythm stays on a single system. */
+	--vs-sp-1: 4px;
+	--vs-sp-2: 6px;
+	--vs-sp-3: 8px;
+	--vs-sp-4: 10px;
+	--vs-sp-5: 12px;
+	--vs-sp-6: 14px;
+	--vs-sp-7: 16px;
+	--vs-sp-8: 18px;
 	/* One shared match-highlight token, used in both the list and the preview. */
 	--vs-highlight-bg: color-mix(in srgb, var(--text-highlight-bg) 70%, var(--interactive-accent));
 	/* Selection fill — accent-tinted, distinct from a plain hover wash. */
 	--vs-selected-bg: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary));
 	--vs-hover-bg: color-mix(in srgb, var(--background-modifier-hover) 60%, transparent);
+	/* Accent used as FOREGROUND text/glyph on an accent tint — mixed toward the
+	   body colour so it keeps contrast even when the user's accent is pale
+	   (mint/yellow/pale-blue), where flat accent-on-accent-tint collapses to ~1.5:1. */
+	--vs-accent-fg: color-mix(in srgb, var(--interactive-accent) 62%, var(--text-normal));
 }
 
 /* Container overrides — remove default Obsidian modal padding */
@@ -35,7 +54,13 @@
 	width: min(680px, 92vw);
 	border-radius: var(--vs-radius-lg, 14px);
 	overflow: hidden;
-	box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+	/* Layered elevation that reads in BOTH themes: a soft ambient drop plus a
+	   tighter contact shadow for depth, and a hairline ring so the modal edge
+	   still separates from a dark background where a pure-black drop disappears. */
+	box-shadow:
+		0 24px 64px -16px rgba(0, 0, 0, 0.5),
+		0 8px 24px -12px rgba(0, 0, 0, 0.4),
+		0 0 0 1px var(--background-modifier-border);
 	border: 1px solid var(--background-modifier-border);
 }
 
@@ -49,7 +74,7 @@
 
 /* Header */
 .vault-spotlight-header {
-	padding: 16px 18px 12px;
+	padding: var(--vs-sp-7) var(--vs-sp-8) var(--vs-sp-5);
 	border-bottom: 1px solid var(--background-modifier-border);
 	background: var(--background-primary);
 }
@@ -83,7 +108,7 @@
 
 .vault-spotlight-mode-badge.is-pro {
 	background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
-	color: var(--interactive-accent);
+	color: var(--vs-accent-fg);
 }
 
 .vault-spotlight-mode-badge.is-content {
@@ -94,8 +119,8 @@
 .vault-spotlight-input-wrap {
 	display: flex;
 	align-items: center;
-	gap: 10px;
-	padding: 10px 14px;
+	gap: var(--vs-sp-4);
+	padding: var(--vs-sp-4) var(--vs-sp-6);
 	border-radius: var(--vs-radius-md);
 	background: var(--background-secondary);
 	border: 1px solid var(--background-modifier-border);
@@ -115,6 +140,13 @@
 	height: 18px;
 	color: var(--text-muted);
 	flex-shrink: 0;
+	transition: color 0.15s ease;
+}
+
+/* The leading glyph lifts to the accent when the field is focused, so the whole
+   input reads as one active control rather than a lit border around a dim icon. */
+.vault-spotlight-input-wrap:focus-within .vault-spotlight-search-icon {
+	color: var(--interactive-accent);
 }
 
 .vault-spotlight-input-wrap input {
@@ -134,8 +166,8 @@
 }
 
 .vault-spotlight-hint {
-	margin-top: 10px;
-	font-size: 11px;
+	margin-top: var(--vs-sp-4);
+	font-size: var(--vs-fz-micro);
 	line-height: 1.5;
 	color: var(--text-muted);
 }
@@ -155,11 +187,12 @@
 }
 
 /* Results */
+/* min-height lives on .vault-spotlight-body; the results pane inside it is always
+   clamped to min-height:0 (see the body rule below), so a value here is dead. */
 .vault-spotlight-results {
 	flex: 1;
-	min-height: 240px;
 	overflow-y: auto;
-	padding: 8px 10px 12px;
+	padding: var(--vs-sp-3) var(--vs-sp-4) var(--vs-sp-5);
 	/* Keep list scrolling self-contained — reaching the top/bottom must not
 	   scroll the vault behind the modal (reads as a solid, standalone surface). */
 	overscroll-behavior: contain;
@@ -220,13 +253,30 @@
 	position: relative;
 	display: flex;
 	align-items: center;
-	gap: 12px;
-	padding: 9px 12px;
-	margin-bottom: 3px;
+	gap: var(--vs-sp-5);
+	padding: 9px var(--vs-sp-5);
+	margin-bottom: var(--vs-radius-xs);
 	cursor: pointer;
 	border-radius: var(--vs-radius-md);
 	border: 1px solid transparent;
 	transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+/* The accent selection bar is present on every row but collapsed; it scales up
+   from the vertical centre as selection lands, so moving the keyboard cursor
+   glides the bar rather than popping a fresh pseudo-element into place. */
+.vault-spotlight-item::before {
+	content: "";
+	position: absolute;
+	left: 0;
+	top: 6px;
+	bottom: 6px;
+	width: 3px;
+	border-radius: 0 var(--vs-radius-xs) var(--vs-radius-xs) 0;
+	background: var(--interactive-accent);
+	transform: scaleY(0);
+	opacity: 0;
+	transition: transform 0.12s ease, opacity 0.12s ease;
 }
 
 /* Plain hover is a subtle neutral wash — clearly secondary to the keyboard
@@ -243,14 +293,8 @@
 }
 
 .vault-spotlight-item.is-selected::before {
-	content: "";
-	position: absolute;
-	left: 0;
-	top: 6px;
-	bottom: 6px;
-	width: 3px;
-	border-radius: 0 3px 3px 0;
-	background: var(--interactive-accent);
+	transform: scaleY(1);
+	opacity: 1;
 }
 
 .vault-spotlight-item.is-checked {
@@ -311,7 +355,7 @@
 .vault-spotlight-item-title mark {
 	background: var(--vs-highlight-bg);
 	color: var(--text-normal);
-	border-radius: 3px;
+	border-radius: var(--vs-radius-xs);
 	padding: 0 2px;
 }
 
@@ -336,7 +380,7 @@
 
 .vault-spotlight-item-badge.is-action {
 	background: color-mix(in srgb, var(--interactive-accent) 16%, transparent);
-	color: var(--interactive-accent);
+	color: var(--vs-accent-fg);
 }
 
 .vault-spotlight-item-badge.is-star {
@@ -415,7 +459,7 @@
 }
 
 .vault-spotlight-starred-row button {
-	font-size: 11px;
+	font-size: var(--vs-fz-micro);
 }
 
 .vault-spotlight-setting-locked {
@@ -441,10 +485,13 @@
 	overflow: hidden;
 }
 
-.vault-spotlight-item-time {
-	font-size: 11px;
-	color: var(--text-faint);
-	flex-shrink: 0;
+/* The matched term inside a content snippet — same highlight token the title and
+   preview use, so a hit reads identically wherever it appears. */
+.vault-spotlight-item-snippet mark {
+	background: var(--vs-highlight-bg);
+	color: var(--text-normal);
+	border-radius: var(--vs-radius-xs);
+	padding: 0 2px;
 }
 
 .vault-spotlight-check {
@@ -486,8 +533,8 @@
 	align-items: center;
 	justify-content: center;
 	background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary));
-	color: var(--interactive-accent);
-	margin-bottom: 4px;
+	color: var(--vs-accent-fg);
+	margin-bottom: var(--vs-sp-1);
 }
 
 .vault-spotlight-empty-icon svg {
@@ -538,7 +585,7 @@
 
 .vault-spotlight-skeleton-line {
 	height: 10px;
-	border-radius: 4px;
+	border-radius: var(--vs-radius-xs);
 }
 
 .vault-spotlight-skeleton-line.is-title {
@@ -571,11 +618,11 @@
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: 16px;
-	padding: 12px 16px;
+	gap: var(--vs-sp-7);
+	padding: var(--vs-sp-5) var(--vs-sp-7);
 	border-top: 1px solid var(--background-modifier-border);
 	background: var(--background-secondary);
-	font-size: 11px;
+	font-size: var(--vs-fz-micro);
 	color: var(--text-muted);
 	flex-shrink: 0;
 }
@@ -594,7 +641,7 @@
 }
 
 .vault-spotlight-status {
-	font-size: 11px;
+	font-size: var(--vs-fz-micro);
 	color: var(--text-muted);
 	white-space: nowrap;
 }
@@ -631,7 +678,7 @@
 	height: 26px;
 	border-radius: var(--vs-radius-sm);
 	background: color-mix(in srgb, var(--interactive-accent) 20%, transparent);
-	color: var(--interactive-accent);
+	color: var(--vs-accent-fg);
 	flex-shrink: 0;
 }
 
@@ -696,7 +743,9 @@
 	padding: 2px 6px;
 	border-radius: 999px;
 	background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
-	color: var(--interactive-accent);
+	/* Settings tab is outside .vault-spotlight-modal, so the --vs-accent-fg token
+	   isn't in scope; inline the same accent→text mix for legibility on pale accents. */
+	color: color-mix(in srgb, var(--interactive-accent) 62%, var(--text-normal));
 	margin-left: 8px;
 	vertical-align: middle;
 }
@@ -739,7 +788,7 @@
 	min-width: 0;
 	overflow-y: auto;
 	overscroll-behavior: contain;
-	padding: 14px 18px;
+	padding: var(--vs-sp-6) var(--vs-sp-8);
 	background: var(--background-primary);
 }
 
@@ -756,7 +805,7 @@
 
 /* The reading surface a paying user leans on: full-strength body text. */
 .vault-spotlight-preview-body {
-	font-size: 13px;
+	font-size: var(--vs-fz-body);
 	line-height: 1.55;
 	color: var(--text-normal);
 }
@@ -768,17 +817,11 @@
 .vault-spotlight-preview-hit {
 	background: var(--vs-highlight-bg);
 	color: var(--text-normal);
-	border-radius: 3px;
+	border-radius: var(--vs-radius-xs);
 	padding: 0 1px;
 	scroll-margin: 24px;
 }
 
-.vault-spotlight-preview-empty {
-	color: var(--text-faint);
-	text-align: center;
-	padding: 32px 12px;
-	font-size: 13px;
-}
 /* Symbol-mode outline indentation (heading level 2-6) */
 .vault-spotlight-item.vault-spotlight-indent-2 { padding-left: 26px; }
 .vault-spotlight-item.vault-spotlight-indent-3 { padding-left: 40px; }
@@ -843,7 +886,9 @@ input.vault-spotlight-prefix-input {
 	}
 
 	.vault-spotlight-item,
+	.vault-spotlight-item::before,
 	.vault-spotlight-input-wrap,
+	.vault-spotlight-search-icon,
 	.vault-spotlight-star-btn,
 	.vault-spotlight-check,
 	.vault-spotlight-pro-btn {

@@ -526,7 +526,7 @@ export default class VaultSpotlightPlugin extends Plugin {
 		const customSearchIds = new Set(this.settings.customSearches.map((search) => search.id));
 		this.settings.pinnedCustomSearchIds = this.settings.pinnedCustomSearchIds
 			.filter((id): id is string => typeof id === "string" && customSearchIds.has(id));
-		this.settings.workflowPresets = this.settings.workflowPresets.slice(0, 25);
+		// workflowPresets was already capped by normalizeWorkflowPresets() above.
 
 		// Enforce caps against what was loaded from disk.
 		this.settings.recentPaths = this.settings.recentPaths.slice(0, this.settings.maxRecent);

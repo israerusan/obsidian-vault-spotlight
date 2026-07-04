@@ -8,6 +8,7 @@ import {
 	Platform,
 	TFile,
 	TFolder,
+	type WorkspaceLeaf,
 	moment,
 	normalizePath,
 	setIcon,
@@ -24,7 +25,7 @@ import { SaveSearchPromptModal } from "./SaveSearchPromptModal";
 import { PromptModal } from "./PromptModal";
 import { getVaultFileKind } from "../search/vaultFiles";
 import { activeProfile, createProfileFromSettings, type CoreSearchProfile } from "../core/searchProfiles.mjs";
-import { canSaveWorkflowPreset, createWorkflowPreset, ensureStarterWorkflows, type WorkflowPreset } from "../core/workflowPresets.mjs";
+import { canSaveWorkflowPreset, createWorkflowPreset, ensureStarterWorkflows, MAX_WORKFLOW_PRESETS, type WorkflowPreset } from "../core/workflowPresets.mjs";
 import { detectSearchIntegrations, type SearchIntegrations } from "../core/integrations.mjs";
 import { findBacklinks, findOutlinks } from "../core/linkGraph.mjs";
 import { evaluateExpression, parseCurrencyRates } from "../core/calculator.mjs";
@@ -51,7 +52,7 @@ import { PreviewPane } from "./PreviewPane";
 import { renderResultRow } from "./resultRow";
 import * as batchOps from "./batchOps";
 import { copyToClipboard, renameFile } from "./batchOps";
-import { DEFAULT_SETTINGS, safeHttpUrl } from "../settings";
+import { DEFAULT_SETTINGS, createExternalLink } from "../settings";
 
 
 // Re-exported so existing importers keep working after the types moved to
@@ -67,6 +68,16 @@ export { MODE_ORDER, type SpotlightMode } from "./resultTypes";
  */
 const formatMoment = moment as unknown as (input?: number) => { format(fmt?: string): string };
 
+// Keystroke → search debounce.
+const SEARCH_DEBOUNCE_MS = 60;
+// Per-mode result caps. The modal only renders ~50-60 rows, so these bound the
+// work; named here rather than repeated as magic numbers across the mode branches.
+const RESULT_LIMIT = 60; // commands, headings, editors, folders, links, snippets
+const FILE_QUERY_LIMIT = 50; // files with a text query
+const FILE_BROWSE_LIMIT = 40; // files, empty query (browse recents/all)
+const SYMBOL_LIMIT = 100; // symbol outline of the active note
+const COMMAND_BROWSE_LIMIT = 1000; // empty command query: rank the whole palette before slicing
+
 export class SpotlightModal extends Modal {
 	private inputEl!: HTMLInputElement;
 	private resultsEl!: HTMLDivElement;
@@ -79,6 +90,14 @@ export class SpotlightModal extends Modal {
 	private hintEl!: HTMLDivElement;
 	private items: ResultItem[] = [];
 	private selectedIndex = 0;
+	// The row index currently carrying is-selected in the DOM, so a selection move
+	// only restyles the two affected rows instead of all of them. -1 whenever the
+	// list holds no real rows (empty/loading/skeletons).
+	private renderedSelectedIndex = -1;
+	// Signature of the last footer we built (selected kind + has-file). The shortcut
+	// chips depend only on these, so an unchanged signature skips the full
+	// teardown/rebuild on every arrow keypress.
+	private footerSig = "";
 	private checkedPaths = new Set<string>();
 	private searchTimer: number | null = null;
 	private loadingTimer: number | null = null;
@@ -200,6 +219,52 @@ export class SpotlightModal extends Modal {
 		this.resultsEl.addEventListener("mousemove", () => {
 			this.suppressHoverSelect = false;
 		});
+		// Row interactions are delegated to the list once here, rather than
+		// re-binding four closures per row on every keystroke's full rebuild.
+		this.resultsEl.addEventListener("mouseover", (evt) => {
+			// Ignore hover selection triggered by rows sliding under a stationary
+			// cursor during keyboard navigation; only honour a real pointer move.
+			if (this.suppressHoverSelect) return;
+			const index = this.rowIndexFromEvent(evt);
+			if (index === null || index === this.selectedIndex) return;
+			this.selectedIndex = index;
+			this.updateSelectionHighlight();
+		});
+		this.resultsEl.addEventListener("mousedown", (evt) => {
+			const index = this.rowIndexFromEvent(evt);
+			if (index === null) return;
+			const item = this.items[index];
+			const starBtn = (evt.target as HTMLElement).closest<HTMLElement>(".vault-spotlight-star-btn");
+			if (starBtn) {
+				// Star toggle: update the icon, row state, and item flag in place —
+				// re-running the whole search would reset the selection and scroll to
+				// the top, losing the user's place mid-list.
+				evt.preventDefault();
+				evt.stopPropagation();
+				if (item?.kind === "file") {
+					item.isStarred = this.plugin.toggleStar(item.file.path);
+					setIcon(starBtn, item.isStarred ? "star" : "star-off");
+					const row = starBtn.closest<HTMLElement>(".vault-spotlight-item");
+					row?.toggleClass("is-starred", item.isStarred);
+				}
+				return;
+			}
+			evt.preventDefault();
+			this.selectedIndex = index;
+			void this.activateSelection();
+		});
+		this.resultsEl.addEventListener("contextmenu", (evt) => {
+			const index = this.rowIndexFromEvent(evt);
+			if (index === null) return;
+			const item = this.items[index];
+			// The menu only opens for rows backed by a file (same gate the footer
+			// chip uses), so a right-click elsewhere falls through to the default.
+			if (!item || !itemFile(item)) return;
+			evt.preventDefault();
+			this.selectedIndex = index;
+			this.updateSelectionHighlight();
+			this.openActionsMenu(item, evt);
+		});
 		this.renderLoading();
 
 		this.syncPreviewMount();
@@ -226,13 +291,12 @@ export class SpotlightModal extends Modal {
 				cls: "vault-spotlight-pro-cta-text",
 				text: "Unlock content, heading & link search, live preview, snippets, saved workflows, and batch actions.",
 			});
-			const link = cta.createEl("a", {
+			createExternalLink(cta, {
 				cls: "vault-spotlight-pro-btn",
 				text: "Get Pro",
-				href: safeHttpUrl(this.plugin.settings.purchaseUrl, DEFAULT_SETTINGS.purchaseUrl),
+				url: this.plugin.settings.purchaseUrl,
+				fallback: DEFAULT_SETTINGS.purchaseUrl,
 			});
-			link.setAttr("target", "_blank");
-			link.setAttr("rel", "noopener noreferrer");
 		}
 
 		this.inputEl.addEventListener("input", () => {
@@ -383,7 +447,7 @@ export class SpotlightModal extends Modal {
 
 	private scheduleSearch(): void {
 		if (this.searchTimer !== null) window.clearTimeout(this.searchTimer);
-		this.searchTimer = window.setTimeout(() => void this.runSearch(), 60);
+		this.searchTimer = window.setTimeout(() => void this.runSearch(), SEARCH_DEBOUNCE_MS);
 	}
 
 	/**
@@ -439,16 +503,31 @@ export class SpotlightModal extends Modal {
 		}, 100);
 
 		if (this.actionContext) {
-			const actions = this.availableActions(this.actionContext);
-			const query = trimmed.toLowerCase();
-			this.setBadge("Actions", "is-content");
-			this.items = actions
-				.filter((action) => !query || `${action.name} ${action.description}`.toLowerCase().includes(query))
-				.map((action) => ({ kind: "action" as const, action }));
-			this.isLoading = false;
-			this.selectedIndex = 0;
-			this.renderResults();
-			this.updateStatus(this.items.length);
+			// This branch sits outside the main try/catch below, so guard it on its
+			// own: a throw while building the action list must still tear the loading
+			// state down (in a finally) or the skeleton spinner would be stranded.
+			try {
+				const actions = this.availableActions(this.actionContext);
+				const query = trimmed.toLowerCase();
+				this.setBadge("Actions", "is-content");
+				this.items = actions
+					.filter((action) => !query || `${action.name} ${action.description}`.toLowerCase().includes(query))
+					.map((action) => ({ kind: "action" as const, action }));
+				this.selectedIndex = 0;
+				this.renderResults();
+				this.updateStatus(this.items.length);
+			} catch (err) {
+				console.error("[VaultSpotlight] action palette failed", err);
+				this.items = [];
+				this.renderEmptyState("alert-triangle", "Couldn't build actions", "Something went wrong. Press Escape to go back.");
+				this.updateStatus(0);
+			} finally {
+				this.isLoading = false;
+				if (this.loadingTimer !== null) {
+					window.clearTimeout(this.loadingTimer);
+					this.loadingTimer = null;
+				}
+			}
 			return;
 		}
 
@@ -476,7 +555,7 @@ export class SpotlightModal extends Modal {
 				const cmdQuery = body;
 				this.setBadge("Commands", "is-content");
 				// Empty query: resurface recently-run commands first, then the rest.
-				const commandResults = this.commandSearcher.search(cmdQuery, cmdQuery ? 60 : 1000);
+				const commandResults = this.commandSearcher.search(cmdQuery, cmdQuery ? RESULT_LIMIT : COMMAND_BROWSE_LIMIT);
 				if (generation !== this.searchGeneration) return;
 				let ordered = commandResults;
 				const recentIds = this.plugin.settings.recentCommandIds;
@@ -489,7 +568,7 @@ export class SpotlightModal extends Modal {
 					ordered = [...recent, ...commandResults.filter((r) => !recentSet.has(r.id))];
 				}
 				const recentSet = new Set(cmdQuery.length === 0 ? recentIds : []);
-				this.items = ordered.slice(0, 60).map((r) => ({
+				this.items = ordered.slice(0, RESULT_LIMIT).map((r) => ({
 					kind: "command" as const,
 					id: r.id,
 					name: r.name,
@@ -535,6 +614,7 @@ export class SpotlightModal extends Modal {
 					snippet: r.snippet,
 					score: r.score,
 					engine: r.engine,
+					matchIndices: r.matchIndices ?? [],
 				}));
 			} else if (mode === "headings") {
 				this.setBadge("Headings", "is-content");
@@ -542,7 +622,7 @@ export class SpotlightModal extends Modal {
 				const parsed = parseHeadingQuery(body);
 				const headingResults = this.headingSearcher.search(parsed.headingQuery, {
 					excludeFolders,
-					limit: 60,
+					limit: RESULT_LIMIT,
 					fileQuery: parsed.fileQuery,
 					levelMin: parsed.levelMin,
 					levelMax: parsed.levelMax,
@@ -571,7 +651,7 @@ export class SpotlightModal extends Modal {
 					this.updateStatus(0);
 					return;
 				}
-				const symbolResults = this.symbolSearcher.search(target, body, 100);
+				const symbolResults = this.symbolSearcher.search(target, body, SYMBOL_LIMIT);
 				if (generation !== this.searchGeneration) return;
 				this.items = symbolResults.map((r) => ({
 					kind: "symbol" as const,
@@ -584,7 +664,7 @@ export class SpotlightModal extends Modal {
 				}));
 			} else if (mode === "editors") {
 				this.setBadge("Editors", "is-content");
-				const editorResults = this.editorSearcher.search(body, 60);
+				const editorResults = this.editorSearcher.search(body, RESULT_LIMIT);
 				if (generation !== this.searchGeneration) return;
 				this.items = editorResults.map((r) => ({
 					kind: "editor" as const,
@@ -669,7 +749,7 @@ export class SpotlightModal extends Modal {
 					frecency: this.plugin.settings.useFrecency ? this.plugin.settings.fileFrecency : undefined,
 					ranking: this.plugin.settings.ranking,
 					rankingMode: workflow?.rankingMode ?? profile?.rankingMode,
-					limit: isEmptyQuery ? 40 : 50,
+					limit: isEmptyQuery ? FILE_BROWSE_LIMIT : FILE_QUERY_LIMIT,
 				});
 
 				this.items = fileResults.map((r) => ({
@@ -846,7 +926,7 @@ export class SpotlightModal extends Modal {
 		}
 		// Walk the bookmark tree once for the whole result set, not per row.
 		const bookmarkedPaths = new Set(this.plugin.getBookmarkedPaths());
-		return linked.slice(0, 60).map((file, index) => this.fileToResult(file, 1000 - index, bookmarkedPaths));
+		return linked.slice(0, RESULT_LIMIT).map((file, index) => this.fileToResult(file, 1000 - index, bookmarkedPaths));
 	}
 
 	/** The highest-scoring fuzzy match for `q`, not just the first substring hit. */
@@ -884,7 +964,7 @@ export class SpotlightModal extends Modal {
 			});
 		}
 		rows.sort((a, b) => b.score - a.score || a.folder.path.localeCompare(b.folder.path));
-		return rows.slice(0, 60).map((row) => ({
+		return rows.slice(0, RESULT_LIMIT).map((row) => ({
 			kind: "folder" as const,
 			folder: row.folder,
 			matchIndices: row.indices,
@@ -1147,7 +1227,7 @@ export class SpotlightModal extends Modal {
 			});
 		}
 		rows.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
-		return rows.slice(0, 60).map((row) => ({
+		return rows.slice(0, RESULT_LIMIT).map((row) => ({
 			kind: "snippet" as const,
 			id: row.id,
 			name: row.name,
@@ -1187,6 +1267,7 @@ export class SpotlightModal extends Modal {
 
 	private renderLoading(): void {
 		this.resultsEl.empty();
+		this.renderedSelectedIndex = -1;
 		this.resultsEl.addClass("vault-spotlight-loading");
 		// Mirror the real row (icon tile + title line + meta line) so the swap to
 		// loaded content is seamless rather than a visible jump.
@@ -1205,6 +1286,7 @@ export class SpotlightModal extends Modal {
 			this.loadingTimer = null;
 		}
 		this.resultsEl.empty();
+		this.renderedSelectedIndex = -1;
 		this.resultsEl.removeClass("vault-spotlight-loading");
 		this.resultsEl.removeClass("is-searching");
 		const empty = this.resultsEl.createDiv({ cls: "vault-spotlight-empty" });
@@ -1285,42 +1367,14 @@ export class SpotlightModal extends Modal {
 					attr: { type: "button", tabindex: "-1", "aria-hidden": "true" },
 				});
 				setIcon(starBtn, starItem.isStarred ? "star" : "star-off");
-				starBtn.addEventListener("mousedown", (evt) => {
-					evt.preventDefault();
-					evt.stopPropagation();
-					// Update the icon, row state, and item flag in place — re-running
-					// the whole search would reset the selection and scroll to the
-					// top, losing the user's place mid-list.
-					starItem.isStarred = this.plugin.toggleStar(starItem.file.path);
-					setIcon(starBtn, starItem.isStarred ? "star" : "star-off");
-					// Keep the is-starred class in sync so the CSS star colour tracks
-					// the real state (the class, not the icon, drives the tint).
-					row.toggleClass("is-starred", starItem.isStarred);
-				});
 			}
-
-			row.addEventListener("mouseenter", () => {
-				// Ignore hover selection triggered by rows sliding under a stationary
-				// cursor during keyboard navigation; only honour a real pointer move.
-				if (this.suppressHoverSelect) return;
-				this.selectedIndex = index;
-				this.updateSelectionHighlight();
-			});
-			row.addEventListener("mousedown", (evt) => {
-				if ((evt.target as HTMLElement).closest(".vault-spotlight-star-btn")) return;
-				evt.preventDefault();
-				this.selectedIndex = index;
-				void this.activateSelection();
-			});
-			if (file) {
-				row.addEventListener("contextmenu", (evt) => {
-					evt.preventDefault();
-					this.selectedIndex = index;
-					this.updateSelectionHighlight();
-					this.openActionsMenu(item, evt);
-				});
-			}
+			// Hover, click, star-toggle, and context-menu are handled by the
+			// delegated listeners on resultsEl (see onOpen) — no per-row closures.
 		});
+
+		// The selected row was styled inline in the loop above; record it so the
+		// next selection move only has to restyle it and its successor.
+		this.renderedSelectedIndex = this.selectedIndex;
 
 		// Point the combobox at the default (row-0) option now, so a screen reader
 		// announces the pre-selected result on first render — not only after the
@@ -1328,6 +1382,14 @@ export class SpotlightModal extends Modal {
 		const selectedRow = this.resultsEl.querySelector<HTMLElement>(".is-selected");
 		if (selectedRow?.id) this.inputEl.setAttribute("aria-activedescendant", selectedRow.id);
 		else this.inputEl.removeAttribute("aria-activedescendant");
+	}
+
+	/** Resolve the result index for a delegated list event, or null if off-row. */
+	private rowIndexFromEvent(evt: Event): number | null {
+		const row = (evt.target as HTMLElement).closest<HTMLElement>(".vault-spotlight-item");
+		if (!row || !this.resultsEl.contains(row)) return null;
+		const index = Number(row.dataset.index);
+		return Number.isInteger(index) && index >= 0 && index < this.items.length ? index : null;
 	}
 
 	private applyRowState(row: HTMLElement, index: number): void {
@@ -1346,12 +1408,18 @@ export class SpotlightModal extends Modal {
 	}
 
 	private updateSelectionHighlight(): void {
-		const rows = this.resultsEl.querySelectorAll<HTMLElement>(".vault-spotlight-item");
-		rows.forEach((row) => {
-			const index = Number(row.dataset.index);
-			this.applyRowState(row, index);
-		});
-		const selected = this.resultsEl.querySelector<HTMLElement>(".is-selected");
+		// Restyle only the row that lost selection and the one that gained it, not
+		// every row — arrow-holding a long list otherwise did O(rows) DOM writes
+		// plus a full footer rebuild and a forced reflow on every single step.
+		const prev = this.renderedSelectedIndex;
+		if (prev >= 0 && prev !== this.selectedIndex) {
+			const prevRow = this.resultsEl.querySelector<HTMLElement>(`.vault-spotlight-item[data-index="${prev}"]`);
+			if (prevRow) this.applyRowState(prevRow, prev);
+		}
+		const selected = this.resultsEl.querySelector<HTMLElement>(`.vault-spotlight-item[data-index="${this.selectedIndex}"]`);
+		if (selected) this.applyRowState(selected, this.selectedIndex);
+		this.renderedSelectedIndex = this.selectedIndex;
+
 		selected?.scrollIntoView({ block: "nearest" });
 		// Point the combobox at the active option for screen readers.
 		if (selected?.id) this.inputEl.setAttribute("aria-activedescendant", selected.id);
@@ -1362,9 +1430,15 @@ export class SpotlightModal extends Modal {
 	}
 
 	private renderFooter(): void {
+		const selected = this.items[this.selectedIndex] ?? null;
+		// The chips are a pure function of the selected item's kind and whether it
+		// is file-backed (the Alt+↵ menu chip); skip the rebuild when neither moved.
+		const sig = `${selected?.kind ?? "none"}|${selected && itemFile(selected) ? "f" : ""}`;
+		if (sig === this.footerSig) return;
+		this.footerSig = sig;
+
 		const shortcuts = this.shortcutsEl;
 		shortcuts.empty();
-		const selected = this.items[this.selectedIndex] ?? null;
 
 		for (const hint of getShortcutHints({
 			itemKind: selected?.kind ?? null,
@@ -1690,12 +1764,23 @@ export class SpotlightModal extends Modal {
 		if (!file) return;
 		const leaf = target === null ? this.app.workspace.getLeaf(false) : this.app.workspace.getLeaf(target);
 		await leaf.openFile(file);
+		this.seekToItemLine(leaf, item);
+	}
+
+	/**
+	 * After opening a file, place the cursor on the item's 1-based line and scroll
+	 * it into view — for content/heading/symbol rows in a markdown view. Shared by
+	 * openItem and the context-menu open handlers so the two can't drift (the menu
+	 * previously set the cursor but forgot to scroll the line into view).
+	 */
+	private seekToItemLine(leaf: WorkspaceLeaf, item: ResultItem): void {
 		const line = item.kind === "content" || item.kind === "heading" || item.kind === "symbol" ? item.line : null;
-		if (line !== null && file.extension === "md" && leaf.view instanceof MarkdownView) {
-			const editor = leaf.view.editor;
-			editor.setCursor({ line: line - 1, ch: 0 });
-			editor.scrollIntoView({ from: { line: line - 1, ch: 0 }, to: { line: line - 1, ch: 0 } }, true);
-		}
+		if (line === null) return;
+		const file = itemFile(item);
+		if (!file || file.extension !== "md" || !(leaf.view instanceof MarkdownView)) return;
+		const pos = { line: line - 1, ch: 0 };
+		leaf.view.editor.setCursor(pos);
+		leaf.view.editor.scrollIntoView({ from: pos, to: pos }, true);
 	}
 
 	private async createAndOpen(rawName: string): Promise<void> {
@@ -1816,7 +1901,7 @@ export class SpotlightModal extends Modal {
 					profileId: this.plugin.settings.activeProfileId,
 					rankingMode: this.currentProfile()?.rankingMode,
 				});
-				this.plugin.settings.workflowPresets = [workflow, ...this.plugin.settings.workflowPresets].slice(0, 20);
+				this.plugin.settings.workflowPresets = [workflow, ...this.plugin.settings.workflowPresets].slice(0, MAX_WORKFLOW_PRESETS);
 				this.activeWorkflowId = workflow.id;
 				void this.plugin.saveSettings();
 				new Notice("Vault Spotlight: workflow saved.");
@@ -2064,78 +2149,25 @@ export class SpotlightModal extends Modal {
 		// set actually contains files, so a command/folder/workflow row never
 		// surfaces "Batch move" or "Create MOC" that would act on the wrong set.
 		if (this.resultItemsForBatch().length > 0) {
-			actions.push(
-			{
-				id: "copy-results",
-				name: "Copy results as Markdown",
-				description: "Copy selected results, or the current result list, as Markdown links.",
-				requiresPro: true,
-				run: () => batchOps.copyResultsAsMarkdown(this.batchContext()),
-			},
-			{
-				id: "export-results",
-				name: "Export results to note",
-				description: "Create a Markdown note containing selected/search results.",
-				requiresPro: true,
-				run: () => batchOps.exportResultsToNote(this.batchContext()),
-			},
-			{
-				id: "batch-add-tag",
-				name: "Batch add tag",
-				description: "Append a tag to selected Markdown files.",
-				requiresPro: true,
-				run: () => batchOps.batchAddTag(this.batchContext()),
-			},
-			{
-				id: "batch-remove-tag",
-				name: "Batch remove tag",
-				description: "Remove a tag from selected Markdown files.",
-				requiresPro: true,
-				run: () => batchOps.batchRemoveTag(this.batchContext()),
-			},
-			{
-				id: "batch-set-property",
-				name: "Batch set property",
-				description: "Set a frontmatter property on selected Markdown files.",
-				requiresPro: true,
-				run: () => batchOps.batchSetProperty(this.batchContext()),
-			},
-			{
-				id: "batch-move",
-				name: "Batch move files",
-				description: "Move selected files into a target folder.",
-				requiresPro: true,
-				run: () => batchOps.batchMoveFiles(this.batchContext()),
-			},
-			{
-				id: "batch-star",
-				name: "Batch star results",
-				description: "Add selected/current result files to Starred pins.",
-				requiresPro: true,
-				run: () => batchOps.batchSetStarred(this.batchContext(), true),
-			},
-			{
-				id: "batch-unstar",
-				name: "Batch unstar results",
-				description: "Remove selected/current result files from Starred pins.",
-				requiresPro: true,
-				run: () => batchOps.batchSetStarred(this.batchContext(), false),
-			},
-			{
-				id: "create-moc",
-				name: "Create MOC from results",
-				description: "Create a grouped index note from selected/current results.",
-				requiresPro: true,
-				run: () => batchOps.createMocFromResults(this.batchContext()),
-			},
-			{
-				id: "append-links",
-				name: "Append links to active note",
-				description: "Append selected/current result links to the active Markdown note.",
-				requiresPro: true,
-				run: () => batchOps.appendLinksToActiveNote(this.batchContext()),
+			// All batch/export actions are Pro and share the same shape; the only
+			// per-row differences are id/name/description and which batchOps call
+			// they run, so drive them from one table instead of ten near-identical
+			// object literals. Order here is the order shown in the palette.
+			const batchActions: Array<[id: string, name: string, description: string, run: () => void]> = [
+				["copy-results", "Copy results as Markdown", "Copy selected results, or the current result list, as Markdown links.", () => batchOps.copyResultsAsMarkdown(this.batchContext())],
+				["export-results", "Export results to note", "Create a Markdown note containing selected/search results.", () => batchOps.exportResultsToNote(this.batchContext())],
+				["batch-add-tag", "Batch add tag", "Append a tag to selected Markdown files.", () => batchOps.batchAddTag(this.batchContext())],
+				["batch-remove-tag", "Batch remove tag", "Remove a tag from selected Markdown files.", () => batchOps.batchRemoveTag(this.batchContext())],
+				["batch-set-property", "Batch set property", "Set a frontmatter property on selected Markdown files.", () => batchOps.batchSetProperty(this.batchContext())],
+				["batch-move", "Batch move files", "Move selected files into a target folder.", () => batchOps.batchMoveFiles(this.batchContext())],
+				["batch-star", "Batch star results", "Add selected/current result files to Starred pins.", () => batchOps.batchSetStarred(this.batchContext(), true)],
+				["batch-unstar", "Batch unstar results", "Remove selected/current result files from Starred pins.", () => batchOps.batchSetStarred(this.batchContext(), false)],
+				["create-moc", "Create MOC from results", "Create a grouped index note from selected/current results.", () => batchOps.createMocFromResults(this.batchContext())],
+				["append-links", "Append links to active note", "Append selected/current result links to the active Markdown note.", () => batchOps.appendLinksToActiveNote(this.batchContext())],
+			];
+			for (const [id, name, description, run] of batchActions) {
+				actions.push({ id, name, description, requiresPro: true, run });
 			}
-			);
 			if (integrations.omnisearch) {
 				actions.push({
 					id: "open-omnisearch",
@@ -2190,8 +2222,6 @@ export class SpotlightModal extends Modal {
 		// Seek to the matched line for anything that carries one, so opening a
 		// symbol/heading/content hit via the menu lands on the passage — matching
 		// what Enter (openItem) already does.
-		const line =
-			item.kind === "content" || item.kind === "heading" || item.kind === "symbol" ? item.line : null;
 		const menu = new Menu();
 
 		const openIn = (paneType: "tab" | "split" | "window") => {
@@ -2199,9 +2229,7 @@ export class SpotlightModal extends Modal {
 			void (async () => {
 				const leaf = this.app.workspace.getLeaf(paneType);
 				await leaf.openFile(file);
-				if (line !== null && file.extension === "md" && leaf.view instanceof MarkdownView) {
-					leaf.view.editor.setCursor({ line: line - 1, ch: 0 });
-				}
+				this.seekToItemLine(leaf, item);
 				this.plugin.trackRecent(file.path);
 			})();
 		};

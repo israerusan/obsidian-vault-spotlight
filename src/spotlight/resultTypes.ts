@@ -50,6 +50,8 @@ export type ResultItem =
 			snippet: string;
 			score: number;
 			engine: "ripgrep" | "vault" | "canvas" | "base";
+			/** Char offsets within `snippet` to highlight (the matched query terms). */
+			matchIndices: number[];
 	  }
 	| {
 			kind: "heading";

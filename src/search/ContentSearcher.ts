@@ -11,6 +11,33 @@ export interface ContentSearchResult {
 	snippet: string;
 	score: number;
 	engine: "ripgrep" | "vault" | "canvas" | "base";
+	/**
+	 * Char offsets within `snippet` covering the matched query terms, filled in
+	 * centrally by ContentSearcher.search (the engines don't compute it). Optional
+	 * so the per-engine result builders don't each have to.
+	 */
+	matchIndices?: number[];
+}
+
+/**
+ * Char positions in `snippet` (case-insensitive) covered by any query token, so
+ * the list can highlight the hit the same way the filename and preview modes do.
+ */
+export function snippetMatchIndices(snippet: string, tokens: string[]): number[] {
+	if (tokens.length === 0) return [];
+	const low = snippet.toLowerCase();
+	const marked = new Set<number>();
+	for (const token of tokens) {
+		if (!token) continue;
+		let from = 0;
+		for (;;) {
+			const at = low.indexOf(token, from);
+			if (at === -1) break;
+			for (let k = at; k < at + token.length; k++) marked.add(k);
+			from = at + token.length;
+		}
+	}
+	return Array.from(marked).sort((a, b) => a - b);
 }
 
 export interface ContentSearchOptions {
@@ -56,6 +83,7 @@ export class ContentSearcher {
 	}
 
 	setRipgrepCommand(command: string): void {
+		// Kill any process the old searcher still has running before dropping it.
 		this.ripgrep.dispose();
 		this.ripgrep = new RipgrepSearcher(this.app, command);
 	}
@@ -92,8 +120,12 @@ export class ContentSearcher {
 		}
 		if (base === null) base = await this.searchVaultIndex(tokens, limit, excluded);
 
-		if (extras.length === 0) return base;
-		return this.mergeResults(base, extras, limit);
+		const results = extras.length === 0 ? base : this.mergeResults(base, extras, limit);
+		// Annotate in one place so every engine's rows highlight identically.
+		for (const result of results) {
+			result.matchIndices = snippetMatchIndices(result.snippet, tokens);
+		}
+		return results;
 	}
 
 	private async searchVaultIndex(
@@ -227,7 +259,7 @@ export class ContentSearcher {
 		this.index.delete(path);
 	}
 
-	/** Release the worker when the plugin unloads. */
+	/** Release the worker and any in-flight ripgrep process when the plugin unloads. */
 	dispose(): void {
 		this.disposed = true;
 		this.ripgrep.dispose();

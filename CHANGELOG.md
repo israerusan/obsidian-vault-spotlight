@@ -3,6 +3,37 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.8.0] - 2026-07-04
+
+### Performance
+- The launcher opens noticeably faster on large vaults: per-file tag/alias/time
+  metadata is now built only for the results actually shown, instead of for every
+  scored file before trimming to the visible list.
+- Smoother keyboard navigation: arrowing through a long result list now restyles
+  only the two rows that change (and rebuilds the footer only when the selected
+  item's type changes) instead of re-touching every row on each keypress.
+- Row hover/click/star/menu handlers are attached once to the list rather than
+  re-bound to every row on each keystroke, cutting per-keystroke work.
+
+### Added / Changed
+- Content search now highlights the matched terms inside each snippet, so the
+  hit reads the same way it already does in filenames and the preview pane.
+- The Pro preview pane's empty and error states are now a proper icon + title +
+  guidance card (matching the results list) instead of a single faint line.
+- Badges, pills, and glyphs that render the accent colour on an accent tint now
+  stay legible under pale accent themes (mint, yellow, pale blue).
+- A more refined feel: a theme-aware modal shadow that reads on dark backgrounds,
+  the selection bar glides with the cursor instead of popping, and the search
+  glyph lifts to the accent when the field is focused. Spacing, type, and radius
+  now come from one documented token scale.
+
+### Fixed
+- Opening a content/heading/symbol result from the right-click menu now scrolls
+  the note to the matched line, matching Enter's behaviour.
+- Batch star/unstar now reports the number of files it actually changed.
+- The action palette can no longer leave the loading skeleton on screen if it
+  fails to build.
+
 ## [2.7.2] - 2026-07-04
 
 ### Changed

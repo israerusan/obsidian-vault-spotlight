@@ -40,12 +40,20 @@ async function runBatch(
 	const outcomes = await Promise.allSettled(files.map((file) => op(file)));
 	const failed = outcomes.filter((o) => o.status === "rejected").length;
 	const ok = outcomes.length - failed;
-	const plural = ok === 1 ? "" : "s";
-	const base = `Vault Spotlight: ${verb} ${ok} ${noun}${plural}`;
-	new Notice(failed > 0 ? `${base} (${failed} failed).` : `${base}.`);
+	notifyBatchSummary(verb, ok, failed, noun);
 	if (failed > 0) {
 		console.error(`[VaultSpotlight] ${verb}: ${failed} of ${outcomes.length} file(s) failed.`);
 	}
+}
+
+/**
+ * "Vault Spotlight: <verb> N <noun>(s)[ (M failed)]." — the one summary format
+ * every batch op reports through, so the parallel (runBatch) and the sequential
+ * (batchMoveFiles) paths can't drift in wording or pluralisation.
+ */
+function notifyBatchSummary(verb: string, ok: number, failed: number, noun = "note"): void {
+	const base = `Vault Spotlight: ${verb} ${ok} ${noun}${ok === 1 ? "" : "s"}`;
+	new Notice(failed > 0 ? `${base} (${failed} failed).` : `${base}.`);
 }
 
 function markdownFilesForBatch(ctx: BatchOpsContext): TFile[] {
@@ -221,9 +229,7 @@ export function batchMoveFiles(ctx: BatchOpsContext): void {
 						console.error("[VaultSpotlight] move failed", file.path, err);
 					}
 				}
-				const plural = moved === 1 ? "" : "s";
-				const base = `Vault Spotlight: moved ${moved} file${plural}`;
-				new Notice(failed > 0 ? `${base} (${failed} failed).` : `${base}.`);
+				notifyBatchSummary("moved", moved, failed, "file");
 			})();
 		},
 	}).open();
@@ -231,11 +237,16 @@ export function batchMoveFiles(ctx: BatchOpsContext): void {
 
 export function batchSetStarred(ctx: BatchOpsContext, starred: boolean): void {
 	const files = filesForBatch(ctx);
+	// Count only files whose state actually flipped to the requested one: files
+	// already in that state are no-ops, and the star cap can silently refuse a new
+	// star — reporting files.length in either case would overstate what happened.
+	let changed = 0;
 	for (const file of files) {
-		const isStarred = ctx.plugin.isStarred(file.path);
-		if (starred !== isStarred) ctx.plugin.toggleStar(file.path);
+		if (ctx.plugin.isStarred(file.path) === starred) continue;
+		ctx.plugin.toggleStar(file.path);
+		if (ctx.plugin.isStarred(file.path) === starred) changed++;
 	}
-	new Notice(`Vault Spotlight: ${starred ? "starred" : "unstarred"} ${files.length} file${files.length === 1 ? "" : "s"}.`);
+	new Notice(`Vault Spotlight: ${starred ? "starred" : "unstarred"} ${changed} file${changed === 1 ? "" : "s"}.`);
 	ctx.runSearch();
 }
 

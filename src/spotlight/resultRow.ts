@@ -68,7 +68,10 @@ export function renderResultRow(
 						? "Base"
 						: "Match";
 		titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: `${engineLabel} · L${item.line}` });
-		body.createDiv({ cls: "vault-spotlight-item-snippet", text: item.snippet });
+		// Highlight the matched terms in the snippet so the flagship content mode is
+		// as scannable as the filename mode (and matches the preview pane's hit mark).
+		const snippetEl = body.createDiv({ cls: "vault-spotlight-item-snippet" });
+		renderHighlightedText(snippetEl, item.snippet, item.matchIndices);
 		body.createDiv({ cls: "vault-spotlight-item-meta", text: item.file.path });
 	} else if (item.kind === "heading") {
 		setIcon(iconWrap, "heading");

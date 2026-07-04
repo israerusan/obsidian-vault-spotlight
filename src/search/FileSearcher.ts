@@ -30,6 +30,15 @@ export interface FrecencyEntry {
 	last: number;
 }
 
+/** The cheap-to-compute fields captured during the scan, before the top-N slice. */
+interface ScanRow {
+	file: TFile;
+	score: number;
+	matchIndices: number[];
+	primaryMatch: FileSearchResult["primaryMatch"];
+	aliasMatched: boolean;
+}
+
 export interface FileSearchOptions {
 	textTokens: string[];
 	phrases?: string[];
@@ -69,7 +78,6 @@ export class FileSearcher {
 			excludeFolders: options.excludeFolders,
 		});
 		const limit = options.limit ?? 50;
-		const results: FileSearchResult[] = [];
 		const ranking = normalizeRankingSettings(options.ranking);
 		const boosts = rankingBoosts(resolveRankingMode(ranking, options.rankingMode));
 		const recentSet = new Map(options.recentPaths.map((p, i) => [p, i]));
@@ -79,6 +87,14 @@ export class FileSearcher {
 			options.tags.length > 0 || options.properties.length > 0 || options.extFilters.length > 0;
 		const isBrowseMode = options.textTokens.length === 0 && !hasActiveFilters;
 		const isFilterOnly = options.textTokens.length === 0 && hasActiveFilters;
+		// Build the combined token list once, not per file, inside the vault loop.
+		const searchTokens = [...(options.nameTerms ?? []), ...options.textTokens];
+
+		// Scan every file for a score, but only capture the cheap fields here. The
+		// expensive per-file display metadata (tag/alias cache reads, relative-time
+		// formatting, file-kind) is deferred until after the top-N slice below, so a
+		// browse/empty query on a 10k-note vault does ~limit cache reads, not 10k.
+		const scanned: ScanRow[] = [];
 
 		for (const file of files) {
 			if (!this.matchesExtFilter(file, options.extFilters)) continue;
@@ -98,7 +114,7 @@ export class FileSearcher {
 				primaryMatch = "filters";
 			} else {
 				let matched = true;
-				for (const token of [...(options.nameTerms ?? []), ...options.textTokens]) {
+				for (const token of searchTokens) {
 					const basenameMatch = fuzzyMatch(token, basename, { ignoreDiacritics: ranking.ignoreDiacritics });
 					if (basenameMatch) {
 						score += basenameMatch.score + boosts.basename;
@@ -125,13 +141,6 @@ export class FileSearcher {
 			}
 
 			if (score <= 0) continue;
-
-			// Only now that the file is a keeper do we pay for tag/alias metadata
-			// (a metadataCache lookup + Set build per file) — skipping it for the
-			// vast majority of non-matching files on every keystroke.
-			const cache = file.extension === "md" ? this.app.metadataCache.getFileCache(file) : null;
-			const tags = cache ? Array.from(collectFileTags(cache)).slice(0, 3) : [];
-			const aliases = extractAliases(cache?.frontmatter ?? null).slice(0, 3);
 
 			const starredRank = starredSet.get(file.path);
 			const recentRank = recentSet.get(file.path);
@@ -163,23 +172,33 @@ export class FileSearcher {
 				score += Math.floor((freqBoost + recencyBoost) * weight);
 			}
 
-			results.push({
+			scanned.push({ file, score, matchIndices: indices, primaryMatch, aliasMatched });
+		}
+
+		// Rank and cut to the visible window BEFORE paying for display metadata, so
+		// tag/alias cache reads and time formatting run for ~limit files, not every
+		// match (in browse mode that is the whole vault).
+		scanned.sort((a, b) => b.score - a.score);
+		return scanned.slice(0, limit).map((row) => {
+			const file = row.file;
+			const cache = file.extension === "md" ? this.app.metadataCache.getFileCache(file) : null;
+			const tags = cache ? Array.from(collectFileTags(cache)).slice(0, 3) : [];
+			const aliases = extractAliases(cache?.frontmatter ?? null).slice(0, 3);
+			return {
 				file,
-				score,
-				matchIndices: indices,
+				score: row.score,
+				matchIndices: row.matchIndices,
 				modifiedLabel: formatRelativeTime(file.stat.mtime),
 				fileKind: getVaultFileKind(file),
-				primaryMatch,
-				aliasMatched,
+				primaryMatch: row.primaryMatch,
+				aliasMatched: row.aliasMatched,
 				tags,
 				aliases,
 				isRecent: recentSet.has(file.path),
 				isStarred: starredSet.has(file.path),
 				isBookmarked: bookmarkedSet.has(file.path),
-			});
-		}
-
-		return results.sort((a, b) => b.score - a.score).slice(0, limit);
+			};
+		});
 	}
 
 	private matchesExtFilter(file: TFile, extFilters: string[]): boolean {

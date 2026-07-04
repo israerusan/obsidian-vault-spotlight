@@ -2699,6 +2699,16 @@ function safeHttpUrl(url, fallback) {
   }
   return fallback;
 }
+function createExternalLink(parent, options) {
+  const link = parent.createEl("a", {
+    cls: options.cls,
+    text: options.text,
+    href: safeHttpUrl(options.url, options.fallback)
+  });
+  link.setAttr("target", "_blank");
+  link.setAttr("rel", "noopener noreferrer");
+  return link;
+}
 var MAX_CUSTOM_SEARCHES = 50;
 var MAX_RECENT_SEARCHES = 15;
 var DEFAULT_SETTINGS = {
@@ -2778,13 +2788,12 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
   /** Inline "Upgrade to Pro" link appended to a locked row's description. */
   appendUpgrade(setting) {
     setting.descEl.appendText(" ");
-    const link = setting.descEl.createEl("a", {
+    createExternalLink(setting.descEl, {
       cls: "vault-spotlight-upgrade-inline",
       text: "Upgrade to Pro",
-      href: safeHttpUrl(this.plugin.settings.purchaseUrl, DEFAULT_SETTINGS.purchaseUrl)
+      url: this.plugin.settings.purchaseUrl,
+      fallback: DEFAULT_SETTINGS.purchaseUrl
     });
-    link.setAttr("target", "_blank");
-    link.setAttr("rel", "noopener noreferrer");
   }
   display() {
     const { containerEl } = this;
@@ -2809,15 +2818,12 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
       status.createEl("p", {
         text: "Free tier active. Upgrade to unlock content, heading & link search, live preview, snippets, saved workflows, batch actions, and more."
       });
-      const link = status.createEl("a", {
+      createExternalLink(status, {
         cls: "vault-spotlight-pro-btn",
         text: "Get Vault Spotlight Pro",
-        // Only render http(s) URLs — a stored "javascript:" value would
-        // otherwise become a clickable script link (self-XSS) in the pane.
-        href: safeHttpUrl(this.plugin.settings.purchaseUrl, DEFAULT_SETTINGS.purchaseUrl)
+        url: this.plugin.settings.purchaseUrl,
+        fallback: DEFAULT_SETTINGS.purchaseUrl
       });
-      link.setAttr("target", "_blank");
-      link.setAttr("rel", "noopener noreferrer");
     }
     new import_obsidian.Setting(containerEl).setName("General").setHeading();
     new import_obsidian.Setting(containerEl).setName("Show modified time").setDesc("Display relative modified time in search results.").addToggle(
@@ -3578,7 +3584,7 @@ var FileSearcher = class {
     this.app = app;
   }
   search(options) {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c, _d, _e, _f;
     const files = getSearchableFiles(this.app, {
       includeCanvas: options.includeCanvas,
       includePdf: options.includePdf,
@@ -3586,7 +3592,6 @@ var FileSearcher = class {
       excludeFolders: options.excludeFolders
     });
     const limit = (_b = options.limit) != null ? _b : 50;
-    const results = [];
     const ranking = normalizeRankingSettings(options.ranking);
     const boosts = rankingBoosts(resolveRankingMode(ranking, options.rankingMode));
     const recentSet = new Map(options.recentPaths.map((p, i) => [p, i]));
@@ -3595,6 +3600,8 @@ var FileSearcher = class {
     const hasActiveFilters = options.tags.length > 0 || options.properties.length > 0 || options.extFilters.length > 0;
     const isBrowseMode = options.textTokens.length === 0 && !hasActiveFilters;
     const isFilterOnly = options.textTokens.length === 0 && hasActiveFilters;
+    const searchTokens = [...(_d = options.nameTerms) != null ? _d : [], ...options.textTokens];
+    const scanned = [];
     for (const file of files) {
       if (!this.matchesExtFilter(file, options.extFilters)) continue;
       if (!this.matchesAdvancedFileFilters(file, options, starredSet.has(file.path), bookmarkedSet.has(file.path))) continue;
@@ -3611,7 +3618,7 @@ var FileSearcher = class {
         primaryMatch = "filters";
       } else {
         let matched = true;
-        for (const token of [...(_d = options.nameTerms) != null ? _d : [], ...options.textTokens]) {
+        for (const token of searchTokens) {
           const basenameMatch = fuzzyMatch(token, basename, { ignoreDiacritics: ranking.ignoreDiacritics });
           if (basenameMatch) {
             score += basenameMatch.score + boosts.basename;
@@ -3637,9 +3644,6 @@ var FileSearcher = class {
         if (!matched) score = 0;
       }
       if (score <= 0) continue;
-      const cache = file.extension === "md" ? this.app.metadataCache.getFileCache(file) : null;
-      const tags = cache ? Array.from(collectFileTags(cache)).slice(0, 3) : [];
-      const aliases = extractAliases((_e = cache == null ? void 0 : cache.frontmatter) != null ? _e : null).slice(0, 3);
       const starredRank = starredSet.get(file.path);
       const recentRank = recentSet.get(file.path);
       if (ranking.preferStarredFiles && starredRank !== void 0) {
@@ -3655,8 +3659,8 @@ var FileSearcher = class {
         const ageDays = Math.floor(Math.max(0, Date.now() - file.stat.mtime) / 864e5);
         score += Math.max(0, boosts.queryMtimeDays - ageDays);
       }
-      if (ranking.preferOpenFiles && ((_f = options.openPaths) == null ? void 0 : _f.has(file.path))) score += 400;
-      const fr = (_g = options.frecency) == null ? void 0 : _g[file.path];
+      if (ranking.preferOpenFiles && ((_e = options.openPaths) == null ? void 0 : _e.has(file.path))) score += 400;
+      const fr = (_f = options.frecency) == null ? void 0 : _f[file.path];
       if (fr) {
         const freqBoost = Math.min(300, fr.count * 15);
         const ageDays = (Date.now() - fr.last) / 864e5;
@@ -3664,22 +3668,30 @@ var FileSearcher = class {
         const weight = isBrowseMode || isFilterOnly ? 1 : boosts.frecencyWeight;
         score += Math.floor((freqBoost + recencyBoost) * weight);
       }
-      results.push({
+      scanned.push({ file, score, matchIndices: indices, primaryMatch, aliasMatched });
+    }
+    scanned.sort((a, b) => b.score - a.score);
+    return scanned.slice(0, limit).map((row) => {
+      var _a2;
+      const file = row.file;
+      const cache = file.extension === "md" ? this.app.metadataCache.getFileCache(file) : null;
+      const tags = cache ? Array.from(collectFileTags(cache)).slice(0, 3) : [];
+      const aliases = extractAliases((_a2 = cache == null ? void 0 : cache.frontmatter) != null ? _a2 : null).slice(0, 3);
+      return {
         file,
-        score,
-        matchIndices: indices,
+        score: row.score,
+        matchIndices: row.matchIndices,
         modifiedLabel: formatRelativeTime(file.stat.mtime),
         fileKind: getVaultFileKind(file),
-        primaryMatch,
-        aliasMatched,
+        primaryMatch: row.primaryMatch,
+        aliasMatched: row.aliasMatched,
         tags,
         aliases,
         isRecent: recentSet.has(file.path),
         isStarred: starredSet.has(file.path),
         isBookmarked: bookmarkedSet.has(file.path)
-      });
-    }
-    return results.sort((a, b) => b.score - a.score).slice(0, limit);
+      };
+    });
   }
   matchesExtFilter(file, extFilters) {
     if (extFilters.length === 0) return true;
@@ -4752,14 +4764,16 @@ var PreviewPane = class {
       this.timer = null;
       previewEl.empty();
       if (!file) {
-        previewEl.createDiv({ cls: "vault-spotlight-preview-empty", text: "No preview" });
+        renderPreviewEmpty(previewEl, "eye", "Nothing selected", "Pick a result and its note previews here, scrolled to the match.");
         return;
       }
       if (file.extension !== "md") {
-        previewEl.createDiv({
-          cls: "vault-spotlight-preview-empty",
-          text: `${file.extension.toUpperCase()} file \u2014 no preview`
-        });
+        renderPreviewEmpty(
+          previewEl,
+          "file-x",
+          `No preview for ${file.extension.toUpperCase()} files`,
+          "Live preview is available for Markdown notes. Press \u21B5 to open this file instead."
+        );
         return;
       }
       previewEl.createDiv({ cls: "vault-spotlight-preview-title", text: file.basename });
@@ -4775,7 +4789,7 @@ var PreviewPane = class {
       }).catch(() => {
         if (this.token !== token || !previewEl.isConnected) return;
         previewEl.empty();
-        previewEl.createDiv({ cls: "vault-spotlight-preview-empty", text: "Preview unavailable" });
+        renderPreviewEmpty(previewEl, "alert-triangle", "Preview unavailable", "This note couldn't be read. Try selecting it again.");
       });
     }, 120);
   }
@@ -4793,6 +4807,14 @@ var PreviewPane = class {
     this.el = null;
   }
 };
+function renderPreviewEmpty(target, icon, title, desc) {
+  const empty = target.createDiv({ cls: "vault-spotlight-empty" });
+  const iconWrap = empty.createDiv({ cls: "vault-spotlight-empty-icon" });
+  (0, import_obsidian6.setIcon)(iconWrap, icon);
+  iconWrap.setAttr("aria-hidden", "true");
+  empty.createDiv({ cls: "vault-spotlight-empty-title", text: title });
+  empty.createDiv({ cls: "vault-spotlight-empty-desc", text: desc });
+}
 function highlightFirstMatch(root, terms) {
   var _a;
   const needles = terms.map((t) => t.toLowerCase()).filter((t) => t.length > 0);
@@ -4904,7 +4926,8 @@ function renderResultRow(row, item, options) {
     title.setText(item.file.basename);
     const engineLabel = item.engine === "ripgrep" ? "Ripgrep" : item.engine === "canvas" ? "Canvas" : item.engine === "base" ? "Base" : "Match";
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: `${engineLabel} \xB7 L${item.line}` });
-    body.createDiv({ cls: "vault-spotlight-item-snippet", text: item.snippet });
+    const snippetEl = body.createDiv({ cls: "vault-spotlight-item-snippet" });
+    renderHighlightedText(snippetEl, item.snippet, item.matchIndices);
     body.createDiv({ cls: "vault-spotlight-item-meta", text: item.file.path });
   } else if (item.kind === "heading") {
     (0, import_obsidian7.setIcon)(iconWrap, "heading");
@@ -5085,12 +5108,14 @@ async function runBatch(files, op, verb, noun = "note") {
   const outcomes = await Promise.allSettled(files.map((file) => op(file)));
   const failed = outcomes.filter((o) => o.status === "rejected").length;
   const ok = outcomes.length - failed;
-  const plural = ok === 1 ? "" : "s";
-  const base = `Vault Spotlight: ${verb} ${ok} ${noun}${plural}`;
-  new import_obsidian8.Notice(failed > 0 ? `${base} (${failed} failed).` : `${base}.`);
+  notifyBatchSummary(verb, ok, failed, noun);
   if (failed > 0) {
     console.error(`[VaultSpotlight] ${verb}: ${failed} of ${outcomes.length} file(s) failed.`);
   }
+}
+function notifyBatchSummary(verb, ok, failed, noun = "note") {
+  const base = `Vault Spotlight: ${verb} ${ok} ${noun}${ok === 1 ? "" : "s"}`;
+  new import_obsidian8.Notice(failed > 0 ? `${base} (${failed} failed).` : `${base}.`);
 }
 function markdownFilesForBatch(ctx) {
   return filesForBatch(ctx).filter((file) => file.extension === "md");
@@ -5248,20 +5273,20 @@ function batchMoveFiles(ctx) {
             console.error("[VaultSpotlight] move failed", file.path, err);
           }
         }
-        const plural = moved === 1 ? "" : "s";
-        const base = `Vault Spotlight: moved ${moved} file${plural}`;
-        new import_obsidian8.Notice(failed > 0 ? `${base} (${failed} failed).` : `${base}.`);
+        notifyBatchSummary("moved", moved, failed, "file");
       })();
     }
   }).open();
 }
 function batchSetStarred(ctx, starred) {
   const files = filesForBatch(ctx);
+  let changed = 0;
   for (const file of files) {
-    const isStarred = ctx.plugin.isStarred(file.path);
-    if (starred !== isStarred) ctx.plugin.toggleStar(file.path);
+    if (ctx.plugin.isStarred(file.path) === starred) continue;
+    ctx.plugin.toggleStar(file.path);
+    if (ctx.plugin.isStarred(file.path) === starred) changed++;
   }
-  new import_obsidian8.Notice(`Vault Spotlight: ${starred ? "starred" : "unstarred"} ${files.length} file${files.length === 1 ? "" : "s"}.`);
+  new import_obsidian8.Notice(`Vault Spotlight: ${starred ? "starred" : "unstarred"} ${changed} file${changed === 1 ? "" : "s"}.`);
   ctx.runSearch();
 }
 function createMocFromResults(ctx) {
@@ -5348,12 +5373,26 @@ function renameFile(app, file) {
 
 // src/spotlight/SpotlightModal.ts
 var formatMoment = import_obsidian9.moment;
+var SEARCH_DEBOUNCE_MS = 60;
+var RESULT_LIMIT = 60;
+var FILE_QUERY_LIMIT = 50;
+var FILE_BROWSE_LIMIT = 40;
+var SYMBOL_LIMIT = 100;
+var COMMAND_BROWSE_LIMIT = 1e3;
 var SpotlightModal = class extends import_obsidian9.Modal {
   constructor(app, plugin, initialQuery = "", initialMode = "files") {
     super(app);
     this.plugin = plugin;
     this.items = [];
     this.selectedIndex = 0;
+    // The row index currently carrying is-selected in the DOM, so a selection move
+    // only restyles the two affected rows instead of all of them. -1 whenever the
+    // list holds no real rows (empty/loading/skeletons).
+    this.renderedSelectedIndex = -1;
+    // Signature of the last footer we built (selected kind + has-file). The shortcut
+    // chips depend only on these, so an unchanged signature skips the full
+    // teardown/rebuild on every arrow keypress.
+    this.footerSig = "";
     this.checkedPaths = /* @__PURE__ */ new Set();
     this.searchTimer = null;
     this.loadingTimer = null;
@@ -5446,6 +5485,43 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     this.resultsEl.addEventListener("mousemove", () => {
       this.suppressHoverSelect = false;
     });
+    this.resultsEl.addEventListener("mouseover", (evt) => {
+      if (this.suppressHoverSelect) return;
+      const index = this.rowIndexFromEvent(evt);
+      if (index === null || index === this.selectedIndex) return;
+      this.selectedIndex = index;
+      this.updateSelectionHighlight();
+    });
+    this.resultsEl.addEventListener("mousedown", (evt) => {
+      const index = this.rowIndexFromEvent(evt);
+      if (index === null) return;
+      const item = this.items[index];
+      const starBtn = evt.target.closest(".vault-spotlight-star-btn");
+      if (starBtn) {
+        evt.preventDefault();
+        evt.stopPropagation();
+        if ((item == null ? void 0 : item.kind) === "file") {
+          item.isStarred = this.plugin.toggleStar(item.file.path);
+          (0, import_obsidian9.setIcon)(starBtn, item.isStarred ? "star" : "star-off");
+          const row = starBtn.closest(".vault-spotlight-item");
+          row == null ? void 0 : row.toggleClass("is-starred", item.isStarred);
+        }
+        return;
+      }
+      evt.preventDefault();
+      this.selectedIndex = index;
+      void this.activateSelection();
+    });
+    this.resultsEl.addEventListener("contextmenu", (evt) => {
+      const index = this.rowIndexFromEvent(evt);
+      if (index === null) return;
+      const item = this.items[index];
+      if (!item || !itemFile(item)) return;
+      evt.preventDefault();
+      this.selectedIndex = index;
+      this.updateSelectionHighlight();
+      this.openActionsMenu(item, evt);
+    });
     this.renderLoading();
     this.syncPreviewMount();
     this.footerEl = contentEl.createDiv({ cls: "vault-spotlight-footer" });
@@ -5465,13 +5541,12 @@ var SpotlightModal = class extends import_obsidian9.Modal {
         cls: "vault-spotlight-pro-cta-text",
         text: "Unlock content, heading & link search, live preview, snippets, saved workflows, and batch actions."
       });
-      const link = cta.createEl("a", {
+      createExternalLink(cta, {
         cls: "vault-spotlight-pro-btn",
         text: "Get Pro",
-        href: safeHttpUrl(this.plugin.settings.purchaseUrl, DEFAULT_SETTINGS.purchaseUrl)
+        url: this.plugin.settings.purchaseUrl,
+        fallback: DEFAULT_SETTINGS.purchaseUrl
       });
-      link.setAttr("target", "_blank");
-      link.setAttr("rel", "noopener noreferrer");
     }
     this.inputEl.addEventListener("input", () => {
       const item = this.items[this.selectedIndex];
@@ -5607,7 +5682,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
   }
   scheduleSearch() {
     if (this.searchTimer !== null) window.clearTimeout(this.searchTimer);
-    this.searchTimer = window.setTimeout(() => void this.runSearch(), 60);
+    this.searchTimer = window.setTimeout(() => void this.runSearch(), SEARCH_DEBOUNCE_MS);
   }
   /**
    * Leading prefixes always win over the Tab-toggled mode, so they stay
@@ -5653,14 +5728,26 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       }
     }, 100);
     if (this.actionContext) {
-      const actions = this.availableActions(this.actionContext);
-      const query = trimmed.toLowerCase();
-      this.setBadge("Actions", "is-content");
-      this.items = actions.filter((action) => !query || `${action.name} ${action.description}`.toLowerCase().includes(query)).map((action) => ({ kind: "action", action }));
-      this.isLoading = false;
-      this.selectedIndex = 0;
-      this.renderResults();
-      this.updateStatus(this.items.length);
+      try {
+        const actions = this.availableActions(this.actionContext);
+        const query = trimmed.toLowerCase();
+        this.setBadge("Actions", "is-content");
+        this.items = actions.filter((action) => !query || `${action.name} ${action.description}`.toLowerCase().includes(query)).map((action) => ({ kind: "action", action }));
+        this.selectedIndex = 0;
+        this.renderResults();
+        this.updateStatus(this.items.length);
+      } catch (err) {
+        console.error("[VaultSpotlight] action palette failed", err);
+        this.items = [];
+        this.renderEmptyState("alert-triangle", "Couldn't build actions", "Something went wrong. Press Escape to go back.");
+        this.updateStatus(0);
+      } finally {
+        this.isLoading = false;
+        if (this.loadingTimer !== null) {
+          window.clearTimeout(this.loadingTimer);
+          this.loadingTimer = null;
+        }
+      }
       return;
     }
     try {
@@ -5679,7 +5766,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       if (mode === "commands") {
         const cmdQuery = body;
         this.setBadge("Commands", "is-content");
-        const commandResults = this.commandSearcher.search(cmdQuery, cmdQuery ? 60 : 1e3);
+        const commandResults = this.commandSearcher.search(cmdQuery, cmdQuery ? RESULT_LIMIT : COMMAND_BROWSE_LIMIT);
         if (generation !== this.searchGeneration) return;
         let ordered = commandResults;
         const recentIds = this.plugin.settings.recentCommandIds;
@@ -5690,7 +5777,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
           ordered = [...recent, ...commandResults.filter((r) => !recentSet2.has(r.id))];
         }
         const recentSet = new Set(cmdQuery.length === 0 ? recentIds : []);
-        this.items = ordered.slice(0, 60).map((r) => ({
+        this.items = ordered.slice(0, RESULT_LIMIT).map((r) => ({
           kind: "command",
           id: r.id,
           name: r.name,
@@ -5727,20 +5814,24 @@ var SpotlightModal = class extends import_obsidian9.Modal {
           excludeFolders
         });
         if (generation !== this.searchGeneration) return;
-        this.items = contentResults.map((r) => ({
-          kind: "content",
-          file: r.file,
-          line: r.line,
-          snippet: r.snippet,
-          score: r.score,
-          engine: r.engine
-        }));
+        this.items = contentResults.map((r) => {
+          var _a2;
+          return {
+            kind: "content",
+            file: r.file,
+            line: r.line,
+            snippet: r.snippet,
+            score: r.score,
+            engine: r.engine,
+            matchIndices: (_a2 = r.matchIndices) != null ? _a2 : []
+          };
+        });
       } else if (mode === "headings") {
         this.setBadge("Headings", "is-content");
         const parsed = parseHeadingQuery(body);
         const headingResults = this.headingSearcher.search(parsed.headingQuery, {
           excludeFolders,
-          limit: 60,
+          limit: RESULT_LIMIT,
           fileQuery: parsed.fileQuery,
           levelMin: parsed.levelMin,
           levelMax: parsed.levelMax
@@ -5769,7 +5860,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
           this.updateStatus(0);
           return;
         }
-        const symbolResults = this.symbolSearcher.search(target, body, 100);
+        const symbolResults = this.symbolSearcher.search(target, body, SYMBOL_LIMIT);
         if (generation !== this.searchGeneration) return;
         this.items = symbolResults.map((r) => ({
           kind: "symbol",
@@ -5782,7 +5873,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
         }));
       } else if (mode === "editors") {
         this.setBadge("Editors", "is-content");
-        const editorResults = this.editorSearcher.search(body, 60);
+        const editorResults = this.editorSearcher.search(body, RESULT_LIMIT);
         if (generation !== this.searchGeneration) return;
         this.items = editorResults.map((r) => ({
           kind: "editor",
@@ -5865,7 +5956,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
           frecency: this.plugin.settings.useFrecency ? this.plugin.settings.fileFrecency : void 0,
           ranking: this.plugin.settings.ranking,
           rankingMode: (_h = workflow == null ? void 0 : workflow.rankingMode) != null ? _h : profile == null ? void 0 : profile.rankingMode,
-          limit: isEmptyQuery ? 40 : 50
+          limit: isEmptyQuery ? FILE_BROWSE_LIMIT : FILE_QUERY_LIMIT
         });
         this.items = fileResults.map((r) => ({
           kind: "file",
@@ -6011,7 +6102,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       });
     }
     const bookmarkedPaths = new Set(this.plugin.getBookmarkedPaths());
-    return linked.slice(0, 60).map((file, index) => this.fileToResult(file, 1e3 - index, bookmarkedPaths));
+    return linked.slice(0, RESULT_LIMIT).map((file, index) => this.fileToResult(file, 1e3 - index, bookmarkedPaths));
   }
   /** The highest-scoring fuzzy match for `q`, not just the first substring hit. */
   bestFileMatch(files, q) {
@@ -6048,7 +6139,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       });
     }
     rows.sort((a, b) => b.score - a.score || a.folder.path.localeCompare(b.folder.path));
-    return rows.slice(0, 60).map((row) => ({
+    return rows.slice(0, RESULT_LIMIT).map((row) => ({
       kind: "folder",
       folder: row.folder,
       matchIndices: row.indices
@@ -6271,7 +6362,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       });
     }
     rows.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
-    return rows.slice(0, 60).map((row) => ({
+    return rows.slice(0, RESULT_LIMIT).map((row) => ({
       kind: "snippet",
       id: row.id,
       name: row.name,
@@ -6310,6 +6401,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
   }
   renderLoading() {
     this.resultsEl.empty();
+    this.renderedSelectedIndex = -1;
     this.resultsEl.addClass("vault-spotlight-loading");
     for (let i = 0; i < 5; i++) {
       const row = this.resultsEl.createDiv({ cls: "vault-spotlight-skeleton" });
@@ -6325,6 +6417,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       this.loadingTimer = null;
     }
     this.resultsEl.empty();
+    this.renderedSelectedIndex = -1;
     this.resultsEl.removeClass("vault-spotlight-loading");
     this.resultsEl.removeClass("is-searching");
     const empty = this.resultsEl.createDiv({ cls: "vault-spotlight-empty" });
@@ -6393,37 +6486,19 @@ var SpotlightModal = class extends import_obsidian9.Modal {
           attr: { type: "button", tabindex: "-1", "aria-hidden": "true" }
         });
         (0, import_obsidian9.setIcon)(starBtn, starItem.isStarred ? "star" : "star-off");
-        starBtn.addEventListener("mousedown", (evt) => {
-          evt.preventDefault();
-          evt.stopPropagation();
-          starItem.isStarred = this.plugin.toggleStar(starItem.file.path);
-          (0, import_obsidian9.setIcon)(starBtn, starItem.isStarred ? "star" : "star-off");
-          row.toggleClass("is-starred", starItem.isStarred);
-        });
-      }
-      row.addEventListener("mouseenter", () => {
-        if (this.suppressHoverSelect) return;
-        this.selectedIndex = index;
-        this.updateSelectionHighlight();
-      });
-      row.addEventListener("mousedown", (evt) => {
-        if (evt.target.closest(".vault-spotlight-star-btn")) return;
-        evt.preventDefault();
-        this.selectedIndex = index;
-        void this.activateSelection();
-      });
-      if (file) {
-        row.addEventListener("contextmenu", (evt) => {
-          evt.preventDefault();
-          this.selectedIndex = index;
-          this.updateSelectionHighlight();
-          this.openActionsMenu(item, evt);
-        });
       }
     });
+    this.renderedSelectedIndex = this.selectedIndex;
     const selectedRow = this.resultsEl.querySelector(".is-selected");
     if (selectedRow == null ? void 0 : selectedRow.id) this.inputEl.setAttribute("aria-activedescendant", selectedRow.id);
     else this.inputEl.removeAttribute("aria-activedescendant");
+  }
+  /** Resolve the result index for a delegated list event, or null if off-row. */
+  rowIndexFromEvent(evt) {
+    const row = evt.target.closest(".vault-spotlight-item");
+    if (!row || !this.resultsEl.contains(row)) return null;
+    const index = Number(row.dataset.index);
+    return Number.isInteger(index) && index >= 0 && index < this.items.length ? index : null;
   }
   applyRowState(row, index) {
     const selected = index === this.selectedIndex;
@@ -6438,12 +6513,14 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     }
   }
   updateSelectionHighlight() {
-    const rows = this.resultsEl.querySelectorAll(".vault-spotlight-item");
-    rows.forEach((row) => {
-      const index = Number(row.dataset.index);
-      this.applyRowState(row, index);
-    });
-    const selected = this.resultsEl.querySelector(".is-selected");
+    const prev = this.renderedSelectedIndex;
+    if (prev >= 0 && prev !== this.selectedIndex) {
+      const prevRow = this.resultsEl.querySelector(`.vault-spotlight-item[data-index="${prev}"]`);
+      if (prevRow) this.applyRowState(prevRow, prev);
+    }
+    const selected = this.resultsEl.querySelector(`.vault-spotlight-item[data-index="${this.selectedIndex}"]`);
+    if (selected) this.applyRowState(selected, this.selectedIndex);
+    this.renderedSelectedIndex = this.selectedIndex;
     selected == null ? void 0 : selected.scrollIntoView({ block: "nearest" });
     if (selected == null ? void 0 : selected.id) this.inputEl.setAttribute("aria-activedescendant", selected.id);
     else this.inputEl.removeAttribute("aria-activedescendant");
@@ -6452,12 +6529,15 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     this.updatePreview();
   }
   renderFooter() {
-    var _a, _b;
+    var _a, _b, _c;
+    const selected = (_a = this.items[this.selectedIndex]) != null ? _a : null;
+    const sig = `${(_b = selected == null ? void 0 : selected.kind) != null ? _b : "none"}|${selected && itemFile(selected) ? "f" : ""}`;
+    if (sig === this.footerSig) return;
+    this.footerSig = sig;
     const shortcuts = this.shortcutsEl;
     shortcuts.empty();
-    const selected = (_a = this.items[this.selectedIndex]) != null ? _a : null;
     for (const hint of getShortcutHints({
-      itemKind: (_b = selected == null ? void 0 : selected.kind) != null ? _b : null,
+      itemKind: (_c = selected == null ? void 0 : selected.kind) != null ? _c : null,
       defaultNewTab: this.plugin.settings.defaultNewTab,
       isPro: this.plugin.settings.isPro,
       modifierLabel: this.modifierLabel
@@ -6710,12 +6790,22 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     if (!file) return;
     const leaf = target === null ? this.app.workspace.getLeaf(false) : this.app.workspace.getLeaf(target);
     await leaf.openFile(file);
+    this.seekToItemLine(leaf, item);
+  }
+  /**
+   * After opening a file, place the cursor on the item's 1-based line and scroll
+   * it into view — for content/heading/symbol rows in a markdown view. Shared by
+   * openItem and the context-menu open handlers so the two can't drift (the menu
+   * previously set the cursor but forgot to scroll the line into view).
+   */
+  seekToItemLine(leaf, item) {
     const line = item.kind === "content" || item.kind === "heading" || item.kind === "symbol" ? item.line : null;
-    if (line !== null && file.extension === "md" && leaf.view instanceof import_obsidian9.MarkdownView) {
-      const editor = leaf.view.editor;
-      editor.setCursor({ line: line - 1, ch: 0 });
-      editor.scrollIntoView({ from: { line: line - 1, ch: 0 }, to: { line: line - 1, ch: 0 } }, true);
-    }
+    if (line === null) return;
+    const file = itemFile(item);
+    if (!file || file.extension !== "md" || !(leaf.view instanceof import_obsidian9.MarkdownView)) return;
+    const pos = { line: line - 1, ch: 0 };
+    leaf.view.editor.setCursor(pos);
+    leaf.view.editor.scrollIntoView({ from: pos, to: pos }, true);
   }
   async createAndOpen(rawName) {
     var _a, _b;
@@ -6824,7 +6914,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
           profileId: this.plugin.settings.activeProfileId,
           rankingMode: (_a = this.currentProfile()) == null ? void 0 : _a.rankingMode
         });
-        this.plugin.settings.workflowPresets = [workflow, ...this.plugin.settings.workflowPresets].slice(0, 20);
+        this.plugin.settings.workflowPresets = [workflow, ...this.plugin.settings.workflowPresets].slice(0, MAX_WORKFLOW_PRESETS);
         this.activeWorkflowId = workflow.id;
         void this.plugin.saveSettings();
         new import_obsidian9.Notice("Vault Spotlight: workflow saved.");
@@ -7038,78 +7128,21 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       run: () => this.saveCurrentProfile()
     });
     if (this.resultItemsForBatch().length > 0) {
-      actions.push(
-        {
-          id: "copy-results",
-          name: "Copy results as Markdown",
-          description: "Copy selected results, or the current result list, as Markdown links.",
-          requiresPro: true,
-          run: () => copyResultsAsMarkdown(this.batchContext())
-        },
-        {
-          id: "export-results",
-          name: "Export results to note",
-          description: "Create a Markdown note containing selected/search results.",
-          requiresPro: true,
-          run: () => exportResultsToNote(this.batchContext())
-        },
-        {
-          id: "batch-add-tag",
-          name: "Batch add tag",
-          description: "Append a tag to selected Markdown files.",
-          requiresPro: true,
-          run: () => batchAddTag(this.batchContext())
-        },
-        {
-          id: "batch-remove-tag",
-          name: "Batch remove tag",
-          description: "Remove a tag from selected Markdown files.",
-          requiresPro: true,
-          run: () => batchRemoveTag(this.batchContext())
-        },
-        {
-          id: "batch-set-property",
-          name: "Batch set property",
-          description: "Set a frontmatter property on selected Markdown files.",
-          requiresPro: true,
-          run: () => batchSetProperty(this.batchContext())
-        },
-        {
-          id: "batch-move",
-          name: "Batch move files",
-          description: "Move selected files into a target folder.",
-          requiresPro: true,
-          run: () => batchMoveFiles(this.batchContext())
-        },
-        {
-          id: "batch-star",
-          name: "Batch star results",
-          description: "Add selected/current result files to Starred pins.",
-          requiresPro: true,
-          run: () => batchSetStarred(this.batchContext(), true)
-        },
-        {
-          id: "batch-unstar",
-          name: "Batch unstar results",
-          description: "Remove selected/current result files from Starred pins.",
-          requiresPro: true,
-          run: () => batchSetStarred(this.batchContext(), false)
-        },
-        {
-          id: "create-moc",
-          name: "Create MOC from results",
-          description: "Create a grouped index note from selected/current results.",
-          requiresPro: true,
-          run: () => createMocFromResults(this.batchContext())
-        },
-        {
-          id: "append-links",
-          name: "Append links to active note",
-          description: "Append selected/current result links to the active Markdown note.",
-          requiresPro: true,
-          run: () => appendLinksToActiveNote(this.batchContext())
-        }
-      );
+      const batchActions = [
+        ["copy-results", "Copy results as Markdown", "Copy selected results, or the current result list, as Markdown links.", () => copyResultsAsMarkdown(this.batchContext())],
+        ["export-results", "Export results to note", "Create a Markdown note containing selected/search results.", () => exportResultsToNote(this.batchContext())],
+        ["batch-add-tag", "Batch add tag", "Append a tag to selected Markdown files.", () => batchAddTag(this.batchContext())],
+        ["batch-remove-tag", "Batch remove tag", "Remove a tag from selected Markdown files.", () => batchRemoveTag(this.batchContext())],
+        ["batch-set-property", "Batch set property", "Set a frontmatter property on selected Markdown files.", () => batchSetProperty(this.batchContext())],
+        ["batch-move", "Batch move files", "Move selected files into a target folder.", () => batchMoveFiles(this.batchContext())],
+        ["batch-star", "Batch star results", "Add selected/current result files to Starred pins.", () => batchSetStarred(this.batchContext(), true)],
+        ["batch-unstar", "Batch unstar results", "Remove selected/current result files from Starred pins.", () => batchSetStarred(this.batchContext(), false)],
+        ["create-moc", "Create MOC from results", "Create a grouped index note from selected/current results.", () => createMocFromResults(this.batchContext())],
+        ["append-links", "Append links to active note", "Append selected/current result links to the active Markdown note.", () => appendLinksToActiveNote(this.batchContext())]
+      ];
+      for (const [id, name, description, run] of batchActions) {
+        actions.push({ id, name, description, requiresPro: true, run });
+      }
       if (integrations.omnisearch) {
         actions.push({
           id: "open-omnisearch",
@@ -7159,16 +7192,13 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     var _a;
     const file = itemFile(item);
     if (!file) return;
-    const line = item.kind === "content" || item.kind === "heading" || item.kind === "symbol" ? item.line : null;
     const menu = new import_obsidian9.Menu();
     const openIn = (paneType) => {
       this.close();
       void (async () => {
         const leaf = this.app.workspace.getLeaf(paneType);
         await leaf.openFile(file);
-        if (line !== null && file.extension === "md" && leaf.view instanceof import_obsidian9.MarkdownView) {
-          leaf.view.editor.setCursor({ line: line - 1, ch: 0 });
-        }
+        this.seekToItemLine(leaf, item);
         this.plugin.trackRecent(file.path);
       })();
     };
@@ -7617,14 +7647,7 @@ var RipgrepSearcher = class {
     }
     args.push("--", anchor, ".");
     const needAll = multi ? tokens.map((t) => t.toLowerCase()) : null;
-    if (this.currentChild) {
-      this.currentChild.superseded = true;
-      try {
-        this.currentChild.kill();
-      } catch (e) {
-      }
-      this.currentChild = null;
-    }
+    this.dispose();
     return new Promise((resolve) => {
       let child;
       try {
@@ -8014,6 +8037,22 @@ var WorkerIndex = class _WorkerIndex {
 };
 
 // src/search/ContentSearcher.ts
+function snippetMatchIndices(snippet, tokens) {
+  if (tokens.length === 0) return [];
+  const low = snippet.toLowerCase();
+  const marked = /* @__PURE__ */ new Set();
+  for (const token of tokens) {
+    if (!token) continue;
+    let from = 0;
+    for (; ; ) {
+      const at = low.indexOf(token, from);
+      if (at === -1) break;
+      for (let k = at; k < at + token.length; k++) marked.add(k);
+      from = at + token.length;
+    }
+  }
+  return Array.from(marked).sort((a, b) => a - b);
+}
 var ContentSearcher = class {
   constructor(app, ripgrepCommand = "rg") {
     this.app = app;
@@ -8070,8 +8109,11 @@ var ContentSearcher = class {
       });
     }
     if (base === null) base = await this.searchVaultIndex(tokens, limit, excluded);
-    if (extras.length === 0) return base;
-    return this.mergeResults(base, extras, limit);
+    const results = extras.length === 0 ? base : this.mergeResults(base, extras, limit);
+    for (const result of results) {
+      result.matchIndices = snippetMatchIndices(result.snippet, tokens);
+    }
+    return results;
   }
   async searchVaultIndex(tokens, limit, excluded) {
     const worker = this.getWorkerIndex();
@@ -8167,7 +8209,7 @@ var ContentSearcher = class {
     (_a = this.workerIndex) == null ? void 0 : _a.removeFile(path);
     this.index.delete(path);
   }
-  /** Release the worker when the plugin unloads. */
+  /** Release the worker and any in-flight ripgrep process when the plugin unloads. */
   dispose() {
     var _a;
     this.disposed = true;
@@ -8617,7 +8659,6 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
     }
     const customSearchIds = new Set(this.settings.customSearches.map((search) => search.id));
     this.settings.pinnedCustomSearchIds = this.settings.pinnedCustomSearchIds.filter((id) => typeof id === "string" && customSearchIds.has(id));
-    this.settings.workflowPresets = this.settings.workflowPresets.slice(0, 25);
     this.settings.recentPaths = this.settings.recentPaths.slice(0, this.settings.maxRecent);
     this.settings.starredPaths = this.settings.starredPaths.slice(0, this.settings.maxStarred);
   }

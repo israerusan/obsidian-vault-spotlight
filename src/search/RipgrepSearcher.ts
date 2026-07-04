@@ -194,15 +194,7 @@ export class RipgrepSearcher {
 
 		// A new keystroke supersedes any still-running search: kill it so fast
 		// typing can't stack up concurrent full-vault rg processes.
-		if (this.currentChild) {
-			this.currentChild.superseded = true;
-			try {
-				this.currentChild.kill();
-			} catch {
-				// Process may have already exited.
-			}
-			this.currentChild = null;
-		}
+		this.dispose();
 
 		return new Promise<ContentSearchResult[] | null>((resolve) => {
 			let child: { kill: () => boolean; superseded?: boolean };

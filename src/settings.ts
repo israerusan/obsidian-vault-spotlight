@@ -24,6 +24,26 @@ export function safeHttpUrl(url: string, fallback: string): string {
 	return fallback;
 }
 
+/**
+ * Create an outbound link that is always safe: the href is sanitised to http(s)
+ * (a stored "javascript:" value can't become a clickable script — self-XSS), and
+ * it opens in a new tab with rel="noopener noreferrer". Every external link in the
+ * plugin (settings tab + modal Pro CTA) goes through here so none forgets a guard.
+ */
+export function createExternalLink(
+	parent: HTMLElement,
+	options: { text: string; url: string; fallback: string; cls?: string }
+): HTMLAnchorElement {
+	const link = parent.createEl("a", {
+		cls: options.cls,
+		text: options.text,
+		href: safeHttpUrl(options.url, options.fallback),
+	});
+	link.setAttr("target", "_blank");
+	link.setAttr("rel", "noopener noreferrer");
+	return link;
+}
+
 export type ModePrefixes = Record<
 	"content" | "commands" | "headings" | "symbols" | "links" | "editors" | "folders" | "capture" | "snippets",
 	string
@@ -208,13 +228,12 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 	/** Inline "Upgrade to Pro" link appended to a locked row's description. */
 	private appendUpgrade(setting: Setting): void {
 		setting.descEl.appendText(" ");
-		const link = setting.descEl.createEl("a", {
+		createExternalLink(setting.descEl, {
 			cls: "vault-spotlight-upgrade-inline",
 			text: "Upgrade to Pro",
-			href: safeHttpUrl(this.plugin.settings.purchaseUrl, DEFAULT_SETTINGS.purchaseUrl),
+			url: this.plugin.settings.purchaseUrl,
+			fallback: DEFAULT_SETTINGS.purchaseUrl,
 		});
-		link.setAttr("target", "_blank");
-		link.setAttr("rel", "noopener noreferrer");
 	}
 
 	display(): void {
@@ -254,15 +273,12 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			status.createEl("p", {
 				text: "Free tier active. Upgrade to unlock content, heading & link search, live preview, snippets, saved workflows, batch actions, and more.",
 			});
-			const link = status.createEl("a", {
+			createExternalLink(status, {
 				cls: "vault-spotlight-pro-btn",
 				text: "Get Vault Spotlight Pro",
-				// Only render http(s) URLs — a stored "javascript:" value would
-				// otherwise become a clickable script link (self-XSS) in the pane.
-				href: safeHttpUrl(this.plugin.settings.purchaseUrl, DEFAULT_SETTINGS.purchaseUrl),
+				url: this.plugin.settings.purchaseUrl,
+				fallback: DEFAULT_SETTINGS.purchaseUrl,
 			});
-			link.setAttr("target", "_blank");
-			link.setAttr("rel", "noopener noreferrer");
 		}
 
 		new Setting(containerEl).setName("General").setHeading();

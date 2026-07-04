@@ -16,6 +16,11 @@ export function findOutlinks(files, resolvedLinks, sourcePath) {
 		.map((path) => byPath.get(path));
 }
 
+/**
+ * Rank notes that share tags with the target, most-shared first. Not yet wired to
+ * a UI (no production caller); kept and tested as the building block for a future
+ * "related notes" view, alongside findBacklinks/findOutlinks in this module.
+ */
 export function findRelatedBySharedTags(rows, targetPath) {
 	const target = rows.find((row) => row.path === targetPath);
 	if (!target) return [];
