@@ -1603,7 +1603,15 @@ export class SpotlightModal extends Modal {
 				new Notice("Vault Spotlight: Pro required for this action.");
 				return;
 			}
-			await selected.action.run();
+			// activateSelection is invoked as a fire-and-forget `void ...` from the
+			// key handlers, so a rejecting action (e.g. openFile on a locked note)
+			// would surface as an unhandled rejection. Contain it and tell the user.
+			try {
+				await selected.action.run();
+			} catch (err) {
+				console.error("[VaultSpotlight] action failed", err);
+				new Notice("Vault Spotlight: action failed.");
+			}
 			return;
 		}
 
@@ -1771,7 +1779,9 @@ export class SpotlightModal extends Modal {
 			initial: "New profile",
 			cta: "Save profile",
 			onSubmit: (name) => {
-				const profile = createProfileFromSettings(name, this.plugin.settings, this.actionReturnMode || this.mode, this.actionReturnQuery || this.inputEl.value);
+				const mode = this.actionContext ? this.actionReturnMode : this.mode;
+				const query = this.actionContext ? this.actionReturnQuery : this.inputEl.value;
+				const profile = createProfileFromSettings(name, this.plugin.settings, mode, query);
 				const exists = this.plugin.settings.searchProfiles.some((p) => p.id === profile.id);
 				this.plugin.settings.searchProfiles = [
 					...this.plugin.settings.searchProfiles.filter((p) => p.id !== profile.id),
@@ -1785,8 +1795,14 @@ export class SpotlightModal extends Modal {
 	}
 
 	private saveCurrentWorkflow(): void {
-		const mode = this.actionReturnMode || this.mode;
-		const query = (this.actionReturnQuery || this.inputEl.value).trim();
+		// Reachable via the Mod+S shortcut whether or not the action palette is
+		// open. With the palette open the live input is cleared, so the real
+		// mode/query live in actionReturn*; otherwise they hold defaults ("files"/
+		// "") and the current mode/input are authoritative. Key off actionContext
+		// rather than a truthiness fallback — "files" is truthy, so `|| this.mode`
+		// could never reach the live mode and every save was recorded as "files".
+		const mode = this.actionContext ? this.actionReturnMode : this.mode;
+		const query = (this.actionContext ? this.actionReturnQuery : this.inputEl.value).trim();
 		if (!canSaveWorkflowPreset(this.plugin.settings.workflowPresets, this.plugin.settings.isPro)) {
 			new Notice("Vault Spotlight: workflows require Pro and a non-empty search.");
 			return;
@@ -2313,12 +2329,18 @@ export class SpotlightModal extends Modal {
 		// open, so these fire regardless of which element inside the modal holds
 		// DOM focus. Typed characters are left untouched here so they flow into
 		// the focused input natively.
+		// While an IME candidate window is open (evt.isComposing / keyCode 229),
+		// these keys belong to the composition — navigating the result list or
+		// activating a result would discard the in-progress text. Let them through
+		// to the input untouched, matching Obsidian's own suggesters.
 		this.scope.register([], "ArrowDown", (evt) => {
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			this.moveSelection(1);
 			return false;
 		});
 		this.scope.register([], "ArrowUp", (evt) => {
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			this.moveSelection(-1);
 			return false;
@@ -2356,6 +2378,9 @@ export class SpotlightModal extends Modal {
 			return false;
 		});
 		this.scope.register([], "Enter", (evt) => {
+			// Enter confirms the IME candidate mid-composition — don't activate a
+			// result and close the modal out from under the user's input.
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			void this.activateSelection();
 			return false;
@@ -2389,6 +2414,9 @@ export class SpotlightModal extends Modal {
 			return false;
 		});
 		this.scope.register([], "Escape", (evt) => {
+			// Escape cancels the IME composition first; only unwind modal state
+			// once there's no active composition to dismiss.
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			if (this.actionContext) this.closeActionPalette();
 			else if (this.drillFile) this.exitDrill();
@@ -2396,11 +2424,13 @@ export class SpotlightModal extends Modal {
 			return false;
 		});
 		this.scope.register([], "Tab", (evt) => {
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			this.cycleMode(1);
 			return false;
 		});
 		this.scope.register(["Shift"], "Tab", (evt) => {
+			if (evt.isComposing) return true;
 			evt.preventDefault();
 			this.cycleMode(-1);
 			return false;

@@ -63,6 +63,8 @@ function candidateCommands(configured: string): string[] {
 export class RipgrepSearcher {
 	/** The command that answered `--version`, or null when none did. */
 	private resolvedCommand: string | null | undefined = undefined;
+	/** In-flight probe, shared so fast typing doesn't launch duplicate cascades. */
+	private resolvePromise: Promise<string | null> | null = null;
 	private currentChild: { kill: () => boolean; superseded?: boolean } | null = null;
 
 	constructor(
@@ -78,30 +80,38 @@ export class RipgrepSearcher {
 	 * Try the configured command, then well-known install locations, caching
 	 * whichever answers `--version` first.
 	 */
-	private async resolveCommand(): Promise<string | null> {
-		if (this.resolvedCommand !== undefined) return this.resolvedCommand;
-		const cp = getChildProcess();
-		if (!cp) {
+	private resolveCommand(): Promise<string | null> {
+		if (this.resolvedCommand !== undefined) return Promise.resolve(this.resolvedCommand);
+		// Coalesce concurrent callers (fast typing) onto one probe cascade instead
+		// of each re-running the serial candidate loop and its `rg --version` spawns.
+		if (this.resolvePromise) return this.resolvePromise;
+		this.resolvePromise = (async () => {
+			const cp = getChildProcess();
+			if (!cp) {
+				this.resolvedCommand = null;
+				return null;
+			}
+			for (const candidate of candidateCommands(this.command)) {
+				const ok = await new Promise<boolean>((resolve) => {
+					try {
+						cp.execFile(candidate, ["--version"], { timeout: 3000, windowsHide: true }, (error) =>
+							resolve(!error)
+						);
+					} catch {
+						resolve(false);
+					}
+				});
+				if (ok) {
+					this.resolvedCommand = candidate;
+					return candidate;
+				}
+			}
 			this.resolvedCommand = null;
 			return null;
-		}
-		for (const candidate of candidateCommands(this.command)) {
-			const ok = await new Promise<boolean>((resolve) => {
-				try {
-					cp.execFile(candidate, ["--version"], { timeout: 3000, windowsHide: true }, (error) =>
-						resolve(!error)
-					);
-				} catch {
-					resolve(false);
-				}
-			});
-			if (ok) {
-				this.resolvedCommand = candidate;
-				return candidate;
-			}
-		}
-		this.resolvedCommand = null;
-		return null;
+		})().finally(() => {
+			this.resolvePromise = null;
+		});
+		return this.resolvePromise;
 	}
 
 	/**
@@ -169,7 +179,11 @@ export class RipgrepSearcher {
 
 		for (const folder of options.excludeFolders ?? []) {
 			const f = folder.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-			if (f) args.push("-g", `!${f}/**`);
+			// --iglob (case-insensitive) so excluding "notes" also skips "Notes",
+			// matching the in-process fallback, which lowercases both sides. A
+			// case-sensitive -g here would leak excluded folders into rg results
+			// only, giving different output depending on whether rg resolved.
+			if (f) args.push("--iglob", `!${f}/**`);
 		}
 
 		// Search "." with cwd=vaultPath so rg emits vault-relative paths that
@@ -231,6 +245,19 @@ export class RipgrepSearcher {
 			}
 			this.currentChild = child;
 		});
+	}
+
+	/** Kill any in-flight rg process (plugin unload, or command change). */
+	dispose(): void {
+		if (this.currentChild) {
+			this.currentChild.superseded = true;
+			try {
+				this.currentChild.kill();
+			} catch {
+				// Process may have already exited.
+			}
+			this.currentChild = null;
+		}
 	}
 
 	private parseOutput(

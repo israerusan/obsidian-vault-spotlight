@@ -56,6 +56,7 @@ export class ContentSearcher {
 	}
 
 	setRipgrepCommand(command: string): void {
+		this.ripgrep.dispose();
 		this.ripgrep = new RipgrepSearcher(this.app, command);
 	}
 
@@ -229,6 +230,7 @@ export class ContentSearcher {
 	/** Release the worker when the plugin unloads. */
 	dispose(): void {
 		this.disposed = true;
+		this.ripgrep.dispose();
 		this.workerIndex?.dispose();
 		this.workerIndex = null;
 	}

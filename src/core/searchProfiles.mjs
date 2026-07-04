@@ -15,8 +15,8 @@ export function normalizeProfiles(rawProfiles) {
 	if (!Array.isArray(rawProfiles)) return [];
 	return rawProfiles
 		.filter((profile) => profile && typeof profile === "object")
-		.map((profile) => ({
-			id: cleanId(profile.id) || `profile-${Date.now()}`,
+		.map((profile, index) => ({
+			id: cleanId(profile.id) || `profile-${Date.now()}-${index}`,
 			name: String(profile.name || "Untitled profile").trim() || "Untitled profile",
 			defaultMode: PROFILE_MODES.has(profile.defaultMode) ? profile.defaultMode : "files",
 			defaultQuery: String(profile.defaultQuery || ""),

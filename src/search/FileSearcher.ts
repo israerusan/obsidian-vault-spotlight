@@ -142,9 +142,14 @@ export class FileSearcher {
 			} else if (ranking.preferRecentFiles && recentRank !== undefined) {
 				score += 1000 - recentRank * 10;
 			} else if (isBrowseMode) {
-				score += Math.max(0, boosts.browseMtimeHours - Math.floor((Date.now() - file.stat.mtime) / 3600000));
+				// Clamp age at 0: a future-dated mtime (clock skew, imported files)
+				// would otherwise make the subtracted term negative and inflate the
+				// boost above browseMtimeHours, pinning skewed files to the top.
+				const ageHours = Math.floor(Math.max(0, Date.now() - file.stat.mtime) / 3600000);
+				score += Math.max(0, boosts.browseMtimeHours - ageHours);
 			} else {
-				score += Math.max(0, boosts.queryMtimeDays - Math.floor((Date.now() - file.stat.mtime) / 86400000));
+				const ageDays = Math.floor(Math.max(0, Date.now() - file.stat.mtime) / 86400000);
+				score += Math.max(0, boosts.queryMtimeDays - ageDays);
 			}
 
 			if (ranking.preferOpenFiles && options.openPaths?.has(file.path)) score += 400;
