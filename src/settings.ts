@@ -3,6 +3,7 @@ import type VaultSpotlightPlugin from "./main";
 import { createProfileFromSettings } from "./core/searchProfiles.mjs";
 import { DEFAULT_RANKING_SETTINGS } from "./core/ranking.mjs";
 import { ensureStarterWorkflows } from "./core/workflowPresets.mjs";
+import { createSnippet, MAX_SNIPPETS } from "./core/snippets.mjs";
 import {
 	DEFAULT_ESCAPE_CHAR,
 	DEFAULT_MODE_PREFIXES,
@@ -22,7 +23,7 @@ export function safeHttpUrl(url: string, fallback: string): string {
 }
 
 export type ModePrefixes = Record<
-	"content" | "commands" | "headings" | "symbols" | "links" | "editors" | "folders",
+	"content" | "commands" | "headings" | "symbols" | "links" | "editors" | "folders" | "capture" | "snippets",
 	string
 >;
 
@@ -30,6 +31,12 @@ export interface CustomSearch {
 	id: string;
 	name: string;
 	query: string;
+}
+
+export interface Snippet {
+	id: string;
+	name: string;
+	body: string;
 }
 
 export interface SearchProfile {
@@ -101,6 +108,13 @@ export interface VaultSpotlightSettings {
 	escapeChar: string;
 	defaultNewTab: boolean;
 	recentCommandIds: string[];
+	enableCalculator: boolean;
+	currencyRates: string;
+	enableDateJump: boolean;
+	captureInboxPath: string;
+	captureMode: "append" | "prepend";
+	captureHeading: string;
+	snippets: Snippet[];
 }
 
 export const MAX_CUSTOM_SEARCHES = 50;
@@ -137,6 +151,13 @@ export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	escapeChar: DEFAULT_ESCAPE_CHAR,
 	defaultNewTab: false,
 	recentCommandIds: [],
+	enableCalculator: true,
+	currencyRates: "",
+	enableDateJump: true,
+	captureInboxPath: "",
+	captureMode: "append",
+	captureHeading: "",
+	snippets: [],
 };
 
 export const MAX_RECENT_COMMANDS = 25;
@@ -303,6 +324,41 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 				});
 			});
 
+		new Setting(containerEl).setName("Calculator & dates").setHeading();
+
+		new Setting(containerEl)
+			.setName("Inline calculator")
+			.setDesc("Type math, unit conversions, or percentages (e.g. 1234*0.19, 10 km to mi, 20% of 250) and press Enter to copy the answer.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.enableCalculator).onChange((value) => {
+					this.plugin.settings.enableCalculator = value;
+					void this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Currency rates")
+			.setDesc("One per line as CODE=rate, expressed in units per 1 USD (e.g. EUR=0.92). Used for offline currency conversion — you keep them current.")
+			.addTextArea((area) => {
+				area.setPlaceholder("USD=1\nEUR=0.92\nGBP=0.79");
+				area.setValue(this.plugin.settings.currencyRates);
+				area.inputEl.rows = 4;
+				area.onChange((value) => {
+					this.plugin.settings.currencyRates = value;
+					void this.plugin.saveSettings();
+				});
+			});
+
+		new Setting(containerEl)
+			.setName("Daily-note date jump")
+			.setDesc("Type a date like today, next friday, or in 3 weeks to open (or create) that day's daily note. Honors your Daily Notes / Periodic Notes settings.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.enableDateJump).onChange((value) => {
+					this.plugin.settings.enableDateJump = value;
+					void this.plugin.saveSettings();
+				})
+			);
+
 		new Setting(containerEl).setName("Opening & mode triggers").setHeading();
 
 		new Setting(containerEl)
@@ -323,6 +379,8 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			{ key: "links", name: "Links trigger", desc: "Backlinks and outlinks (Pro)." },
 			{ key: "editors", name: "Open editors trigger", desc: "Jump between open tabs and panes." },
 			{ key: "folders", name: "Folders trigger", desc: "Find a folder and browse its files." },
+			{ key: "capture", name: "Quick capture trigger", desc: "Append a note to your daily note or inbox without opening it." },
+			{ key: "snippets", name: "Snippets trigger", desc: "Insert reusable text snippets at the cursor (Pro)." },
 		];
 		for (const { key, name, desc } of prefixLabels) {
 			new Setting(containerEl)
@@ -425,6 +483,106 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 				);
 			}
 		);
+
+		new Setting(containerEl).setName("Quick capture").setHeading();
+		containerEl.createEl("p", {
+			cls: "vault-spotlight-hint-text",
+			text: "Type the capture trigger, jot a thought, and press Enter — it appends to today's daily note without opening it. Pro adds an inbox target, prepend, and a target heading.",
+		});
+
+		proSearch(
+			"Inbox note",
+			"Optional second capture target — a vault path like Inbox.md. Appears as an extra row in capture mode.",
+			(setting) => {
+				setting.addText((text) =>
+					text
+						.setPlaceholder("Inbox.md")
+						.setValue(this.plugin.settings.captureInboxPath)
+						.onChange((value) => {
+							this.plugin.settings.captureInboxPath = value.trim();
+							void this.plugin.saveSettings();
+						})
+				);
+			}
+		);
+
+		proSearch("Capture placement", "Add captured lines to the end (append) or top (prepend) of the target note.", (setting) => {
+			setting.addDropdown((dropdown) => {
+				dropdown
+					.addOption("append", "Append to end")
+					.addOption("prepend", "Prepend to top")
+					.setValue(this.plugin.settings.captureMode)
+					.onChange((value: "append" | "prepend") => {
+						this.plugin.settings.captureMode = value;
+						void this.plugin.saveSettings();
+					});
+			});
+		});
+
+		proSearch(
+			"Capture under heading",
+			"Optional heading (e.g. Log) to append captured lines beneath. Created if missing. Leave blank to use the placement above.",
+			(setting) => {
+				setting.addText((text) =>
+					text
+						.setPlaceholder("Log")
+						.setValue(this.plugin.settings.captureHeading)
+						.onChange((value) => {
+							this.plugin.settings.captureHeading = value.trim();
+							void this.plugin.saveSettings();
+						})
+				);
+			}
+		);
+
+		new Setting(containerEl).setName("Snippets (Pro)").setHeading();
+		const snippetList = containerEl.createDiv();
+		if (!this.plugin.settings.isPro) {
+			snippetList.createEl("p", {
+				text: "Unlock Pro to insert reusable text snippets with {{date}}, {{time}}, {{clipboard}}, {{selection}}, and {{cursor}} placeholders.",
+			});
+		} else {
+			new Setting(snippetList)
+				.setName("Add snippet")
+				.setDesc("Snippets appear in snippet mode and insert at the cursor. Placeholders: {{date}} {{time}} {{clipboard}} {{selection}} {{cursor}}.")
+				.addButton((button) =>
+					button.setButtonText("Add snippet").onClick(() => {
+						const snippet = createSnippet(`Snippet ${this.plugin.settings.snippets.length + 1}`, "");
+						this.plugin.settings.snippets = [...this.plugin.settings.snippets, snippet].slice(0, MAX_SNIPPETS);
+						void this.plugin.saveSettings().then(() => this.display());
+					})
+				);
+			if (this.plugin.settings.snippets.length === 0) {
+				snippetList.createEl("p", { text: "No snippets yet. Add one to insert boilerplate, callouts, or signatures from the launcher." });
+			} else {
+				for (const snippet of this.plugin.settings.snippets) {
+					const row = snippetList.createDiv({ cls: "vault-spotlight-snippet-row" });
+					const nameInput = row.createEl("input", { type: "text", cls: "vault-spotlight-snippet-name" });
+					nameInput.value = snippet.name;
+					nameInput.placeholder = "Name";
+					nameInput.addEventListener("change", () => {
+						snippet.name = nameInput.value.trim() || snippet.name;
+						// Resync the field so a whitespace-only entry doesn't leave the
+						// visible value diverged from the persisted name.
+						nameInput.value = snippet.name;
+						void this.plugin.saveSettings();
+					});
+					const bodyInput = row.createEl("textarea", { cls: "vault-spotlight-snippet-body" });
+					bodyInput.value = snippet.body;
+					bodyInput.rows = 2;
+					bodyInput.placeholder = "Snippet text with {{cursor}}";
+					bodyInput.addEventListener("change", () => {
+						snippet.body = bodyInput.value;
+						void this.plugin.saveSettings();
+					});
+					const remove = row.createEl("button", { text: "Remove" });
+					remove.addEventListener("click", () => {
+						this.plugin.settings.snippets = this.plugin.settings.snippets.filter((s) => s.id !== snippet.id);
+						void this.plugin.saveSettings().then(() => this.display());
+					});
+				}
+			}
+		}
 
 		new Setting(containerEl).setName("Starred files (Pro)").setHeading();
 		const starredList = containerEl.createDiv();

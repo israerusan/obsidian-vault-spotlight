@@ -10,7 +10,9 @@ export type SpotlightMode =
 	| "commands"
 	| "links"
 	| "editors"
-	| "folders";
+	| "folders"
+	| "capture"
+	| "snippets";
 
 export const MODE_ORDER: SpotlightMode[] = [
 	"files",
@@ -21,6 +23,8 @@ export const MODE_ORDER: SpotlightMode[] = [
 	"links",
 	"editors",
 	"folders",
+	"capture",
+	"snippets",
 ];
 
 export type ResultItem =
@@ -124,6 +128,33 @@ export type ResultItem =
 	| {
 			kind: "create";
 			name: string;
+	  }
+	| {
+			kind: "calc";
+			expression: string;
+			result: string;
+			detail: string;
+	  }
+	| {
+			kind: "datejump";
+			date: number;
+			label: string;
+			path: string;
+			exists: boolean;
+	  }
+	| {
+			kind: "capture";
+			text: string;
+			target: "daily" | "inbox";
+			label: string;
+			description: string;
+	  }
+	| {
+			kind: "snippet";
+			id: string;
+			name: string;
+			body: string;
+			matchIndices: number[];
 	  };
 
 export type SpotlightAction = {

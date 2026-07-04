@@ -5,7 +5,9 @@ export type TriggeredMode =
 	| "symbols"
 	| "links"
 	| "editors"
-	| "folders";
+	| "folders"
+	| "capture"
+	| "snippets";
 
 export type ModePrefixMap = Record<TriggeredMode, string>;
 

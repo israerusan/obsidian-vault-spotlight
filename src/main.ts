@@ -14,6 +14,7 @@ import { ContentSearcher } from "./search/ContentSearcher";
 import { normalizeProfiles } from "./core/searchProfiles.mjs";
 import { normalizeRankingSettings } from "./core/ranking.mjs";
 import { normalizeWorkflowPresets } from "./core/workflowPresets.mjs";
+import { normalizeSnippets } from "./core/snippets.mjs";
 import {
 	DEFAULT_ESCAPE_CHAR,
 	normalizeEscapeChar,
@@ -462,6 +463,14 @@ export default class VaultSpotlightPlugin extends Plugin {
 				: DEFAULT_ESCAPE_CHAR;
 		}
 		this.settings.defaultNewTab = this.settings.defaultNewTab === true;
+		// Delight-layer settings: coerce to safe shapes.
+		this.settings.enableCalculator = this.settings.enableCalculator !== false;
+		this.settings.enableDateJump = this.settings.enableDateJump !== false;
+		if (typeof this.settings.currencyRates !== "string") this.settings.currencyRates = "";
+		if (typeof this.settings.captureInboxPath !== "string") this.settings.captureInboxPath = "";
+		if (typeof this.settings.captureHeading !== "string") this.settings.captureHeading = "";
+		this.settings.captureMode = this.settings.captureMode === "prepend" ? "prepend" : "append";
+		this.settings.snippets = normalizeSnippets(this.settings.snippets);
 		this.settings.recentCommandIds = (Array.isArray(this.settings.recentCommandIds) ? this.settings.recentCommandIds : [])
 			.filter((id): id is string => typeof id === "string" && id.length > 0)
 			.slice(0, MAX_RECENT_COMMANDS);

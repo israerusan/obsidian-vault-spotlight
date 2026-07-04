@@ -6,9 +6,16 @@ Spotlight-style vault launcher for [Obsidian](https://obsidian.md). Open notes, 
 
 Vault Spotlight is a fast command center for large vaults: type a few letters to jump to notes, search by tags/properties, run commands, reopen recent work, and use Pro tools for content search, saved collections, workflow presets, ranking controls, result export, and batch actions.
 
-## Phase 1 highlights
+## New: the launcher that also *does* things
 
-This release rounds out the first paid-workflow layer:
+Most Obsidian switchers stop at finding notes. Vault Spotlight now brings the Raycast/Alfred "delight layer" into your vault — the quick actions you'd otherwise leave Obsidian for:
+
+- **Inline calculator & converter (Free)** — type `1234*0.19`, `20% of 250`, `10 km to mi`, `72f to c`, or `40 USD to EUR` right in the search bar; the answer appears on top, press `Enter` to copy or `Shift+Enter` to insert it at your cursor. Currency uses offline rates you control — no network, ever.
+- **Natural-language date jump (Free)** — type `today`, `tomorrow`, `next friday`, `in 3 weeks`, or `2026-07-24` to open (or create) that day's daily note. Honors your Daily Notes / Periodic Notes settings.
+- **Quick capture (Free)** — press `+`, jot a thought, and `Enter` appends it to today's daily note *without opening it*. Pro adds an inbox target, prepend, and append-under-a-heading placement.
+- **Snippet insertion (Pro)** — press `;` to fuzzy-find reusable snippets and insert them at the cursor, with `{{date}}`, `{{time}}`, `{{clipboard}}`, `{{selection}}`, and `{{cursor}}` placeholders.
+
+## Paid-workflow layer
 
 - Browse mode can surface reusable workflow presets before you type.
 - Search profiles and workflow presets can work together, so a workflow can reopen a saved context and query in one step.
@@ -18,6 +25,9 @@ This release rounds out the first paid-workflow layer:
 
 ## Free features
 
+- **Inline calculator & converter** — evaluate math, percentages, unit conversions, temperatures, and offline currency right in the query bar; `Enter` copies the answer, `Shift+Enter` inserts it at the cursor.
+- **Natural-language date jump** — open or create a daily note by typing `today`, `next friday`, `in 3 weeks`, or an ISO date.
+- **Quick capture** — press the capture trigger (`+`), type a thought, and `Enter` appends it to today's daily note without opening it.
 - **Fast fuzzy file launcher** — find notes by partial names, initials, or light typos, with recent files and open editors boosted automatically.
 - **Tag and property filters** — narrow results with queries like `#work`, `@status:done`, or a filename plus metadata filters.
 - **Command palette mode** — prefix with `:` or press `Tab` to search and run commands; recently run commands resurface on an empty query.
@@ -35,6 +45,8 @@ This release rounds out the first paid-workflow layer:
 
 ## Pro features ($8 one-time)
 
+- **Snippet insertion** — prefix with `;` to fuzzy-find reusable text snippets and insert them at the cursor, resolving `{{date}}`, `{{time}}`, `{{clipboard}}`, `{{selection}}`, and `{{cursor}}` placeholders.
+- **Capture targets** — add an inbox note, choose prepend vs append, and append captures beneath a specific heading.
 - **Content search** — prefix with `>` to search inside note bodies; multi-word queries require every word on the matching line. Without ripgrep, the built-in index runs in a background web worker, so typing stays smooth even on very large vaults.
 - **Ripgrep acceleration** — use `rg` when available for faster full-vault content search, with safe fallback to the built-in vault index. Common install locations (winget, scoop, chocolatey, Homebrew, VS Code's bundled rg) are auto-detected when `rg` isn't on your PATH.
 - **Heading jump** — search headings across the vault (`^` prefix) and open directly at the matching section; scope with `file#heading` and filter depth with `level:1-2`.
@@ -82,6 +94,11 @@ License keys are verified **offline** (Ed25519). No account, server, or subscrip
 | Area | Free | Pro |
 | --- | --- | --- |
 | File launcher, commands, symbols, editors, folders | Yes | Yes |
+| Inline calculator, converters, currency | Yes | Yes |
+| Natural-language date jump to daily notes | Yes | Yes |
+| Quick capture to daily note | Yes | Yes |
+| Capture to inbox / under a heading | No | Yes |
+| Snippet insertion with placeholders | No | Yes |
 | Metadata filters in file search | Yes | Yes |
 | Browse hints and trigger discoverability | Yes | Yes |
 | Body content search (`>`) | No | Yes |

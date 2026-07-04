@@ -137,6 +137,31 @@ export function renderResultRow(
 		title.setText(item.action.name);
 		titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.action.requiresPro ? "Pro action" : "Action" });
 		body.createDiv({ cls: "vault-spotlight-item-meta", text: item.action.description });
+	} else if (item.kind === "calc") {
+		row.addClass("is-calc");
+		setIcon(iconWrap, "calculator");
+		title.addClass("vault-spotlight-calc-result");
+		title.setText(item.result);
+		titleRow.createSpan({ cls: "vault-spotlight-item-badge is-star", text: "↵ Copy" });
+		body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.expression} · ${item.detail}` });
+	} else if (item.kind === "datejump") {
+		setIcon(iconWrap, "calendar-days");
+		title.setText(item.label);
+		titleRow.createSpan({
+			cls: item.exists ? "vault-spotlight-item-badge" : "vault-spotlight-item-badge is-star",
+			text: item.exists ? "Daily note" : "Create daily note",
+		});
+		body.createDiv({ cls: "vault-spotlight-item-meta", text: item.path });
+	} else if (item.kind === "capture") {
+		setIcon(iconWrap, "plus-circle");
+		title.setText(item.text || "Type something to capture…");
+		titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.label });
+		body.createDiv({ cls: "vault-spotlight-item-meta", text: item.description });
+	} else if (item.kind === "snippet") {
+		setIcon(iconWrap, "clipboard-type");
+		renderHighlightedText(title, item.name, item.matchIndices);
+		titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Snippet" });
+		body.createDiv({ cls: "vault-spotlight-item-snippet", text: item.body.replace(/\s+/g, " ").slice(0, 120) });
 	} else {
 		setIcon(iconWrap, "file-plus");
 		title.setText(`Create “${item.name}”`);

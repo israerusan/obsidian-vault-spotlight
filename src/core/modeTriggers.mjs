@@ -6,6 +6,8 @@ export const DEFAULT_MODE_PREFIXES = {
 	links: "~",
 	editors: "=",
 	folders: "/",
+	capture: "+",
+	snippets: ";",
 };
 
 export const DEFAULT_ESCAPE_CHAR = "!";
@@ -21,7 +23,7 @@ export function normalizeModePrefixes(raw) {
 	const taken = new Set();
 	// If a custom prefix steals another mode's default, the displaced mode
 	// gets the first free spare so no two modes ever share a trigger.
-	const spares = ["`", ";", ",", "'", "?", "%", "&", "*"];
+	const spares = ["`", ",", "'", "?", "%", "&", "*"];
 	for (const mode of Object.keys(DEFAULT_MODE_PREFIXES)) {
 		const value = typeof raw[mode] === "string" ? raw[mode].trim() : "";
 		let next =

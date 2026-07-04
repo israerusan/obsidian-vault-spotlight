@@ -7,6 +7,7 @@ import {
 	Modal,
 	TFile,
 	TFolder,
+	moment,
 	normalizePath,
 	setIcon,
 } from "obsidian";
@@ -25,6 +26,10 @@ import { activeProfile, createProfileFromSettings, type CoreSearchProfile } from
 import { canSaveWorkflowPreset, createWorkflowPreset, ensureStarterWorkflows, type WorkflowPreset } from "../core/workflowPresets.mjs";
 import { detectSearchIntegrations, type SearchIntegrations } from "../core/integrations.mjs";
 import { findBacklinks, findOutlinks } from "../core/linkGraph.mjs";
+import { evaluateExpression, parseCurrencyRates } from "../core/calculator.mjs";
+import { parseNaturalDate } from "../core/naturalDates.mjs";
+import { insertCapture } from "../core/capture.mjs";
+import { expandSnippet } from "../core/snippets.mjs";
 import {
 	MODE_ORDER,
 	itemFile,
@@ -241,6 +246,8 @@ export class SpotlightModal extends Modal {
 		const prefixes = this.plugin.settings.modePrefixes;
 		this.hintEl.empty();
 		const hints: Array<[string, string]> = [
+			["2+2", "calc"],
+			[prefixes.capture, "capture"],
 			["#journal", "tag"],
 			[prefixes.commands, "commands"],
 			[prefixes.symbols, "outline"],
@@ -249,6 +256,7 @@ export class SpotlightModal extends Modal {
 			[prefixes.content, "content"],
 			[prefixes.headings, "headings"],
 			[prefixes.links, "links"],
+			[prefixes.snippets, "snippets"],
 			["Tab", "cycle"],
 			[this.plugin.settings.escapeChar, "literal"],
 		];
@@ -345,18 +353,20 @@ export class SpotlightModal extends Modal {
 		}
 
 		try {
-			if ((mode === "content" || mode === "headings" || mode === "links") && !isPro) {
+			if ((mode === "content" || mode === "headings" || mode === "links" || mode === "snippets") && !isPro) {
 				this.setBadge("Pro", "is-pro");
 				this.items = [];
 				this.isLoading = false;
 				this.renderEmptyState(
 					"lock",
-					mode === "content" ? "Content search is a Pro feature" : mode === "headings" ? "Heading jump is a Pro feature" : "Links mode is a Pro feature",
+					mode === "content" ? "Content search is a Pro feature" : mode === "headings" ? "Heading jump is a Pro feature" : mode === "snippets" ? "Snippets are a Pro feature" : "Links mode is a Pro feature",
 					mode === "content"
 						? "Search inside note bodies with queries like > meeting notes."
 						: mode === "headings"
 							? "Jump straight to any heading across your vault."
-							: "Browse backlinks and outlinks for the active note or a matching note."
+							: mode === "snippets"
+								? "Insert reusable text snippets with date, time, clipboard, and cursor placeholders."
+								: "Browse backlinks and outlinks for the active note or a matching note."
 				);
 				this.updateStatus(0);
 				return;
@@ -511,6 +521,25 @@ export class SpotlightModal extends Modal {
 					this.updateStatus(0);
 					return;
 				}
+			} else if (mode === "capture") {
+				this.setBadge("Capture", "is-content");
+				this.items = this.captureItems(body);
+			} else if (mode === "snippets") {
+				this.setBadge("Snippets", "is-content");
+				this.items = this.snippetItems(body);
+				if (this.items.length === 0) {
+					this.isLoading = false;
+					const hasSnippets = this.plugin.settings.snippets.length > 0;
+					this.renderEmptyState(
+						"clipboard-type",
+						hasSnippets ? "No matching snippets" : "No snippets yet",
+						hasSnippets
+							? "Try a different snippet name."
+							: "Add reusable snippets in Settings → Vault Spotlight, then insert them here."
+					);
+					this.updateStatus(0);
+					return;
+				}
 			} else {
 				this.setBadge(isEmptyQuery ? "Browse" : "Files", null);
 				const parsed = tokenizeQuery(body);
@@ -602,6 +631,14 @@ export class SpotlightModal extends Modal {
 							isPinned: pinned.has(search.id),
 						}));
 					this.items = [...collections, ...this.items];
+				}
+
+				// Ambient calculator / date-jump: when the query is a calculation or
+				// a natural-language date, surface a result row above the file list.
+				// Free — it's the top-of-funnel "wait, it does that?" moment.
+				if (!isEmptyQuery) {
+					const smartItems = this.computeSmartItems(body);
+					if (smartItems.length > 0) this.items = [...smartItems, ...this.items];
 				}
 
 				// Offer to create a note when a plain name search finds nothing.
@@ -737,6 +774,249 @@ export class SpotlightModal extends Modal {
 			folder: row.folder,
 			matchIndices: row.indices,
 		}));
+	}
+
+	// --- Delight layer: calculator, dates, capture, snippets -----------------
+
+	private currencyRates(): Record<string, number> {
+		return parseCurrencyRates(this.plugin.settings.currencyRates);
+	}
+
+	/**
+	 * Ambient calculator / natural-language date rows for the files mode. Returns
+	 * at most one row (a calculation takes precedence over a date), or none when
+	 * the query is ordinary text — so plain searches are never intercepted.
+	 */
+	private computeSmartItems(body: string): ResultItem[] {
+		const text = body.trim();
+		if (!text) return [];
+		// Dates are checked BEFORE the calculator so an ISO date like 2026-07-24
+		// resolves to a daily-note jump instead of being evaluated as 2026-7-24.
+		if (this.plugin.settings.enableDateJump) {
+			const date = parseNaturalDate(text);
+			if (date) {
+				const { path, exists } = this.resolveDatePath(date.date);
+				return [{ kind: "datejump", date: date.date, label: date.label, path, exists }];
+			}
+		}
+		if (this.plugin.settings.enableCalculator) {
+			const calc = evaluateExpression(text, { rates: this.currencyRates() });
+			if (calc) {
+				const detail =
+					calc.kind === "currency"
+						? "Currency · your rates"
+						: calc.kind === "unit"
+							? "Unit conversion"
+							: calc.kind === "temp"
+								? "Temperature"
+								: calc.kind === "percent"
+									? "Percentage"
+									: "Calculator";
+				return [{ kind: "calc", expression: calc.expression, result: calc.formatted, detail }];
+			}
+		}
+		return [];
+	}
+
+	private copyCalcResult(item: Extract<ResultItem, { kind: "calc" }>): void {
+		void copyToClipboard(item.result, `Copied ${item.result}`);
+		this.close();
+	}
+
+	private insertCalcResult(item: Extract<ResultItem, { kind: "calc" }>): void {
+		const editor = this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
+		if (!editor) {
+			this.copyCalcResult(item);
+			return;
+		}
+		this.close();
+		editor.replaceSelection(item.result);
+		editor.focus();
+	}
+
+	/** Daily-note folder + moment format from the core or Periodic Notes plugin. */
+	private dailyNoteConfig(): { folder: string; format: string } {
+		const internal = (
+			this.app as unknown as {
+				internalPlugins?: {
+					getPluginById?: (
+						id: string
+					) => { instance?: { options?: { folder?: string; format?: string } } } | null;
+				};
+			}
+		).internalPlugins;
+		const opts = internal?.getPluginById?.("daily-notes")?.instance?.options;
+		if (opts && (opts.format || opts.folder !== undefined)) {
+			return { folder: (opts.folder ?? "").trim(), format: (opts.format || "YYYY-MM-DD").trim() };
+		}
+		const periodic = (
+			this.app as unknown as {
+				plugins?: { plugins?: Record<string, { settings?: { daily?: { folder?: string; format?: string } } }> };
+			}
+		).plugins?.plugins?.["periodic-notes"];
+		const pd = periodic?.settings?.daily;
+		if (pd && (pd.format || pd.folder)) {
+			return { folder: (pd.folder ?? "").trim(), format: (pd.format || "YYYY-MM-DD").trim() };
+		}
+		return { folder: "", format: "YYYY-MM-DD" };
+	}
+
+	private resolveDatePath(ms: number): { path: string; exists: boolean } {
+		const { folder, format } = this.dailyNoteConfig();
+		const name = moment(ms).format(format);
+		const path = normalizePath(folder ? `${folder}/${name}.md` : `${name}.md`);
+		const exists = this.app.vault.getAbstractFileByPath(path) instanceof TFile;
+		return { path, exists };
+	}
+
+	/** Create the parent folder chain for `filePath` if it doesn't exist yet. */
+	private async ensureFolder(filePath: string): Promise<void> {
+		const slash = filePath.lastIndexOf("/");
+		if (slash === -1) return;
+		const dir = filePath.slice(0, slash);
+		if (!dir || this.app.vault.getAbstractFileByPath(dir)) return;
+		try {
+			await this.app.vault.createFolder(dir);
+		} catch {
+			// Already created by a concurrent op — safe to ignore.
+		}
+	}
+
+	private async openOrCreateDatedNote(ms: number): Promise<void> {
+		const { path } = this.resolveDatePath(ms);
+		try {
+			let file = this.app.vault.getAbstractFileByPath(path);
+			if (!(file instanceof TFile)) {
+				await this.ensureFolder(path);
+				file = await this.app.vault.create(path, "");
+			}
+			if (file instanceof TFile) {
+				await this.app.workspace.getLeaf(false).openFile(file);
+				this.plugin.trackRecent(file.path);
+			}
+		} catch (err) {
+			console.error("[VaultSpotlight] open daily note failed", err);
+			new Notice("Vault Spotlight: could not open the daily note.");
+		}
+	}
+
+	private captureItems(body: string): ResultItem[] {
+		const text = body.trim();
+		const dailyName = moment().format(this.dailyNoteConfig().format);
+		const items: ResultItem[] = [
+			{
+				kind: "capture",
+				text,
+				target: "daily",
+				label: "Daily note",
+				description: text ? `Append to ${dailyName}` : "Type a note, then press Enter to capture",
+			},
+		];
+		const inbox = this.plugin.settings.captureInboxPath.trim();
+		if (this.plugin.settings.isPro && inbox) {
+			items.push({
+				kind: "capture",
+				text,
+				target: "inbox",
+				label: "Inbox",
+				description: text ? `Append to ${inbox}` : `Capture into ${inbox}`,
+			});
+		}
+		return items;
+	}
+
+	private async runCapture(item: Extract<ResultItem, { kind: "capture" }>): Promise<void> {
+		const text = item.text.trim();
+		if (!text) {
+			new Notice("Vault Spotlight: type something to capture.");
+			return;
+		}
+		const settings = this.plugin.settings;
+		const path =
+			item.target === "inbox"
+				? normalizePath(settings.captureInboxPath.trim())
+				: this.resolveDatePath(Date.now()).path;
+		if (!path) {
+			new Notice("Vault Spotlight: no capture target configured.");
+			return;
+		}
+		this.recordSearch();
+		this.close();
+		try {
+			await this.ensureFolder(path);
+			let file = this.app.vault.getAbstractFileByPath(path);
+			if (!(file instanceof TFile)) file = await this.app.vault.create(path, "");
+			if (file instanceof TFile) {
+				const existing = await this.app.vault.read(file);
+				const updated = insertCapture(existing, text, {
+					mode: settings.isPro ? settings.captureMode : "append",
+					heading: settings.isPro ? settings.captureHeading : "",
+				});
+				await this.app.vault.modify(file, updated);
+				new Notice(`Vault Spotlight: captured to ${file.basename}.`);
+			}
+		} catch (err) {
+			console.error("[VaultSpotlight] capture failed", err);
+			new Notice("Vault Spotlight: capture failed.");
+		}
+	}
+
+	private snippetItems(query: string): ResultItem[] {
+		const q = query.trim().toLowerCase();
+		const rows: Array<{ id: string; name: string; body: string; score: number; indices: number[] }> = [];
+		for (const snippet of this.plugin.settings.snippets) {
+			if (!q) {
+				rows.push({ id: snippet.id, name: snippet.name, body: snippet.body, score: 1, indices: [] });
+				continue;
+			}
+			const nameMatch = fuzzyMatch(q, snippet.name);
+			const match = nameMatch ?? fuzzyMatch(q, snippet.body);
+			if (!match) continue;
+			rows.push({
+				id: snippet.id,
+				name: snippet.name,
+				body: snippet.body,
+				score: nameMatch ? match.score + 10 : match.score,
+				indices: nameMatch ? nameMatch.indices : [],
+			});
+		}
+		rows.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+		return rows.slice(0, 60).map((row) => ({
+			kind: "snippet" as const,
+			id: row.id,
+			name: row.name,
+			body: row.body,
+			matchIndices: row.indices,
+		}));
+	}
+
+	private async insertSnippet(item: Extract<ResultItem, { kind: "snippet" }>): Promise<void> {
+		const editor = this.app.workspace.getActiveViewOfType(MarkdownView)?.editor ?? null;
+		const selection = editor?.getSelection() ?? "";
+		let clipboard = "";
+		if (item.body.includes("{{clipboard}}")) {
+			try {
+				clipboard = await navigator.clipboard.readText();
+			} catch {
+				clipboard = "";
+			}
+		}
+		const { text, cursorOffset } = expandSnippet(item.body, {
+			date: moment().format("YYYY-MM-DD"),
+			time: moment().format("HH:mm"),
+			clipboard,
+			selection,
+		});
+		this.close();
+		if (editor) {
+			const from = editor.getCursor("from");
+			editor.replaceSelection(text);
+			const caret = editor.offsetToPos(editor.posToOffset(from) + cursorOffset);
+			editor.setCursor(caret);
+			editor.focus();
+		} else {
+			void copyToClipboard(text, "Snippet copied");
+		}
 	}
 
 	private renderLoading(): void {
@@ -952,6 +1232,17 @@ export class SpotlightModal extends Modal {
 
 	/** Shift+Enter: create a note named after the current query text. */
 	private async createFromQuery(): Promise<void> {
+		// For delight-layer rows, Shift+Enter does the useful thing instead of
+		// creating a note titled "2+2" or the capture text.
+		const selected = this.items[this.selectedIndex];
+		if (selected?.kind === "calc") {
+			this.insertCalcResult(selected);
+			return;
+		}
+		if (selected && (selected.kind === "capture" || selected.kind === "snippet" || selected.kind === "datejump")) {
+			await this.activateSelection();
+			return;
+		}
 		const { body } = this.resolveQuery(this.inputEl.value);
 		if (!body) return;
 		this.recordSearch();
@@ -1092,6 +1383,27 @@ export class SpotlightModal extends Modal {
 			this.recordSearch();
 			this.close();
 			await this.createAndOpen(selected.name);
+			return;
+		}
+
+		if (selected.kind === "calc") {
+			this.copyCalcResult(selected);
+			return;
+		}
+
+		if (selected.kind === "datejump") {
+			this.close();
+			await this.openOrCreateDatedNote(selected.date);
+			return;
+		}
+
+		if (selected.kind === "capture") {
+			await this.runCapture(selected);
+			return;
+		}
+
+		if (selected.kind === "snippet") {
+			await this.insertSnippet(selected);
 			return;
 		}
 

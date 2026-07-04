@@ -2417,6 +2417,54 @@ function cleanId2(value) {
   return id || "";
 }
 
+// src/core/snippets.mjs
+var MAX_SNIPPETS = 100;
+var counter = 0;
+function nextId(seed) {
+  counter += 1;
+  return `sn-${seed}-${counter}`;
+}
+function normalizeSnippets(raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const name = typeof entry.name === "string" ? entry.name.trim() : "";
+    const body = typeof entry.body === "string" ? entry.body : "";
+    if (name.length === 0) continue;
+    let id = typeof entry.id === "string" && entry.id.length > 0 ? entry.id : nextId(name.length);
+    while (seen.has(id)) id = nextId(name.length);
+    seen.add(id);
+    out.push({ id, name, body });
+    if (out.length >= MAX_SNIPPETS) break;
+  }
+  return out;
+}
+function createSnippet(name, body) {
+  return { id: nextId(String(name != null ? name : "").length), name: String(name != null ? name : "").trim(), body: String(body != null ? body : "") };
+}
+function expandSnippet(body, ctx = {}) {
+  var _a, _b, _c, _d;
+  const values = {
+    date: (_a = ctx.date) != null ? _a : "",
+    time: (_b = ctx.time) != null ? _b : "",
+    clipboard: (_c = ctx.clipboard) != null ? _c : "",
+    selection: (_d = ctx.selection) != null ? _d : ""
+  };
+  const substitute = (segment) => String(segment).replace(/\{\{(date|time|clipboard|selection)\}\}/g, (_, key) => values[key]);
+  const raw = String(body != null ? body : "");
+  const cursorToken = "{{cursor}}";
+  const idx = raw.indexOf(cursorToken);
+  if (idx === -1) {
+    const text = substitute(raw);
+    return { text, cursorOffset: text.length };
+  }
+  const before = substitute(raw.slice(0, idx));
+  const after = substitute(raw.slice(idx + cursorToken.length).split(cursorToken).join(""));
+  return { text: before + after, cursorOffset: before.length };
+}
+
 // src/core/modeTriggers.mjs
 var DEFAULT_MODE_PREFIXES = {
   content: ">",
@@ -2425,7 +2473,9 @@ var DEFAULT_MODE_PREFIXES = {
   symbols: "$",
   links: "~",
   editors: "=",
-  folders: "/"
+  folders: "/",
+  capture: "+",
+  snippets: ";"
 };
 var DEFAULT_ESCAPE_CHAR = "!";
 function normalizeModePrefixes(raw) {
@@ -2433,7 +2483,7 @@ function normalizeModePrefixes(raw) {
   const out = { ...DEFAULT_MODE_PREFIXES };
   if (!raw || typeof raw !== "object") return out;
   const taken = /* @__PURE__ */ new Set();
-  const spares = ["`", ";", ",", "'", "?", "%", "&", "*"];
+  const spares = ["`", ",", "'", "?", "%", "&", "*"];
   for (const mode of Object.keys(DEFAULT_MODE_PREFIXES)) {
     const value = typeof raw[mode] === "string" ? raw[mode].trim() : "";
     let next = value.length > 0 && value.length <= 4 && !/\s/.test(value) && !taken.has(value) ? value : DEFAULT_MODE_PREFIXES[mode];
@@ -2541,7 +2591,14 @@ var DEFAULT_SETTINGS = {
   modePrefixes: { ...DEFAULT_MODE_PREFIXES },
   escapeChar: DEFAULT_ESCAPE_CHAR,
   defaultNewTab: false,
-  recentCommandIds: []
+  recentCommandIds: [],
+  enableCalculator: true,
+  currencyRates: "",
+  enableDateJump: true,
+  captureInboxPath: "",
+  captureMode: "append",
+  captureHeading: "",
+  snippets: []
 };
 var MAX_RECENT_COMMANDS = 25;
 var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
@@ -2637,6 +2694,28 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
         void this.plugin.saveSettings();
       });
     });
+    new import_obsidian.Setting(containerEl).setName("Calculator & dates").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Inline calculator").setDesc("Type math, unit conversions, or percentages (e.g. 1234*0.19, 10 km to mi, 20% of 250) and press Enter to copy the answer.").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.enableCalculator).onChange((value) => {
+        this.plugin.settings.enableCalculator = value;
+        void this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Currency rates").setDesc("One per line as CODE=rate, expressed in units per 1 USD (e.g. EUR=0.92). Used for offline currency conversion \u2014 you keep them current.").addTextArea((area) => {
+      area.setPlaceholder("USD=1\nEUR=0.92\nGBP=0.79");
+      area.setValue(this.plugin.settings.currencyRates);
+      area.inputEl.rows = 4;
+      area.onChange((value) => {
+        this.plugin.settings.currencyRates = value;
+        void this.plugin.saveSettings();
+      });
+    });
+    new import_obsidian.Setting(containerEl).setName("Daily-note date jump").setDesc("Type a date like today, next friday, or in 3 weeks to open (or create) that day's daily note. Honors your Daily Notes / Periodic Notes settings.").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.enableDateJump).onChange((value) => {
+        this.plugin.settings.enableDateJump = value;
+        void this.plugin.saveSettings();
+      })
+    );
     new import_obsidian.Setting(containerEl).setName("Opening & mode triggers").setHeading();
     new import_obsidian.Setting(containerEl).setName("Open in new tab by default").setDesc("Enter opens results in a new tab. Ctrl+Enter then opens in the current tab instead.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.defaultNewTab).onChange((value) => {
@@ -2651,7 +2730,9 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
       { key: "symbols", name: "Symbols trigger", desc: "Outline of the active note: headings, links, tags, blocks." },
       { key: "links", name: "Links trigger", desc: "Backlinks and outlinks (Pro)." },
       { key: "editors", name: "Open editors trigger", desc: "Jump between open tabs and panes." },
-      { key: "folders", name: "Folders trigger", desc: "Find a folder and browse its files." }
+      { key: "folders", name: "Folders trigger", desc: "Find a folder and browse its files." },
+      { key: "capture", name: "Quick capture trigger", desc: "Append a note to your daily note or inbox without opening it." },
+      { key: "snippets", name: "Snippets trigger", desc: "Insert reusable text snippets at the cursor (Pro)." }
     ];
     for (const { key, name, desc } of prefixLabels) {
       new import_obsidian.Setting(containerEl).setName(name).setDesc(`${desc} Default: ${DEFAULT_MODE_PREFIXES[key]}`).addText((text) => {
@@ -2737,6 +2818,86 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
         );
       }
     );
+    new import_obsidian.Setting(containerEl).setName("Quick capture").setHeading();
+    containerEl.createEl("p", {
+      cls: "vault-spotlight-hint-text",
+      text: "Type the capture trigger, jot a thought, and press Enter \u2014 it appends to today's daily note without opening it. Pro adds an inbox target, prepend, and a target heading."
+    });
+    proSearch(
+      "Inbox note",
+      "Optional second capture target \u2014 a vault path like Inbox.md. Appears as an extra row in capture mode.",
+      (setting) => {
+        setting.addText(
+          (text) => text.setPlaceholder("Inbox.md").setValue(this.plugin.settings.captureInboxPath).onChange((value) => {
+            this.plugin.settings.captureInboxPath = value.trim();
+            void this.plugin.saveSettings();
+          })
+        );
+      }
+    );
+    proSearch("Capture placement", "Add captured lines to the end (append) or top (prepend) of the target note.", (setting) => {
+      setting.addDropdown((dropdown) => {
+        dropdown.addOption("append", "Append to end").addOption("prepend", "Prepend to top").setValue(this.plugin.settings.captureMode).onChange((value) => {
+          this.plugin.settings.captureMode = value;
+          void this.plugin.saveSettings();
+        });
+      });
+    });
+    proSearch(
+      "Capture under heading",
+      "Optional heading (e.g. Log) to append captured lines beneath. Created if missing. Leave blank to use the placement above.",
+      (setting) => {
+        setting.addText(
+          (text) => text.setPlaceholder("Log").setValue(this.plugin.settings.captureHeading).onChange((value) => {
+            this.plugin.settings.captureHeading = value.trim();
+            void this.plugin.saveSettings();
+          })
+        );
+      }
+    );
+    new import_obsidian.Setting(containerEl).setName("Snippets (Pro)").setHeading();
+    const snippetList = containerEl.createDiv();
+    if (!this.plugin.settings.isPro) {
+      snippetList.createEl("p", {
+        text: "Unlock Pro to insert reusable text snippets with {{date}}, {{time}}, {{clipboard}}, {{selection}}, and {{cursor}} placeholders."
+      });
+    } else {
+      new import_obsidian.Setting(snippetList).setName("Add snippet").setDesc("Snippets appear in snippet mode and insert at the cursor. Placeholders: {{date}} {{time}} {{clipboard}} {{selection}} {{cursor}}.").addButton(
+        (button) => button.setButtonText("Add snippet").onClick(() => {
+          const snippet = createSnippet(`Snippet ${this.plugin.settings.snippets.length + 1}`, "");
+          this.plugin.settings.snippets = [...this.plugin.settings.snippets, snippet].slice(0, MAX_SNIPPETS);
+          void this.plugin.saveSettings().then(() => this.display());
+        })
+      );
+      if (this.plugin.settings.snippets.length === 0) {
+        snippetList.createEl("p", { text: "No snippets yet. Add one to insert boilerplate, callouts, or signatures from the launcher." });
+      } else {
+        for (const snippet of this.plugin.settings.snippets) {
+          const row = snippetList.createDiv({ cls: "vault-spotlight-snippet-row" });
+          const nameInput = row.createEl("input", { type: "text", cls: "vault-spotlight-snippet-name" });
+          nameInput.value = snippet.name;
+          nameInput.placeholder = "Name";
+          nameInput.addEventListener("change", () => {
+            snippet.name = nameInput.value.trim() || snippet.name;
+            nameInput.value = snippet.name;
+            void this.plugin.saveSettings();
+          });
+          const bodyInput = row.createEl("textarea", { cls: "vault-spotlight-snippet-body" });
+          bodyInput.value = snippet.body;
+          bodyInput.rows = 2;
+          bodyInput.placeholder = "Snippet text with {{cursor}}";
+          bodyInput.addEventListener("change", () => {
+            snippet.body = bodyInput.value;
+            void this.plugin.saveSettings();
+          });
+          const remove = row.createEl("button", { text: "Remove" });
+          remove.addEventListener("click", () => {
+            this.plugin.settings.snippets = this.plugin.settings.snippets.filter((s) => s.id !== snippet.id);
+            void this.plugin.saveSettings().then(() => this.display());
+          });
+        }
+      }
+    }
     new import_obsidian.Setting(containerEl).setName("Starred files (Pro)").setHeading();
     const starredList = containerEl.createDiv();
     if (!this.plugin.settings.isPro) {
@@ -3704,6 +3865,551 @@ function fileMap(files) {
   return new Map((files || []).map((file) => [file.path, file]));
 }
 
+// src/core/calculator.mjs
+var DEFAULT_CURRENCY_RATES = {
+  usd: 1,
+  eur: 0.92,
+  gbp: 0.79,
+  jpy: 156,
+  cad: 1.37,
+  aud: 1.51,
+  chf: 0.9,
+  cny: 7.25,
+  inr: 83.3
+};
+var UNIT_CATEGORIES = {
+  length: {
+    base: "m",
+    units: {
+      mm: 1e-3,
+      cm: 0.01,
+      dm: 0.1,
+      m: 1,
+      km: 1e3,
+      in: 0.0254,
+      inch: 0.0254,
+      inches: 0.0254,
+      ft: 0.3048,
+      foot: 0.3048,
+      feet: 0.3048,
+      yd: 0.9144,
+      yard: 0.9144,
+      yards: 0.9144,
+      mi: 1609.344,
+      mile: 1609.344,
+      miles: 1609.344,
+      nmi: 1852
+    }
+  },
+  mass: {
+    base: "g",
+    units: {
+      mg: 1e-3,
+      g: 1,
+      gram: 1,
+      grams: 1,
+      kg: 1e3,
+      kgs: 1e3,
+      t: 1e6,
+      tonne: 1e6,
+      tonnes: 1e6,
+      oz: 28.349523125,
+      ounce: 28.349523125,
+      ounces: 28.349523125,
+      lb: 453.59237,
+      lbs: 453.59237,
+      pound: 453.59237,
+      pounds: 453.59237,
+      st: 6350.29318,
+      stone: 6350.29318
+    }
+  },
+  data: {
+    base: "b",
+    units: {
+      b: 1,
+      byte: 1,
+      bytes: 1,
+      bit: 0.125,
+      bits: 0.125,
+      kb: 1e3,
+      mb: 1e6,
+      gb: 1e9,
+      tb: 1e12,
+      pb: 1e15,
+      kib: 1024,
+      mib: 1024 ** 2,
+      gib: 1024 ** 3,
+      tib: 1024 ** 4
+    }
+  },
+  time: {
+    base: "s",
+    units: {
+      ms: 1e-3,
+      s: 1,
+      sec: 1,
+      secs: 1,
+      second: 1,
+      seconds: 1,
+      min: 60,
+      mins: 60,
+      minute: 60,
+      minutes: 60,
+      h: 3600,
+      hr: 3600,
+      hrs: 3600,
+      hour: 3600,
+      hours: 3600,
+      d: 86400,
+      day: 86400,
+      days: 86400,
+      wk: 604800,
+      week: 604800,
+      weeks: 604800
+    }
+  }
+};
+var TEMPERATURE_UNITS = /* @__PURE__ */ new Set(["c", "celsius", "f", "fahrenheit", "k", "kelvin"]);
+function categoryOf(unit) {
+  for (const [name, table] of Object.entries(UNIT_CATEGORIES)) {
+    if (unit in table.units) return name;
+  }
+  return null;
+}
+function toCelsius(value, unit) {
+  if (unit === "c" || unit === "celsius") return value;
+  if (unit === "f" || unit === "fahrenheit") return (value - 32) * (5 / 9);
+  return value - 273.15;
+}
+function fromCelsius(value, unit) {
+  if (unit === "c" || unit === "celsius") return value;
+  if (unit === "f" || unit === "fahrenheit") return value * (9 / 5) + 32;
+  return value + 273.15;
+}
+function formatNumber(value) {
+  if (!Number.isFinite(value)) return String(value);
+  if (Number.isInteger(value)) return value.toLocaleString("en-US");
+  const rounded = Number(value.toFixed(6));
+  if (rounded === 0 && value !== 0) return value.toExponential(2);
+  const [intPart, decPart] = String(rounded).split(".");
+  const withThousands = Number(intPart).toLocaleString("en-US");
+  return decPart ? `${withThousands}.${decPart}` : withThousands;
+}
+var OPERATORS = {
+  "+": { prec: 2, assoc: "left", apply: (a, b) => a + b },
+  "-": { prec: 2, assoc: "left", apply: (a, b) => a - b },
+  "*": { prec: 3, assoc: "left", apply: (a, b) => a * b },
+  "\xD7": { prec: 3, assoc: "left", apply: (a, b) => a * b },
+  "/": { prec: 3, assoc: "left", apply: (a, b) => a / b },
+  "\xF7": { prec: 3, assoc: "left", apply: (a, b) => a / b },
+  "%": { prec: 3, assoc: "left", apply: (a, b) => a % b },
+  "^": { prec: 4, assoc: "right", apply: (a, b) => a ** b }
+};
+function tokenizeMath(input) {
+  var _a, _b;
+  const tokens = [];
+  let i = 0;
+  const s = input.replace(/,/g, "");
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === " ") {
+      i++;
+      continue;
+    }
+    if (/[0-9.]/.test(ch)) {
+      let num = "";
+      while (i < s.length && /[0-9.]/.test(s[i])) num += s[i++];
+      if ((num.match(/\./g) || []).length > 1) return null;
+      tokens.push({ type: "num", value: Number(num) });
+      continue;
+    }
+    if (ch === "(" || ch === ")") {
+      tokens.push({ type: ch === "(" ? "lparen" : "rparen" });
+      i++;
+      continue;
+    }
+    if (ch === "e" && /[0-9.]/.test((_a = s[i - 1]) != null ? _a : "") && /[-+0-9]/.test((_b = s[i + 1]) != null ? _b : "")) {
+      const prev = tokens.pop();
+      let exp = s[++i] === "+" || s[i] === "-" ? s[i++] : "";
+      while (i < s.length && /[0-9]/.test(s[i])) exp += s[i++];
+      tokens.push({ type: "num", value: Number(`${prev.value}e${exp}`) });
+      continue;
+    }
+    if (ch in OPERATORS) {
+      tokens.push({ type: "op", value: ch });
+      i++;
+      continue;
+    }
+    return null;
+  }
+  return tokens;
+}
+function evalMathTokens(tokens) {
+  const output = [];
+  const ops = [];
+  let prevWasValue = false;
+  const drainUnary = () => {
+    while (ops.length && ops[ops.length - 1].type === "unary") output.push(ops.pop());
+  };
+  for (let k = 0; k < tokens.length; k++) {
+    const t = tokens[k];
+    if (t.type === "num") {
+      output.push(t.value);
+      prevWasValue = true;
+    } else if (t.type === "op") {
+      const op = t.value;
+      if (!prevWasValue && (op === "-" || op === "+")) {
+        if (op === "-") ops.push({ type: "unary" });
+        prevWasValue = false;
+        continue;
+      }
+      const o1 = OPERATORS[op];
+      while (ops.length) {
+        const top = ops[ops.length - 1];
+        if (top.type === "unary") {
+          output.push(ops.pop());
+          continue;
+        }
+        if (top.type !== "op") break;
+        const o2 = OPERATORS[top.value];
+        if (o1.assoc === "left" && o1.prec <= o2.prec || o1.assoc === "right" && o1.prec < o2.prec) {
+          output.push({ op: ops.pop().value });
+        } else break;
+      }
+      ops.push({ type: "op", value: op });
+      prevWasValue = false;
+    } else if (t.type === "lparen") {
+      ops.push(t);
+      prevWasValue = false;
+    } else if (t.type === "rparen") {
+      let found = false;
+      while (ops.length) {
+        const top = ops.pop();
+        if (top.type === "lparen") {
+          found = true;
+          break;
+        }
+        output.push(top.type === "unary" ? { type: "unary" } : { op: top.value });
+      }
+      if (!found) return null;
+      drainUnary();
+      prevWasValue = true;
+    }
+  }
+  while (ops.length) {
+    const top = ops.pop();
+    if (top.type === "lparen") return null;
+    output.push(top.type === "unary" ? { type: "unary" } : { op: top.value });
+  }
+  const stack = [];
+  for (const item of output) {
+    if (typeof item === "number") {
+      stack.push(item);
+    } else if (item.type === "unary") {
+      const a = stack.pop();
+      if (a === void 0) return null;
+      stack.push(-a);
+    } else {
+      const b = stack.pop();
+      const a = stack.pop();
+      if (a === void 0 || b === void 0) return null;
+      stack.push(OPERATORS[item.op].apply(a, b));
+    }
+  }
+  if (stack.length !== 1 || !Number.isFinite(stack[0])) return null;
+  return stack[0];
+}
+function evaluateArithmetic(input) {
+  if (!/[-+*/^%×÷]/.test(input)) return null;
+  if (!/\d/.test(input)) return null;
+  const tokens = tokenizeMath(input);
+  if (!tokens || tokens.length === 0) return null;
+  return evalMathTokens(tokens);
+}
+function evaluatePercent(input) {
+  const lower = input.toLowerCase();
+  const ofMatch = lower.match(/^([\d.,]+)\s*%\s*of\s*([\d.,]+)$/);
+  if (ofMatch) {
+    const pct = Number(ofMatch[1].replace(/,/g, ""));
+    const base = Number(ofMatch[2].replace(/,/g, ""));
+    if (Number.isFinite(pct) && Number.isFinite(base)) {
+      return { value: pct / 100 * base, note: `${formatNumber(pct)}% of ${formatNumber(base)}` };
+    }
+  }
+  const addMatch = lower.match(/^([\d.,]+)\s*([+-])\s*([\d.,]+)\s*%$/);
+  if (addMatch) {
+    const base = Number(addMatch[1].replace(/,/g, ""));
+    const pct = Number(addMatch[3].replace(/,/g, ""));
+    if (Number.isFinite(base) && Number.isFinite(pct)) {
+      const delta = pct / 100 * base;
+      const value = addMatch[2] === "+" ? base + delta : base - delta;
+      return { value, note: `${formatNumber(base)} ${addMatch[2]} ${formatNumber(pct)}%` };
+    }
+  }
+  return null;
+}
+function evaluateConversion(input, rates) {
+  const match = input.toLowerCase().match(/^([\d.,]+)\s*([a-z°]+)\s*(?:to|in|as|=|>)\s*([a-z°]+)$/);
+  if (!match) return null;
+  const value = Number(match[1].replace(/,/g, ""));
+  if (!Number.isFinite(value)) return null;
+  const from = match[2].replace(/°/g, "");
+  const to = match[3].replace(/°/g, "");
+  if (from === to) return null;
+  if (TEMPERATURE_UNITS.has(from) && TEMPERATURE_UNITS.has(to)) {
+    const celsius = toCelsius(value, from);
+    const out = fromCelsius(celsius, to);
+    return { value: out, kind: "temp", formatted: `${formatNumber(out)}\xB0${to[0].toUpperCase()}` };
+  }
+  const fromCat = categoryOf(from);
+  const toCat = categoryOf(to);
+  if (fromCat && fromCat === toCat) {
+    const table = UNIT_CATEGORIES[fromCat].units;
+    const out = value * table[from] / table[to];
+    return { value: out, kind: "unit", formatted: `${formatNumber(out)} ${to}` };
+  }
+  if (from in rates && to in rates) {
+    const out = value * rates[to] / rates[from];
+    return { value: out, kind: "currency", formatted: `${formatNumber(out)} ${to.toUpperCase()}` };
+  }
+  return null;
+}
+function evaluateExpression(rawInput, options = {}) {
+  var _a;
+  const input = String(rawInput != null ? rawInput : "").trim();
+  if (input.length === 0 || input.length > 120) return null;
+  const rates = { ...DEFAULT_CURRENCY_RATES, ...(_a = options.rates) != null ? _a : {} };
+  const conversion = evaluateConversion(input, rates);
+  if (conversion) {
+    return {
+      ok: true,
+      kind: conversion.kind,
+      value: conversion.value,
+      formatted: conversion.formatted,
+      expression: input
+    };
+  }
+  const percent = evaluatePercent(input);
+  if (percent) {
+    return {
+      ok: true,
+      kind: "percent",
+      value: percent.value,
+      formatted: formatNumber(percent.value),
+      expression: percent.note
+    };
+  }
+  const arithmetic = evaluateArithmetic(input);
+  if (arithmetic !== null) {
+    return {
+      ok: true,
+      kind: "math",
+      value: arithmetic,
+      formatted: formatNumber(arithmetic),
+      expression: input
+    };
+  }
+  return null;
+}
+function parseCurrencyRates(raw) {
+  const rates = { ...DEFAULT_CURRENCY_RATES };
+  if (typeof raw !== "string") return rates;
+  for (const line of raw.split("\n")) {
+    const match = line.match(/^\s*([a-zA-Z]{2,5})\s*[=:]\s*([\d.]+)\s*$/);
+    if (!match) continue;
+    const value = Number(match[2]);
+    if (Number.isFinite(value) && value > 0) rates[match[1].toLowerCase()] = value;
+  }
+  return rates;
+}
+
+// src/core/naturalDates.mjs
+var WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+var WEEKDAY_ABBR = { sun: 0, mon: 1, tue: 2, tues: 2, wed: 3, thu: 4, thur: 4, thurs: 4, fri: 5, sat: 6 };
+var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+var WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function startOfDay(ms) {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+function addDays(date, n) {
+  const d = new Date(date.getTime());
+  d.setDate(d.getDate() + n);
+  return d;
+}
+function addMonths(date, n) {
+  const d = new Date(date.getTime());
+  const targetDay = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + n);
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(targetDay, lastDay));
+  return d;
+}
+function weekdayIndex(word) {
+  var _a;
+  const w = word.toLowerCase();
+  const full = WEEKDAYS.indexOf(w);
+  if (full !== -1) return full;
+  for (let i = 0; i < WEEKDAYS.length; i++) {
+    if (WEEKDAYS[i].startsWith(w) && w.length >= 3) return i;
+  }
+  return (_a = WEEKDAY_ABBR[w]) != null ? _a : -1;
+}
+function labelForDate(date) {
+  return `${WEEKDAY_SHORT[date.getDay()]}, ${MONTHS[date.getMonth()]} ${date.getDate()} ${date.getFullYear()}`;
+}
+var UNIT_DAYS = { day: 1, days: 1, d: 1, week: 7, weeks: 7, w: 7 };
+function parseNaturalDate(rawInput, options = {}) {
+  var _a;
+  const input = String(rawInput != null ? rawInput : "").trim().toLowerCase();
+  if (input.length === 0 || input.length > 40) return null;
+  const now = typeof options.now === "number" ? options.now : Date.now();
+  const today = startOfDay(now);
+  const build = (date, kind) => ({ date: date.getTime(), label: labelForDate(date), kind });
+  if (input === "today") return build(today, "relative");
+  if (input === "tomorrow" || input === "tmr" || input === "tmrw") return build(addDays(today, 1), "relative");
+  if (input === "yesterday") return build(addDays(today, -1), "relative");
+  const iso = input.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (iso) {
+    const y = Number(iso[1]);
+    const mo = Number(iso[2]);
+    const day = Number(iso[3]);
+    if (mo >= 1 && mo <= 12 && day >= 1 && day <= 31) {
+      const d = new Date(y, mo - 1, day);
+      if (d.getMonth() === mo - 1 && d.getDate() === day) return build(d, "iso");
+    }
+    return null;
+  }
+  const shorthand = input.match(/^[@+]?(-?\d{1,4})\s*(d|w)$/);
+  if (shorthand) {
+    const n = Number(shorthand[1]);
+    const days = shorthand[2] === "w" ? n * 7 : n;
+    return build(addDays(today, days), "relative");
+  }
+  if (input === "next week") return build(addDays(today, 7), "relative");
+  if (input === "last week") return build(addDays(today, -7), "relative");
+  if (input === "next month") return build(addMonths(today, 1), "relative");
+  if (input === "last month") return build(addMonths(today, -1), "relative");
+  const inMatch = input.match(/^in\s+(\d{1,4})\s+(day|days|week|weeks|month|months)$/);
+  if (inMatch) {
+    const n = Number(inMatch[1]);
+    const unit = inMatch[2];
+    if (unit.startsWith("month")) return build(addMonths(today, n), "relative");
+    return build(addDays(today, n * UNIT_DAYS[unit]), "relative");
+  }
+  const agoMatch = input.match(/^(\d{1,4})\s+(day|days|week|weeks|month|months)\s+ago$/);
+  if (agoMatch) {
+    const n = Number(agoMatch[1]);
+    const unit = agoMatch[2];
+    if (unit.startsWith("month")) return build(addMonths(today, -n), "relative");
+    return build(addDays(today, -n * UNIT_DAYS[unit]), "relative");
+  }
+  const wdMatch = input.match(/^(next|last|this)?\s*([a-z]+)$/);
+  if (wdMatch) {
+    const word = wdMatch[2];
+    const idx = weekdayIndex(word);
+    const modifier = (_a = wdMatch[1]) != null ? _a : "";
+    if (idx !== -1 && (modifier !== "" || WEEKDAYS.includes(word))) {
+      const cur = today.getDay();
+      let delta = (idx - cur + 7) % 7;
+      if (modifier === "next") {
+        delta = delta === 0 ? 7 : delta + 7;
+      } else if (modifier === "last") {
+        delta = delta === 0 ? -7 : delta - 7;
+      } else if (delta === 0) {
+        delta = 0;
+      }
+      return build(addDays(today, delta), "weekday");
+    }
+  }
+  return null;
+}
+
+// src/core/capture.mjs
+var FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
+function headingText(line) {
+  const match = line.match(/^(#{1,6})\s+(.*?)\s*$/);
+  return match ? { level: match[1].length, text: match[2].toLowerCase() } : null;
+}
+function fencedLines(lines) {
+  const inFence = new Array(lines.length).fill(false);
+  let fence = null;
+  for (let i = 0; i < lines.length; i++) {
+    const marker = lines[i].match(/^\s*(```+|~~~+)/);
+    if (fence === null && marker) {
+      fence = marker[1][0];
+      inFence[i] = true;
+    } else if (fence !== null) {
+      inFence[i] = true;
+      if (marker && marker[1][0] === fence) fence = null;
+    }
+  }
+  return inFence;
+}
+function appendToEnd(existing, text) {
+  if (existing.trim().length === 0) return `${text}
+`;
+  const trimmedEnd = existing.replace(/\s*$/, "");
+  return `${trimmedEnd}
+${text}
+`;
+}
+function prependToTop(existing, text) {
+  const fm = existing.match(FRONTMATTER);
+  if (fm) {
+    const rest = existing.slice(fm[0].length);
+    return `${fm[0]}${text}
+${rest.startsWith("\n") ? "" : "\n"}${rest}`;
+  }
+  return `${text}
+${existing.startsWith("\n") ? "" : "\n"}${existing}`;
+}
+function insertUnderHeading(existing, text, heading) {
+  const wanted = heading.replace(/^#+\s*/, "").trim().toLowerCase();
+  const lines = existing.split("\n");
+  const inFence = fencedLines(lines);
+  let headingLine = -1;
+  let headingLevel = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (inFence[i]) continue;
+    const h = headingText(lines[i]);
+    if (h && h.text === wanted) {
+      headingLine = i;
+      headingLevel = h.level;
+      break;
+    }
+  }
+  if (headingLine === -1) {
+    const withHeading = appendToEnd(existing, `## ${heading.replace(/^#+\s*/, "").trim()}`);
+    return appendToEnd(withHeading.replace(/\n$/, ""), text);
+  }
+  let end = lines.length;
+  for (let i = headingLine + 1; i < lines.length; i++) {
+    if (inFence[i]) continue;
+    const h = headingText(lines[i]);
+    if (h && h.level <= headingLevel) {
+      end = i;
+      break;
+    }
+  }
+  let insertAt = end;
+  while (insertAt > headingLine + 1 && lines[insertAt - 1].trim() === "") insertAt--;
+  lines.splice(insertAt, 0, text);
+  return lines.join("\n").replace(/\s*$/, "") + "\n";
+}
+function insertCapture(existing, text, options = {}) {
+  const base = typeof existing === "string" ? existing : "";
+  const line = String(text != null ? text : "").trim();
+  if (line.length === 0) return base;
+  if (options.heading && options.heading.trim().length > 0) {
+    return insertUnderHeading(base, line, options.heading);
+  }
+  return options.mode === "prepend" ? prependToTop(base, line) : appendToEnd(base, line);
+}
+
 // src/spotlight/resultTypes.ts
 var MODE_ORDER = [
   "files",
@@ -3713,7 +4419,9 @@ var MODE_ORDER = [
   "commands",
   "links",
   "editors",
-  "folders"
+  "folders",
+  "capture",
+  "snippets"
 ];
 function itemFile(item) {
   if (item.kind === "file" || item.kind === "content" || item.kind === "heading" || item.kind === "symbol") {
@@ -3976,6 +4684,31 @@ function renderResultRow(row, item, options) {
     title.setText(item.action.name);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.action.requiresPro ? "Pro action" : "Action" });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: item.action.description });
+  } else if (item.kind === "calc") {
+    row.addClass("is-calc");
+    (0, import_obsidian7.setIcon)(iconWrap, "calculator");
+    title.addClass("vault-spotlight-calc-result");
+    title.setText(item.result);
+    titleRow.createSpan({ cls: "vault-spotlight-item-badge is-star", text: "\u21B5 Copy" });
+    body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.expression} \xB7 ${item.detail}` });
+  } else if (item.kind === "datejump") {
+    (0, import_obsidian7.setIcon)(iconWrap, "calendar-days");
+    title.setText(item.label);
+    titleRow.createSpan({
+      cls: item.exists ? "vault-spotlight-item-badge" : "vault-spotlight-item-badge is-star",
+      text: item.exists ? "Daily note" : "Create daily note"
+    });
+    body.createDiv({ cls: "vault-spotlight-item-meta", text: item.path });
+  } else if (item.kind === "capture") {
+    (0, import_obsidian7.setIcon)(iconWrap, "plus-circle");
+    title.setText(item.text || "Type something to capture\u2026");
+    titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.label });
+    body.createDiv({ cls: "vault-spotlight-item-meta", text: item.description });
+  } else if (item.kind === "snippet") {
+    (0, import_obsidian7.setIcon)(iconWrap, "clipboard-type");
+    renderHighlightedText(title, item.name, item.matchIndices);
+    titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Snippet" });
+    body.createDiv({ cls: "vault-spotlight-item-snippet", text: item.body.replace(/\s+/g, " ").slice(0, 120) });
   } else {
     (0, import_obsidian7.setIcon)(iconWrap, "file-plus");
     title.setText(`Create \u201C${item.name}\u201D`);
@@ -4269,10 +5002,10 @@ async function createExportNote(ctx, filename, note, message) {
   const dir = "Vault Spotlight Exports";
   if (!ctx.app.vault.getAbstractFileByPath(dir)) await ctx.app.vault.createFolder(dir);
   let path = (0, import_obsidian8.normalizePath)(`${dir}/${filename}`);
-  let counter = 2;
+  let counter2 = 2;
   while (ctx.app.vault.getAbstractFileByPath(path)) {
-    path = (0, import_obsidian8.normalizePath)(`${dir}/${filename.replace(/\.md$/, ` ${counter}.md`)}`);
-    counter++;
+    path = (0, import_obsidian8.normalizePath)(`${dir}/${filename.replace(/\.md$/, ` ${counter2}.md`)}`);
+    counter2++;
   }
   const file = await ctx.app.vault.create(path, note);
   ctx.close();
@@ -4466,6 +5199,8 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     const prefixes = this.plugin.settings.modePrefixes;
     this.hintEl.empty();
     const hints = [
+      ["2+2", "calc"],
+      [prefixes.capture, "capture"],
       ["#journal", "tag"],
       [prefixes.commands, "commands"],
       [prefixes.symbols, "outline"],
@@ -4474,6 +5209,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       [prefixes.content, "content"],
       [prefixes.headings, "headings"],
       [prefixes.links, "links"],
+      [prefixes.snippets, "snippets"],
       ["Tab", "cycle"],
       [this.plugin.settings.escapeChar, "literal"]
     ];
@@ -4560,14 +5296,14 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       return;
     }
     try {
-      if ((mode === "content" || mode === "headings" || mode === "links") && !isPro) {
+      if ((mode === "content" || mode === "headings" || mode === "links" || mode === "snippets") && !isPro) {
         this.setBadge("Pro", "is-pro");
         this.items = [];
         this.isLoading = false;
         this.renderEmptyState(
           "lock",
-          mode === "content" ? "Content search is a Pro feature" : mode === "headings" ? "Heading jump is a Pro feature" : "Links mode is a Pro feature",
-          mode === "content" ? "Search inside note bodies with queries like > meeting notes." : mode === "headings" ? "Jump straight to any heading across your vault." : "Browse backlinks and outlinks for the active note or a matching note."
+          mode === "content" ? "Content search is a Pro feature" : mode === "headings" ? "Heading jump is a Pro feature" : mode === "snippets" ? "Snippets are a Pro feature" : "Links mode is a Pro feature",
+          mode === "content" ? "Search inside note bodies with queries like > meeting notes." : mode === "headings" ? "Jump straight to any heading across your vault." : mode === "snippets" ? "Insert reusable text snippets with date, time, clipboard, and cursor placeholders." : "Browse backlinks and outlinks for the active note or a matching note."
         );
         this.updateStatus(0);
         return;
@@ -4715,6 +5451,23 @@ var SpotlightModal = class extends import_obsidian9.Modal {
           this.updateStatus(0);
           return;
         }
+      } else if (mode === "capture") {
+        this.setBadge("Capture", "is-content");
+        this.items = this.captureItems(body);
+      } else if (mode === "snippets") {
+        this.setBadge("Snippets", "is-content");
+        this.items = this.snippetItems(body);
+        if (this.items.length === 0) {
+          this.isLoading = false;
+          const hasSnippets = this.plugin.settings.snippets.length > 0;
+          this.renderEmptyState(
+            "clipboard-type",
+            hasSnippets ? "No matching snippets" : "No snippets yet",
+            hasSnippets ? "Try a different snippet name." : "Add reusable snippets in Settings \u2192 Vault Spotlight, then insert them here."
+          );
+          this.updateStatus(0);
+          return;
+        }
       } else {
         this.setBadge(isEmptyQuery ? "Browse" : "Files", null);
         const parsed = tokenizeQuery(body);
@@ -4802,6 +5555,10 @@ var SpotlightModal = class extends import_obsidian9.Modal {
             isPinned: pinned.has(search.id)
           }));
           this.items = [...collections, ...this.items];
+        }
+        if (!isEmptyQuery) {
+          const smartItems = this.computeSmartItems(body);
+          if (smartItems.length > 0) this.items = [...smartItems, ...this.items];
         }
         const noFilters = parsed.tags.length === 0 && parsed.properties.length === 0 && parsed.extFilters.length === 0 && parsed.phrases.length === 0 && parsed.exclusions.length === 0 && parsed.folderIncludes.length === 0 && parsed.pathTerms.length === 0 && parsed.nameTerms.length === 0 && !parsed.isStarred && !parsed.isBookmarked && parsed.modifiedDays === null && parsed.createdDays === null;
         if (this.items.length === 0 && !isEmptyQuery && noFilters) {
@@ -4914,6 +5671,212 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       folder: row.folder,
       matchIndices: row.indices
     }));
+  }
+  // --- Delight layer: calculator, dates, capture, snippets -----------------
+  currencyRates() {
+    return parseCurrencyRates(this.plugin.settings.currencyRates);
+  }
+  /**
+   * Ambient calculator / natural-language date rows for the files mode. Returns
+   * at most one row (a calculation takes precedence over a date), or none when
+   * the query is ordinary text — so plain searches are never intercepted.
+   */
+  computeSmartItems(body) {
+    const text = body.trim();
+    if (!text) return [];
+    if (this.plugin.settings.enableDateJump) {
+      const date = parseNaturalDate(text);
+      if (date) {
+        const { path, exists } = this.resolveDatePath(date.date);
+        return [{ kind: "datejump", date: date.date, label: date.label, path, exists }];
+      }
+    }
+    if (this.plugin.settings.enableCalculator) {
+      const calc = evaluateExpression(text, { rates: this.currencyRates() });
+      if (calc) {
+        const detail = calc.kind === "currency" ? "Currency \xB7 your rates" : calc.kind === "unit" ? "Unit conversion" : calc.kind === "temp" ? "Temperature" : calc.kind === "percent" ? "Percentage" : "Calculator";
+        return [{ kind: "calc", expression: calc.expression, result: calc.formatted, detail }];
+      }
+    }
+    return [];
+  }
+  copyCalcResult(item) {
+    void copyToClipboard(item.result, `Copied ${item.result}`);
+    this.close();
+  }
+  insertCalcResult(item) {
+    var _a;
+    const editor = (_a = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView)) == null ? void 0 : _a.editor;
+    if (!editor) {
+      this.copyCalcResult(item);
+      return;
+    }
+    this.close();
+    editor.replaceSelection(item.result);
+    editor.focus();
+  }
+  /** Daily-note folder + moment format from the core or Periodic Notes plugin. */
+  dailyNoteConfig() {
+    var _a, _b, _c, _d, _e, _f, _g, _h;
+    const internal = this.app.internalPlugins;
+    const opts = (_c = (_b = (_a = internal == null ? void 0 : internal.getPluginById) == null ? void 0 : _a.call(internal, "daily-notes")) == null ? void 0 : _b.instance) == null ? void 0 : _c.options;
+    if (opts && (opts.format || opts.folder !== void 0)) {
+      return { folder: ((_d = opts.folder) != null ? _d : "").trim(), format: (opts.format || "YYYY-MM-DD").trim() };
+    }
+    const periodic = (_f = (_e = this.app.plugins) == null ? void 0 : _e.plugins) == null ? void 0 : _f["periodic-notes"];
+    const pd = (_g = periodic == null ? void 0 : periodic.settings) == null ? void 0 : _g.daily;
+    if (pd && (pd.format || pd.folder)) {
+      return { folder: ((_h = pd.folder) != null ? _h : "").trim(), format: (pd.format || "YYYY-MM-DD").trim() };
+    }
+    return { folder: "", format: "YYYY-MM-DD" };
+  }
+  resolveDatePath(ms) {
+    const { folder, format } = this.dailyNoteConfig();
+    const name = (0, import_obsidian9.moment)(ms).format(format);
+    const path = (0, import_obsidian9.normalizePath)(folder ? `${folder}/${name}.md` : `${name}.md`);
+    const exists = this.app.vault.getAbstractFileByPath(path) instanceof import_obsidian9.TFile;
+    return { path, exists };
+  }
+  /** Create the parent folder chain for `filePath` if it doesn't exist yet. */
+  async ensureFolder(filePath) {
+    const slash = filePath.lastIndexOf("/");
+    if (slash === -1) return;
+    const dir = filePath.slice(0, slash);
+    if (!dir || this.app.vault.getAbstractFileByPath(dir)) return;
+    try {
+      await this.app.vault.createFolder(dir);
+    } catch (e) {
+    }
+  }
+  async openOrCreateDatedNote(ms) {
+    const { path } = this.resolveDatePath(ms);
+    try {
+      let file = this.app.vault.getAbstractFileByPath(path);
+      if (!(file instanceof import_obsidian9.TFile)) {
+        await this.ensureFolder(path);
+        file = await this.app.vault.create(path, "");
+      }
+      if (file instanceof import_obsidian9.TFile) {
+        await this.app.workspace.getLeaf(false).openFile(file);
+        this.plugin.trackRecent(file.path);
+      }
+    } catch (err) {
+      console.error("[VaultSpotlight] open daily note failed", err);
+      new import_obsidian9.Notice("Vault Spotlight: could not open the daily note.");
+    }
+  }
+  captureItems(body) {
+    const text = body.trim();
+    const dailyName = (0, import_obsidian9.moment)().format(this.dailyNoteConfig().format);
+    const items = [
+      {
+        kind: "capture",
+        text,
+        target: "daily",
+        label: "Daily note",
+        description: text ? `Append to ${dailyName}` : "Type a note, then press Enter to capture"
+      }
+    ];
+    const inbox = this.plugin.settings.captureInboxPath.trim();
+    if (this.plugin.settings.isPro && inbox) {
+      items.push({
+        kind: "capture",
+        text,
+        target: "inbox",
+        label: "Inbox",
+        description: text ? `Append to ${inbox}` : `Capture into ${inbox}`
+      });
+    }
+    return items;
+  }
+  async runCapture(item) {
+    const text = item.text.trim();
+    if (!text) {
+      new import_obsidian9.Notice("Vault Spotlight: type something to capture.");
+      return;
+    }
+    const settings = this.plugin.settings;
+    const path = item.target === "inbox" ? (0, import_obsidian9.normalizePath)(settings.captureInboxPath.trim()) : this.resolveDatePath(Date.now()).path;
+    if (!path) {
+      new import_obsidian9.Notice("Vault Spotlight: no capture target configured.");
+      return;
+    }
+    this.recordSearch();
+    this.close();
+    try {
+      await this.ensureFolder(path);
+      let file = this.app.vault.getAbstractFileByPath(path);
+      if (!(file instanceof import_obsidian9.TFile)) file = await this.app.vault.create(path, "");
+      if (file instanceof import_obsidian9.TFile) {
+        const existing = await this.app.vault.read(file);
+        const updated = insertCapture(existing, text, {
+          mode: settings.isPro ? settings.captureMode : "append",
+          heading: settings.isPro ? settings.captureHeading : ""
+        });
+        await this.app.vault.modify(file, updated);
+        new import_obsidian9.Notice(`Vault Spotlight: captured to ${file.basename}.`);
+      }
+    } catch (err) {
+      console.error("[VaultSpotlight] capture failed", err);
+      new import_obsidian9.Notice("Vault Spotlight: capture failed.");
+    }
+  }
+  snippetItems(query) {
+    const q = query.trim().toLowerCase();
+    const rows = [];
+    for (const snippet of this.plugin.settings.snippets) {
+      if (!q) {
+        rows.push({ id: snippet.id, name: snippet.name, body: snippet.body, score: 1, indices: [] });
+        continue;
+      }
+      const nameMatch = fuzzyMatch(q, snippet.name);
+      const match = nameMatch != null ? nameMatch : fuzzyMatch(q, snippet.body);
+      if (!match) continue;
+      rows.push({
+        id: snippet.id,
+        name: snippet.name,
+        body: snippet.body,
+        score: nameMatch ? match.score + 10 : match.score,
+        indices: nameMatch ? nameMatch.indices : []
+      });
+    }
+    rows.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+    return rows.slice(0, 60).map((row) => ({
+      kind: "snippet",
+      id: row.id,
+      name: row.name,
+      body: row.body,
+      matchIndices: row.indices
+    }));
+  }
+  async insertSnippet(item) {
+    var _a, _b, _c;
+    const editor = (_b = (_a = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView)) == null ? void 0 : _a.editor) != null ? _b : null;
+    const selection = (_c = editor == null ? void 0 : editor.getSelection()) != null ? _c : "";
+    let clipboard = "";
+    if (item.body.includes("{{clipboard}}")) {
+      try {
+        clipboard = await navigator.clipboard.readText();
+      } catch (e) {
+        clipboard = "";
+      }
+    }
+    const { text, cursorOffset } = expandSnippet(item.body, {
+      date: (0, import_obsidian9.moment)().format("YYYY-MM-DD"),
+      time: (0, import_obsidian9.moment)().format("HH:mm"),
+      clipboard,
+      selection
+    });
+    this.close();
+    if (editor) {
+      const from = editor.getCursor("from");
+      editor.replaceSelection(text);
+      const caret = editor.offsetToPos(editor.posToOffset(from) + cursorOffset);
+      editor.setCursor(caret);
+      editor.focus();
+    } else {
+      void copyToClipboard(text, "Snippet copied");
+    }
   }
   renderLoading() {
     this.resultsEl.empty();
@@ -5092,6 +6055,15 @@ var SpotlightModal = class extends import_obsidian9.Modal {
   }
   /** Shift+Enter: create a note named after the current query text. */
   async createFromQuery() {
+    const selected = this.items[this.selectedIndex];
+    if ((selected == null ? void 0 : selected.kind) === "calc") {
+      this.insertCalcResult(selected);
+      return;
+    }
+    if (selected && (selected.kind === "capture" || selected.kind === "snippet" || selected.kind === "datejump")) {
+      await this.activateSelection();
+      return;
+    }
     const { body } = this.resolveQuery(this.inputEl.value);
     if (!body) return;
     this.recordSearch();
@@ -5212,6 +6184,23 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       this.recordSearch();
       this.close();
       await this.createAndOpen(selected.name);
+      return;
+    }
+    if (selected.kind === "calc") {
+      this.copyCalcResult(selected);
+      return;
+    }
+    if (selected.kind === "datejump") {
+      this.close();
+      await this.openOrCreateDatedNote(selected.date);
+      return;
+    }
+    if (selected.kind === "capture") {
+      await this.runCapture(selected);
+      return;
+    }
+    if (selected.kind === "snippet") {
+      await this.insertSnippet(selected);
       return;
     }
     this.recordSearch();
@@ -6953,6 +7942,13 @@ var VaultSpotlightPlugin = class extends import_obsidian12.Plugin {
       this.settings.escapeChar = takenPrefixes.has(DEFAULT_ESCAPE_CHAR) ? (_a = ["\\", "|", "?", "%", "&"].find((c) => !takenPrefixes.has(c))) != null ? _a : DEFAULT_ESCAPE_CHAR : DEFAULT_ESCAPE_CHAR;
     }
     this.settings.defaultNewTab = this.settings.defaultNewTab === true;
+    this.settings.enableCalculator = this.settings.enableCalculator !== false;
+    this.settings.enableDateJump = this.settings.enableDateJump !== false;
+    if (typeof this.settings.currencyRates !== "string") this.settings.currencyRates = "";
+    if (typeof this.settings.captureInboxPath !== "string") this.settings.captureInboxPath = "";
+    if (typeof this.settings.captureHeading !== "string") this.settings.captureHeading = "";
+    this.settings.captureMode = this.settings.captureMode === "prepend" ? "prepend" : "append";
+    this.settings.snippets = normalizeSnippets(this.settings.snippets);
     this.settings.recentCommandIds = (Array.isArray(this.settings.recentCommandIds) ? this.settings.recentCommandIds : []).filter((id) => typeof id === "string" && id.length > 0).slice(0, MAX_RECENT_COMMANDS);
     this.settings.maxRecent = coercePositiveInt(this.settings.maxRecent, DEFAULT_SETTINGS.maxRecent);
     this.settings.maxStarred = coercePositiveInt(this.settings.maxStarred, DEFAULT_SETTINGS.maxStarred);

@@ -572,3 +572,44 @@ input.vault-spotlight-prefix-input {
 	text-align: center;
 	font-family: var(--font-monospace);
 }
+
+/* Calculator result row — emphasise the answer like a launcher does */
+.vault-spotlight-item.is-calc .vault-spotlight-item-icon-wrap {
+	color: var(--color-green, var(--interactive-accent));
+	border-color: color-mix(in srgb, var(--color-green, var(--interactive-accent)) 35%, transparent);
+}
+
+.vault-spotlight-calc-result {
+	font-family: var(--font-monospace);
+	font-size: 15px;
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+/* Snippet management rows in settings */
+.vault-spotlight-snippet-row {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 8px 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.vault-spotlight-snippet-name {
+	flex: 0 0 140px;
+	min-width: 0;
+}
+
+.vault-spotlight-snippet-body {
+	flex: 1;
+	min-width: 0;
+	font-family: var(--font-monospace);
+	resize: vertical;
+}
+
+.vault-spotlight-hint-text {
+	font-size: 12px;
+	color: var(--text-muted);
+	line-height: 1.5;
+	margin: 4px 0 12px;
+}
