@@ -5285,6 +5285,7 @@ function renameFile(app, file) {
 }
 
 // src/spotlight/SpotlightModal.ts
+var formatMoment = import_obsidian9.moment;
 var SpotlightModal = class extends import_obsidian9.Modal {
   constructor(app, plugin, initialQuery = "", initialMode = "files") {
     super(app);
@@ -6032,7 +6033,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
     } catch (e) {
       return "";
     }
-    const when = (0, import_obsidian9.moment)(ms);
+    const when = formatMoment(ms);
     const title = when.format(format);
     return fillDailyTemplate(raw, (kind, fmt) => {
       if (kind === "title") return title;
@@ -6042,7 +6043,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
   }
   resolveDatePath(ms) {
     const { folder, format } = this.dailyNoteConfig();
-    const name = (0, import_obsidian9.moment)(ms).format(format);
+    const name = formatMoment(ms).format(format);
     const path = (0, import_obsidian9.normalizePath)(folder ? `${folder}/${name}.md` : `${name}.md`);
     const exists = this.app.vault.getAbstractFileByPath(path) instanceof import_obsidian9.TFile;
     return { path, exists };
@@ -6077,7 +6078,7 @@ var SpotlightModal = class extends import_obsidian9.Modal {
   }
   captureItems(body) {
     const text = body.trim();
-    const dailyName = (0, import_obsidian9.moment)().format(this.dailyNoteConfig().format);
+    const dailyName = formatMoment().format(this.dailyNoteConfig().format);
     const captureHeading = this.plugin.settings.isPro ? this.plugin.settings.captureHeading : "";
     const captureMode = this.plugin.settings.isPro ? this.plugin.settings.captureMode : "append";
     const items = [
@@ -6186,8 +6187,8 @@ var SpotlightModal = class extends import_obsidian9.Modal {
       }
     }
     const { text, cursorOffset } = expandSnippet(item.body, {
-      date: (0, import_obsidian9.moment)().format("YYYY-MM-DD"),
-      time: (0, import_obsidian9.moment)().format("HH:mm"),
+      date: formatMoment().format("YYYY-MM-DD"),
+      time: formatMoment().format("HH:mm"),
       clipboard,
       selection
     });

@@ -58,6 +58,15 @@ import { DEFAULT_SETTINGS, safeHttpUrl } from "../settings";
 // resultTypes.ts.
 export { MODE_ORDER, type SpotlightMode } from "./resultTypes";
 
+/**
+ * Obsidian re-exports `moment` via `import * as Moment` — under tsconfigs with
+ * `esModuleInterop` on (the Obsidian sample default) that namespace import loses
+ * its call signature, so `moment(...)` degrades to `any` and trips the review's
+ * no-unsafe-* rules. Pin a minimal callable view (we only ever format) so the
+ * call sites stay typed regardless of interop settings. Behavior is unchanged.
+ */
+const formatMoment = moment as unknown as (input?: number) => { format(fmt?: string): string };
+
 export class SpotlightModal extends Modal {
 	private inputEl!: HTMLInputElement;
 	private resultsEl!: HTMLDivElement;
@@ -943,7 +952,7 @@ export class SpotlightModal extends Modal {
 		} catch {
 			return "";
 		}
-		const when = moment(ms);
+		const when = formatMoment(ms);
 		const title = when.format(format);
 		return fillDailyTemplate(raw, (kind, fmt) => {
 			if (kind === "title") return title;
@@ -954,7 +963,7 @@ export class SpotlightModal extends Modal {
 
 	private resolveDatePath(ms: number): { path: string; exists: boolean } {
 		const { folder, format } = this.dailyNoteConfig();
-		const name = moment(ms).format(format);
+		const name = formatMoment(ms).format(format);
 		const path = normalizePath(folder ? `${folder}/${name}.md` : `${name}.md`);
 		const exists = this.app.vault.getAbstractFileByPath(path) instanceof TFile;
 		return { path, exists };
@@ -993,7 +1002,7 @@ export class SpotlightModal extends Modal {
 
 	private captureItems(body: string): ResultItem[] {
 		const text = body.trim();
-		const dailyName = moment().format(this.dailyNoteConfig().format);
+		const dailyName = formatMoment().format(this.dailyNoteConfig().format);
 		const captureHeading = this.plugin.settings.isPro ? this.plugin.settings.captureHeading : "";
 		const captureMode = this.plugin.settings.isPro ? this.plugin.settings.captureMode : "append";
 		const items: ResultItem[] = [
@@ -1109,8 +1118,8 @@ export class SpotlightModal extends Modal {
 			}
 		}
 		const { text, cursorOffset } = expandSnippet(item.body, {
-			date: moment().format("YYYY-MM-DD"),
-			time: moment().format("HH:mm"),
+			date: formatMoment().format("YYYY-MM-DD"),
+			time: formatMoment().format("HH:mm"),
 			clipboard,
 			selection,
 		});
