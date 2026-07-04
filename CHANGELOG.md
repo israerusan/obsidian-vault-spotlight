@@ -3,6 +3,28 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.7.1] - 2026-07-04
+
+### Fixed
+- Saving a workflow or profile with `Cmd/Ctrl+S` no longer records it as the
+  `files` mode regardless of the mode you were in — the live mode and query are
+  now captured correctly.
+- Content-search exclude folders are matched case-insensitively by ripgrep too,
+  so results no longer differ from the built-in index depending on whether
+  ripgrep is installed.
+- Files with a future-dated modification time (clock skew or imports) can no
+  longer inflate their ranking and pin themselves to the top of results.
+- IME composition (e.g. CJK input) is no longer hijacked by result-list
+  navigation and activation keys (Arrow/Enter/Tab/Escape).
+- Per-file usage data (frecency) can no longer leak between a disable and
+  re-enable within the same session.
+
+### Changed
+- Internal robustness: contain a failing result action instead of leaving an
+  unhandled rejection, kill any in-flight ripgrep process on unload/command
+  change, coalesce concurrent ripgrep availability probes, and give id-less
+  imported profiles unique ids.
+
 ## [2.7.0] - 2026-07-04
 
 ### Changed
