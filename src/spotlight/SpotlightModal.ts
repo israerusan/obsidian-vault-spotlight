@@ -27,7 +27,7 @@ import { showOnboarding } from "../core/onboarding.mjs";
 import { fuzzyMatch, tokenizeQuery } from "../search/fuzzy";
 import { getVaultFileKind } from "../search/vaultFiles";
 import { activeProfile, type CoreSearchProfile } from "../core/searchProfiles.mjs";
-import { ensureStarterWorkflows, normalizeWorkflowPresets, FREE_WORKFLOW_LIMIT, type WorkflowPreset } from "../core/workflowPresets.mjs";
+import { type WorkflowPreset } from "../core/workflowPresets.mjs";
 import { detectSearchIntegrations, type SearchIntegrations } from "../core/integrations.mjs";
 import { findBacklinks, findOutlinks } from "../core/linkGraph.mjs";
 import { evaluateExpression, parseCurrencyRates } from "../core/calculator.mjs";
@@ -51,6 +51,15 @@ import { PreviewPane } from "./PreviewPane";
 import { CaptureController } from "./CaptureController";
 import { WorkflowController } from "./WorkflowController";
 import { registerSpotlightScope } from "./keymap";
+import {
+	buildCommandItems,
+	buildContentItems,
+	buildHeadingItems,
+	buildSymbolItems,
+	buildEditorItems,
+	buildFileItems,
+	buildSavedObjectItems,
+} from "./resultBuilders";
 import { renderResultRow } from "./resultRow";
 import * as batchOps from "./batchOps";
 import { copyToClipboard, renameFile } from "./batchOps";
@@ -624,24 +633,7 @@ export class SpotlightModal extends Modal {
 				// Empty query: resurface recently-run commands first, then the rest.
 				const commandResults = this.commandSearcher.search(cmdQuery, cmdQuery ? RESULT_LIMIT : COMMAND_BROWSE_LIMIT, this.plugin.settings.ranking.ignoreDiacritics);
 				if (generation !== this.searchGeneration) return;
-				let ordered = commandResults;
-				const recentIds = this.plugin.settings.recentCommandIds;
-				if (cmdQuery.length === 0 && recentIds.length > 0) {
-					const byId = new Map(commandResults.map((r) => [r.id, r]));
-					const recent = recentIds
-						.map((id) => byId.get(id))
-						.filter((r): r is (typeof commandResults)[number] => !!r);
-					const recentSet = new Set(recent.map((r) => r.id));
-					ordered = [...recent, ...commandResults.filter((r) => !recentSet.has(r.id))];
-				}
-				const recentSet = new Set(cmdQuery.length === 0 ? recentIds : []);
-				this.items = ordered.slice(0, RESULT_LIMIT).map((r) => ({
-					kind: "command" as const,
-					id: r.id,
-					name: r.name,
-					matchIndices: r.matchIndices,
-					isRecent: recentSet.has(r.id),
-				}));
+				this.items = buildCommandItems(commandResults, this.plugin.settings.recentCommandIds, cmdQuery.length === 0, RESULT_LIMIT);
 			} else if (mode === "content") {
 				const text = body;
 				this.setBadge("Content", "is-content");
@@ -674,15 +666,7 @@ export class SpotlightModal extends Modal {
 					excludeFolders,
 				});
 				if (generation !== this.searchGeneration) return;
-				this.items = contentResults.map((r) => ({
-					kind: "content" as const,
-					file: r.file,
-					line: r.line,
-					snippet: r.snippet,
-					score: r.score,
-					engine: r.engine,
-					matchIndices: r.matchIndices ?? [],
-				}));
+				this.items = buildContentItems(contentResults);
 			} else if (mode === "headings") {
 				this.setBadge("Headings", "is-content");
 				// Supports `file#heading` scoping and `level:1-2` depth filters.
@@ -696,15 +680,7 @@ export class SpotlightModal extends Modal {
 					ignoreDiacritics: this.plugin.settings.ranking.ignoreDiacritics,
 				});
 				if (generation !== this.searchGeneration) return;
-				this.items = headingResults.map((r) => ({
-					kind: "heading" as const,
-					file: r.file,
-					line: r.line,
-					heading: r.heading,
-					level: r.level,
-					score: r.score,
-					matchIndices: r.matchIndices,
-				}));
+				this.items = buildHeadingItems(headingResults);
 			} else if (mode === "symbols") {
 				const target = this.drillFile ?? this.app.workspace.getActiveFile();
 				this.setBadge(target ? `Symbols · ${target.basename}` : "Symbols", "is-content");
@@ -721,29 +697,12 @@ export class SpotlightModal extends Modal {
 				}
 				const symbolResults = this.symbolSearcher.search(target, body, SYMBOL_LIMIT, this.plugin.settings.ranking.ignoreDiacritics);
 				if (generation !== this.searchGeneration) return;
-				this.items = symbolResults.map((r) => ({
-					kind: "symbol" as const,
-					file: r.file,
-					line: r.line,
-					text: r.text,
-					symbolType: r.symbolType,
-					level: r.level,
-					matchIndices: r.matchIndices,
-				}));
+				this.items = buildSymbolItems(symbolResults);
 			} else if (mode === "editors") {
 				this.setBadge("Editors", "is-content");
 				const editorResults = this.editorSearcher.search(body, RESULT_LIMIT, this.plugin.settings.ranking.ignoreDiacritics);
 				if (generation !== this.searchGeneration) return;
-				this.items = editorResults.map((r) => ({
-					kind: "editor" as const,
-					leaf: r.leaf,
-					file: r.file,
-					title: r.title,
-					viewType: r.viewType,
-					isActive: r.isActive,
-					isPinned: r.isPinned,
-					matchIndices: r.matchIndices,
-				}));
+				this.items = buildEditorItems(editorResults);
 				if (this.items.length === 0) {
 					this.isLoading = false;
 					this.renderEmptyState("layout", "No open editors", "Open a few notes, then jump between their tabs from here.");
@@ -820,78 +779,12 @@ export class SpotlightModal extends Modal {
 					limit: isEmptyQuery ? FILE_BROWSE_LIMIT : FILE_QUERY_LIMIT,
 				});
 
-				this.items = fileResults.map((r) => ({
-					kind: "file" as const,
-					file: r.file,
-					score: r.score,
-					matchIndices: r.matchIndices,
-					modifiedLabel: r.modifiedLabel,
-					fileKind: r.fileKind,
-					primaryMatch: r.primaryMatch,
-					aliasMatched: r.aliasMatched,
-					tags: r.tags,
-					aliases: r.aliases,
-					isRecent: r.isRecent,
-					isStarred: r.isStarred,
-					isBookmarked: r.isBookmarked,
-				}));
+				this.items = buildFileItems(fileResults);
 
 				if (isEmptyQuery) {
-					// Saved objects sit above the file list, most-canonical first:
-					// Workflows (the primary saved object) on TOP, then advanced Search
-					// profiles, then the legacy "Smart collections" (retired custom
-					// searches) at the bottom. Prepend once in that order so the hierarchy
-					// is explicit rather than an artifact of three reversed prepends.
-
-					// Workflows are free up to FREE_WORKFLOW_LIMIT so users can feel the
-					// recurring-workflow benefit before upgrading. Pro is unlimited and
-					// gets the curated starter presets seeded when it has none of its own.
-					const workflowSource = isPro
-						? ensureStarterWorkflows(this.plugin.settings.workflowPresets)
-						: normalizeWorkflowPresets(this.plugin.settings.workflowPresets).slice(0, FREE_WORKFLOW_LIMIT);
-					const workflowItems = workflowSource
-						.slice()
-						.sort((a, b) => Number(b.pinned) - Number(a.pinned) || Number(b.starter ?? false) - Number(a.starter ?? false) || a.name.localeCompare(b.name))
-						.map((workflow) => ({
-							kind: "workflow" as const,
-							id: workflow.id,
-							name: workflow.name,
-							query: workflow.query,
-							mode: workflow.mode,
-							profileId: workflow.profileId,
-							isPinned: workflow.pinned,
-							isStarter: workflow.starter ?? false,
-							rankingMode: workflow.rankingMode,
-						}));
-
-					const profileItems =
-						isPro && this.plugin.settings.searchProfiles.length > 0
-							? this.plugin.settings.searchProfiles.map((searchProfile) => ({
-									kind: "profile" as const,
-									id: searchProfile.id,
-									name: searchProfile.name,
-									defaultMode: searchProfile.defaultMode,
-									defaultQuery: searchProfile.defaultQuery,
-									isActive: searchProfile.id === this.plugin.settings.activeProfileId,
-								}))
-							: [];
-
-					let collectionItems: Array<{ kind: "collection"; id: string; name: string; query: string; isPinned: boolean }> = [];
-					if (isPro && this.plugin.settings.customSearches.length > 0) {
-						const pinned = new Set(this.plugin.settings.pinnedCustomSearchIds);
-						collectionItems = this.plugin.settings.customSearches
-							.slice()
-							.sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)) || a.name.localeCompare(b.name))
-							.map((search) => ({
-								kind: "collection" as const,
-								id: search.id,
-								name: search.name,
-								query: search.query,
-								isPinned: pinned.has(search.id),
-							}));
-					}
-
-					this.items = [...workflowItems, ...profileItems, ...collectionItems, ...this.items];
+					// Saved objects (Workflows first, then advanced profiles, then legacy
+					// collections) sit above the file list — see buildSavedObjectItems.
+					this.items = [...buildSavedObjectItems(this.plugin.settings, isPro), ...this.items];
 				}
 
 				// Ambient calculator / date-jump: when the query is a calculation or
