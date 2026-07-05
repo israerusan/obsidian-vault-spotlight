@@ -146,6 +146,9 @@ export class SpotlightModal extends Modal {
 	private drillReturnQuery = "";
 	private drillReturnMode: SpotlightMode = "files";
 	private hasNavigated = false;
+	// True while an IME composition (CJK candidate window) is active — set from the
+	// input's compositionstart/end events so the input handler can defer drill-in.
+	private composing = false;
 	private activeWorkflowId = "";
 	// Platform modifier label ("Cmd" on macOS, else "Ctrl"), resolved once in
 	// onOpen so the footer hints match the real Mod-key bindings and the hint bar.
@@ -353,14 +356,24 @@ export class SpotlightModal extends Modal {
 			});
 		}
 
-		this.inputEl.addEventListener("input", (evt) => {
+		// Track IME composition via composition events rather than reading
+		// evt.isComposing off the input event — our pinned lib types that event as a
+		// plain Event (needing a cast the Obsidian review flags as redundant).
+		// compositionend fires just before the committing input event, so `composing`
+		// is already false for the commit.
+		this.inputEl.addEventListener("compositionstart", () => {
+			this.composing = true;
+		});
+		this.inputEl.addEventListener("compositionend", () => {
+			this.composing = false;
+		});
+		this.inputEl.addEventListener("input", () => {
 			// Never run drill-in logic mid-IME-composition: an intermediate CJK
 			// candidate that transiently equals a mode prefix would otherwise clear the
 			// input and drill/redirect, discarding the in-progress text. Defer to the
 			// same composition the scope-key handlers already respect, and just search
-			// the interim value. The committing input event (isComposing false) runs the
-			// normal path below.
-			if ((evt as InputEvent).isComposing) {
+			// the interim value. The committing input runs the normal path below.
+			if (this.composing) {
 				this.hasNavigated = false;
 				this.activeWorkflowId = "";
 				this.scheduleSearch();

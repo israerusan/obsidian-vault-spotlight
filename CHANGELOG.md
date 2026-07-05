@@ -3,6 +3,20 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.11.1] - 2026-07-05
+
+Obsidian community-review compliance fixes.
+
+### Fixed
+- Removed the redundant word "Obsidian" from the plugin description (it's implied by
+  the plugin directory).
+- Renamed the settings "General" section to "Display" (community guidelines advise
+  against a generic "General" heading).
+- The Undo link in the snippet-removed notice now gets its pointer cursor from a CSS
+  class instead of an inline style.
+- The input handler tracks IME composition via `compositionstart`/`compositionend`
+  events instead of an unnecessary `InputEvent` type assertion.
+
 ## [2.11.0] - 2026-07-05
 
 Phase 2 — a product-consolidation pass: present Vault Spotlight as one command

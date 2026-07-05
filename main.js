@@ -2271,7 +2271,7 @@ __export(main_exports, {
   default: () => VaultSpotlightPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian13 = require("obsidian");
+var import_obsidian14 = require("obsidian");
 
 // src/settings.ts
 var import_obsidian = require("obsidian");
@@ -2847,7 +2847,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
         fallback: DEFAULT_SETTINGS.purchaseUrl
       });
     }
-    new import_obsidian.Setting(containerEl).setName("General").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Display").setHeading();
     new import_obsidian.Setting(containerEl).setName("Show modified time").setDesc("Display relative modified time in search results.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.showModifiedTime).onChange((value) => {
         this.plugin.settings.showModifiedTime = value;
@@ -3129,8 +3129,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
             this.plugin.settings.snippets = this.plugin.settings.snippets.filter((s) => s.id !== removed.id);
             const notice = new import_obsidian.Notice("", 6e3);
             notice.noticeEl.createSpan({ text: `Removed "${removed.name}". ` });
-            const undo = notice.noticeEl.createEl("a", { text: "Undo" });
-            undo.style.cursor = "pointer";
+            const undo = notice.noticeEl.createEl("a", { text: "Undo", cls: "vault-spotlight-clickable" });
             undo.addEventListener("click", () => {
               this.plugin.settings.snippets = [...this.plugin.settings.snippets, removed].slice(0, MAX_SNIPPETS);
               void this.plugin.saveSettings().then(() => this.display());
@@ -3176,7 +3175,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
         });
       });
     }
-    new import_obsidian.Setting(containerEl).setName("Workflow presets").setDesc(`Save searches to re-run from Browse. Free includes ${FREE_WORKFLOW_LIMIT}; Pro is unlimited and can load starter presets.`).setHeading();
+    new import_obsidian.Setting(containerEl).setName("Workflows").setDesc(`Your primary saved object: save a search (mode + query + ranking) with ${mod}+S and re-run it from Browse. Free includes ${FREE_WORKFLOW_LIMIT}; Pro is unlimited and can load starter presets.`).setHeading();
     const workflowList = containerEl.createDiv();
     const isProUser = this.plugin.settings.isPro;
     if (isProUser) {
@@ -3221,6 +3220,10 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
     }
     this.proHeading("Search profiles");
     const profileList = containerEl.createDiv();
+    profileList.createEl("p", {
+      cls: "vault-spotlight-hint-text",
+      text: "Advanced: a profile is an optional context (file-type toggles, excluded folders, preview) a Workflow can restore. Most users only need Workflows."
+    });
     if (!this.plugin.settings.isPro) {
       profileList.createEl("p", { cls: "vault-spotlight-hint-text", text: "Unlock Pro to save workspace-style search profiles." });
     } else {
@@ -3290,7 +3293,7 @@ var VaultSpotlightSettingTab = class extends import_obsidian.PluginSettingTab {
 };
 
 // src/spotlight/SpotlightModal.ts
-var import_obsidian10 = require("obsidian");
+var import_obsidian11 = require("obsidian");
 
 // src/core/advancedQuery.mjs
 function parseAdvancedQuery(raw) {
@@ -5546,8 +5549,495 @@ var WorkflowController = class {
   }
 };
 
-// src/spotlight/resultRow.ts
+// src/spotlight/keymap.ts
+function registerSpotlightScope(scope, isPro, actions) {
+  scope.register([], "ArrowDown", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.moveSelection(1);
+    return false;
+  });
+  scope.register([], "ArrowUp", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.moveSelection(-1);
+    return false;
+  });
+  scope.register([], "Home", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.selectFirst();
+    return false;
+  });
+  scope.register([], "End", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.selectLast();
+    return false;
+  });
+  scope.register([], "PageDown", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.pageMove(1);
+    return false;
+  });
+  scope.register([], "PageUp", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.pageMove(-1);
+    return false;
+  });
+  scope.register(["Ctrl"], "n", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.moveSelection(1);
+    return false;
+  });
+  scope.register(["Ctrl"], "p", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.moveSelection(-1);
+    return false;
+  });
+  scope.register([], "Enter", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.activateDefault();
+    return false;
+  });
+  scope.register(["Mod"], "Enter", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.activatePreferredTab();
+    return false;
+  });
+  scope.register(["Mod", "Alt"], "Enter", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.activateSplit();
+    return false;
+  });
+  scope.register(["Alt"], "Enter", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.openContextMenuForSelection();
+    return false;
+  });
+  scope.register(["Shift"], "Enter", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.createFromQuery();
+    return false;
+  });
+  scope.register(["Mod"], "k", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.openActionPalette();
+    return false;
+  });
+  scope.register([], "Escape", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.escape();
+    return false;
+  });
+  scope.register([], "Tab", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.cycleMode(1);
+    return false;
+  });
+  scope.register(["Shift"], "Tab", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.cycleMode(-1);
+    return false;
+  });
+  scope.register(["Mod"], "s", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.saveWorkflow();
+    return false;
+  });
+  if (!isPro) return;
+  scope.register(["Mod"], " ", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.toggleCheck();
+    return false;
+  });
+  scope.register(["Mod"], "d", (evt) => {
+    if (evt.isComposing) return true;
+    evt.preventDefault();
+    actions.toggleStarSelected();
+    return false;
+  });
+}
+
+// src/spotlight/resultBuilders.ts
+function buildCommandItems(results, recentIds, isEmptyQuery, limit) {
+  let ordered = results;
+  if (isEmptyQuery && recentIds.length > 0) {
+    const byId = new Map(results.map((r) => [r.id, r]));
+    const recent = recentIds.map((id) => byId.get(id)).filter((r) => !!r);
+    const recentSet2 = new Set(recent.map((r) => r.id));
+    ordered = [...recent, ...results.filter((r) => !recentSet2.has(r.id))];
+  }
+  const recentSet = new Set(isEmptyQuery ? recentIds : []);
+  return ordered.slice(0, limit).map((r) => ({
+    kind: "command",
+    id: r.id,
+    name: r.name,
+    matchIndices: r.matchIndices,
+    isRecent: recentSet.has(r.id)
+  }));
+}
+function buildContentItems(results) {
+  return results.map((r) => {
+    var _a;
+    return {
+      kind: "content",
+      file: r.file,
+      line: r.line,
+      snippet: r.snippet,
+      score: r.score,
+      engine: r.engine,
+      matchIndices: (_a = r.matchIndices) != null ? _a : []
+    };
+  });
+}
+function buildHeadingItems(results) {
+  return results.map((r) => ({
+    kind: "heading",
+    file: r.file,
+    line: r.line,
+    heading: r.heading,
+    level: r.level,
+    score: r.score,
+    matchIndices: r.matchIndices
+  }));
+}
+function buildSymbolItems(results) {
+  return results.map((r) => ({
+    kind: "symbol",
+    file: r.file,
+    line: r.line,
+    text: r.text,
+    symbolType: r.symbolType,
+    level: r.level,
+    matchIndices: r.matchIndices
+  }));
+}
+function buildEditorItems(results) {
+  return results.map((r) => ({
+    kind: "editor",
+    leaf: r.leaf,
+    file: r.file,
+    title: r.title,
+    viewType: r.viewType,
+    isActive: r.isActive,
+    isPinned: r.isPinned,
+    matchIndices: r.matchIndices
+  }));
+}
+function buildFileItems(results) {
+  return results.map((r) => ({
+    kind: "file",
+    file: r.file,
+    score: r.score,
+    matchIndices: r.matchIndices,
+    modifiedLabel: r.modifiedLabel,
+    fileKind: r.fileKind,
+    primaryMatch: r.primaryMatch,
+    aliasMatched: r.aliasMatched,
+    tags: r.tags,
+    aliases: r.aliases,
+    isRecent: r.isRecent,
+    isStarred: r.isStarred,
+    isBookmarked: r.isBookmarked
+  }));
+}
+function buildSavedObjectItems(settings, isPro) {
+  const workflowSource = isPro ? ensureStarterWorkflows(settings.workflowPresets) : normalizeWorkflowPresets(settings.workflowPresets).slice(0, FREE_WORKFLOW_LIMIT);
+  const workflowItems = workflowSource.slice().sort((a, b) => {
+    var _a, _b;
+    return Number(b.pinned) - Number(a.pinned) || Number((_a = b.starter) != null ? _a : false) - Number((_b = a.starter) != null ? _b : false) || a.name.localeCompare(b.name);
+  }).map((workflow) => {
+    var _a;
+    return {
+      kind: "workflow",
+      id: workflow.id,
+      name: workflow.name,
+      query: workflow.query,
+      mode: workflow.mode,
+      profileId: workflow.profileId,
+      isPinned: workflow.pinned,
+      isStarter: (_a = workflow.starter) != null ? _a : false,
+      rankingMode: workflow.rankingMode
+    };
+  });
+  const profileItems = isPro && settings.searchProfiles.length > 0 ? settings.searchProfiles.map((searchProfile) => ({
+    kind: "profile",
+    id: searchProfile.id,
+    name: searchProfile.name,
+    defaultMode: searchProfile.defaultMode,
+    defaultQuery: searchProfile.defaultQuery,
+    isActive: searchProfile.id === settings.activeProfileId
+  })) : [];
+  let collectionItems = [];
+  if (isPro && settings.customSearches.length > 0) {
+    const pinned = new Set(settings.pinnedCustomSearchIds);
+    collectionItems = settings.customSearches.slice().sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)) || a.name.localeCompare(b.name)).map((search) => ({
+      kind: "collection",
+      id: search.id,
+      name: search.name,
+      query: search.query,
+      isPinned: pinned.has(search.id)
+    }));
+  }
+  return [...workflowItems, ...profileItems, ...collectionItems];
+}
+
+// src/spotlight/actionBuilders.ts
+function buildAvailableActions(context, host) {
+  if (context.kind === "profile") {
+    return [
+      {
+        id: "activate-profile",
+        name: "Activate search profile",
+        description: `Switch to ${context.name} and run its default query.`,
+        requiresPro: true,
+        run: () => host.workflows.activateProfile(context.id)
+      },
+      {
+        id: "clear-profile",
+        name: "Clear active profile",
+        description: "Return Spotlight to the global search settings.",
+        requiresPro: true,
+        run: () => host.workflows.clearProfile()
+      }
+    ];
+  }
+  if (context.kind === "collection") {
+    return [
+      {
+        id: "run-collection",
+        name: "Run smart collection",
+        description: context.query,
+        run: () => host.runCollectionQuery(context.query)
+      },
+      {
+        id: "pin-collection",
+        name: context.isPinned ? "Unpin smart collection" : "Pin smart collection",
+        description: "Keep this saved search at the top of the browse view.",
+        requiresPro: true,
+        run: () => {
+          host.plugin.togglePinnedCollection(context.id);
+          host.closeActionPalette();
+        }
+      },
+      {
+        id: "copy-collection-query",
+        name: "Copy collection query",
+        description: "Copy the saved search query to the clipboard.",
+        run: () => copyToClipboard(context.query, "Query copied")
+      }
+    ];
+  }
+  if (context.kind === "calc") {
+    return [
+      {
+        id: "copy-calc",
+        name: "Copy result",
+        description: `Copy ${context.result} to the clipboard.`,
+        run: () => host.capture.copyCalcResult(context)
+      },
+      {
+        id: "insert-calc",
+        name: "Insert at cursor",
+        description: "Insert the result into the active note.",
+        run: () => host.capture.insertCalcResult(context)
+      }
+    ];
+  }
+  if (context.kind === "datejump") {
+    return [
+      {
+        id: "open-daily",
+        name: context.exists ? "Open daily note" : "Create daily note",
+        description: context.path,
+        run: () => void host.capture.openOrCreateDatedNote(context.date)
+      }
+    ];
+  }
+  if (context.kind === "capture") {
+    return [
+      {
+        id: "run-capture",
+        name: "Capture",
+        description: context.description,
+        run: () => void host.capture.runCapture(context)
+      }
+    ];
+  }
+  if (context.kind === "snippet") {
+    return [
+      {
+        id: "insert-snippet",
+        name: "Insert snippet",
+        description: "Insert this snippet at the cursor.",
+        requiresPro: true,
+        run: () => void host.capture.insertSnippet(context)
+      },
+      {
+        id: "copy-snippet",
+        name: "Copy snippet",
+        description: "Copy the snippet body to the clipboard.",
+        run: () => copyToClipboard(context.body, "Snippet copied")
+      }
+    ];
+  }
+  const file = itemFile(context);
+  const actions = [];
+  if (file) {
+    actions.push(
+      {
+        id: "open",
+        name: "Open",
+        description: "Open the selected result.",
+        run: () => host.openResultAndClose(context)
+      },
+      {
+        id: "copy-link",
+        name: "Copy link",
+        description: "Copy a Markdown link for this result.",
+        run: () => copyToClipboard(host.app.fileManager.generateMarkdownLink(file, ""), "Link copied")
+      },
+      {
+        id: "copy-path",
+        name: "Copy path",
+        description: "Copy this file path.",
+        run: () => copyToClipboard(file.path, "Path copied")
+      },
+      {
+        id: "rename",
+        name: "Rename",
+        description: "Rename the selected note or file.",
+        // Rename is free (a basic file operation) and available from both the action
+        // palette and the right-click / Alt+Enter menu — intentionally consistent.
+        run: () => renameFile(host.app, file)
+      },
+      {
+        id: "toggle-star",
+        name: host.plugin.isStarred(file.path) ? "Unstar" : "Star",
+        description: "Toggle the selected file in Starred pins.",
+        requiresPro: true,
+        run: () => {
+          host.plugin.toggleStar(file.path);
+          host.closeActionPalette();
+        }
+      }
+    );
+  }
+  const integrations = host.integrations();
+  if (file) {
+    for (const [view, label] of host.basesPowerPackViews(file)) {
+      actions.push({
+        id: `open-base-${view}`,
+        name: `Open in ${label} view`,
+        description: `Open this base in Bases Power Pack's ${label} view.`,
+        run: () => host.handoffBaseToPowerPack(view, file.path)
+      });
+    }
+  }
+  actions.push({
+    id: "save-profile",
+    name: "Save current setup as profile",
+    description: "Create a Pro search profile from the current mode, query, preview, file type, and folder settings.",
+    requiresPro: true,
+    run: () => host.workflows.saveCurrentProfile()
+  });
+  if (host.resultItemsForBatch().length > 0) {
+    const batchActions = [
+      ["copy-results", "Copy results as Markdown", "Copy selected results, or the current result list, as Markdown links.", () => copyResultsAsMarkdown(host.batchContext())],
+      ["export-results", "Export results to note", "Create a Markdown note containing selected/search results.", () => exportResultsToNote(host.batchContext())],
+      ["batch-add-tag", "Batch add tag", "Append a tag to selected Markdown files.", () => batchAddTag(host.batchContext())],
+      ["batch-remove-tag", "Batch remove tag", "Remove a tag from selected Markdown files.", () => batchRemoveTag(host.batchContext())],
+      ["batch-set-property", "Batch set property", "Set a frontmatter property on selected Markdown files.", () => batchSetProperty(host.batchContext())],
+      ["batch-move", "Batch move files", "Move selected files into a target folder.", () => batchMoveFiles(host.batchContext())],
+      ["batch-star", "Batch star results", "Add selected/current result files to Starred pins.", () => batchSetStarred(host.batchContext(), true)],
+      ["batch-unstar", "Batch unstar results", "Remove selected/current result files from Starred pins.", () => batchSetStarred(host.batchContext(), false)],
+      ["create-moc", "Create MOC from results", "Create a grouped index note from selected/current results.", () => createMocFromResults(host.batchContext())],
+      ["append-links", "Append links to active note", "Append selected/current result links to the active Markdown note.", () => appendLinksToActiveNote(host.batchContext())]
+    ];
+    for (const [id, name, description, run] of batchActions) {
+      actions.push({ id, name, description, requiresPro: true, run });
+    }
+    if (integrations.omnisearch) {
+      actions.push({
+        id: "open-omnisearch",
+        name: "Search in Omnisearch",
+        description: "Hand off to the installed Omnisearch plugin.",
+        requiresPro: true,
+        run: () => host.runIntegrationCommand("omnisearch")
+      });
+    }
+    if (integrations.textExtractor) {
+      actions.push({
+        id: "open-text-extractor",
+        name: "Run Text Extractor",
+        description: "Use the installed Text Extractor plugin for document/PDF text support.",
+        requiresPro: true,
+        run: () => host.runIntegrationCommand("text extractor")
+      });
+    }
+  }
+  return actions;
+}
+
+// src/spotlight/contextMenu.ts
 var import_obsidian9 = require("obsidian");
+function openResultContextMenu(item, evt, host) {
+  const file = itemFile(item);
+  if (!file) return;
+  const menu = new import_obsidian9.Menu();
+  const openIn = (paneType) => {
+    host.close();
+    void (async () => {
+      const leaf = host.app.workspace.getLeaf(paneType);
+      await leaf.openFile(file);
+      host.seekToItemLine(leaf, item);
+      host.trackRecent(file.path);
+    })();
+  };
+  menu.addItem((i) => i.setTitle("Open in new tab").setIcon("file-plus").onClick(() => openIn("tab")));
+  menu.addItem((i) => i.setTitle("Open to the right").setIcon("separator-vertical").onClick(() => openIn("split")));
+  menu.addItem((i) => i.setTitle("Open in new window").setIcon("picture-in-picture-2").onClick(() => openIn("window")));
+  menu.addSeparator();
+  menu.addItem(
+    (i) => i.setTitle("Copy Obsidian link").setIcon("link").onClick(() => copyToClipboard(host.app.fileManager.generateMarkdownLink(file, ""), "Link copied"))
+  );
+  menu.addItem((i) => i.setTitle("Copy path").setIcon("copy").onClick(() => copyToClipboard(file.path, "Path copied")));
+  menu.addItem((i) => i.setTitle("Rename\u2026").setIcon("pencil").onClick(() => renameFile(host.app, file)));
+  const showInFolder = host.app.showInFolder;
+  if (typeof showInFolder === "function") {
+    menu.addItem(
+      (i) => i.setTitle("Show in system explorer").setIcon("folder-open").onClick(() => {
+        showInFolder.call(host.app, file.path);
+      })
+    );
+  }
+  if (evt) {
+    menu.showAtMouseEvent(evt);
+  } else {
+    const rect = host.selectedRowRect();
+    if (rect) menu.showAtPosition({ x: rect.left + 40, y: rect.bottom });
+    else menu.showAtPosition({ x: 100, y: 100 });
+  }
+}
+
+// src/spotlight/resultRow.ts
+var import_obsidian10 = require("obsidian");
 
 // src/core/resultDecorators.mjs
 function buildFileDecorations({
@@ -5588,7 +6078,7 @@ function renderResultRow(row, item, options) {
   const titleRow = body.createDiv({ cls: "vault-spotlight-item-title-row" });
   const title = titleRow.createDiv({ cls: "vault-spotlight-item-title" });
   if (item.kind === "file") {
-    (0, import_obsidian9.setIcon)(iconWrap, iconForFileKind(item.fileKind));
+    (0, import_obsidian10.setIcon)(iconWrap, iconForFileKind(item.fileKind));
     row.toggleClass("is-starred", item.isStarred);
     renderHighlightedText(title, item.file.basename, item.matchIndices);
     const decorations = buildFileDecorations({
@@ -5614,7 +6104,7 @@ function renderResultRow(row, item, options) {
     }
     body.createDiv({ cls: "vault-spotlight-item-meta", text: decorations.meta });
   } else if (item.kind === "content") {
-    (0, import_obsidian9.setIcon)(
+    (0, import_obsidian10.setIcon)(
       iconWrap,
       item.file.extension === "canvas" ? "layout-dashboard" : item.file.extension === "base" ? "database" : "text"
     );
@@ -5625,17 +6115,17 @@ function renderResultRow(row, item, options) {
     renderHighlightedText(snippetEl, item.snippet, item.matchIndices);
     body.createDiv({ cls: "vault-spotlight-item-meta", text: item.file.path });
   } else if (item.kind === "heading") {
-    (0, import_obsidian9.setIcon)(iconWrap, "heading");
+    (0, import_obsidian10.setIcon)(iconWrap, "heading");
     renderHighlightedText(title, item.heading, item.matchIndices);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: `H${item.level}` });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.file.basename} \xB7 L${item.line}` });
   } else if (item.kind === "command") {
-    (0, import_obsidian9.setIcon)(iconWrap, "terminal-square");
+    (0, import_obsidian10.setIcon)(iconWrap, "terminal-square");
     renderHighlightedText(title, item.name, item.matchIndices);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isRecent ? "Recent" : "Command" });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: "Run command" });
   } else if (item.kind === "symbol") {
-    (0, import_obsidian9.setIcon)(iconWrap, iconForSymbolType(item.symbolType));
+    (0, import_obsidian10.setIcon)(iconWrap, iconForSymbolType(item.symbolType));
     if (item.symbolType === "heading" && item.level > 1) {
       row.addClass(`vault-spotlight-indent-${Math.min(item.level, 6)}`);
     }
@@ -5646,7 +6136,7 @@ function renderResultRow(row, item, options) {
     });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: `L${item.line}` });
   } else if (item.kind === "editor") {
-    (0, import_obsidian9.setIcon)(iconWrap, item.file ? iconForFileKind(getVaultFileKind(item.file)) : "layout");
+    (0, import_obsidian10.setIcon)(iconWrap, item.file ? iconForFileKind(getVaultFileKind(item.file)) : "layout");
     renderHighlightedText(title, item.title, item.matchIndices);
     if (item.isActive) {
       titleRow.createSpan({ cls: "vault-spotlight-item-badge is-active", text: "Active" });
@@ -5658,7 +6148,7 @@ function renderResultRow(row, item, options) {
     }
     body.createDiv({ cls: "vault-spotlight-item-meta", text: item.file ? item.file.path : "Open editor" });
   } else if (item.kind === "folder") {
-    (0, import_obsidian9.setIcon)(iconWrap, "folder");
+    (0, import_obsidian10.setIcon)(iconWrap, "folder");
     renderHighlightedText(title, item.folder.name, item.matchIndices);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Folder" });
     body.createDiv({
@@ -5666,22 +6156,22 @@ function renderResultRow(row, item, options) {
       text: `${item.folder.path} \xB7 ${item.folder.children.length} item${item.folder.children.length === 1 ? "" : "s"}`
     });
   } else if (item.kind === "history") {
-    (0, import_obsidian9.setIcon)(iconWrap, "history");
+    (0, import_obsidian10.setIcon)(iconWrap, "history");
     title.setText(item.query);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Recent search" });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: "Press \u21B5 to search again" });
   } else if (item.kind === "collection") {
-    (0, import_obsidian9.setIcon)(iconWrap, item.isPinned ? "star" : "search");
+    (0, import_obsidian10.setIcon)(iconWrap, item.isPinned ? "star" : "search");
     title.setText(item.name);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isPinned ? "Pinned collection" : "Smart collection" });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: item.query });
   } else if (item.kind === "profile") {
-    (0, import_obsidian9.setIcon)(iconWrap, item.isActive ? "check-circle" : "sliders-horizontal");
+    (0, import_obsidian10.setIcon)(iconWrap, item.isActive ? "check-circle" : "sliders-horizontal");
     title.setText(item.name);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isActive ? "Active profile" : "Search profile" });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.defaultMode}${item.defaultQuery ? ` \xB7 ${item.defaultQuery}` : ""}` });
   } else if (item.kind === "workflow") {
-    (0, import_obsidian9.setIcon)(iconWrap, item.isPinned ? "sparkles" : "play-circle");
+    (0, import_obsidian10.setIcon)(iconWrap, item.isPinned ? "sparkles" : "play-circle");
     title.setText(item.name);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isStarter ? "Starter workflow" : "Workflow" });
     if (item.rankingMode) {
@@ -5689,19 +6179,19 @@ function renderResultRow(row, item, options) {
     }
     body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.mode}${item.query ? ` \xB7 ${item.query}` : ""}` });
   } else if (item.kind === "action") {
-    (0, import_obsidian9.setIcon)(iconWrap, item.action.requiresPro ? "sparkles" : "bolt");
+    (0, import_obsidian10.setIcon)(iconWrap, item.action.requiresPro ? "sparkles" : "bolt");
     title.setText(item.action.name);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.action.requiresPro ? "Pro action" : "Action" });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: item.action.description });
   } else if (item.kind === "calc") {
     row.addClass("is-calc");
-    (0, import_obsidian9.setIcon)(iconWrap, "calculator");
+    (0, import_obsidian10.setIcon)(iconWrap, "calculator");
     title.addClass("vault-spotlight-calc-result");
     title.setText(item.result);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge is-action", text: "\u21B5 Copy" });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.expression} \xB7 ${item.detail}` });
   } else if (item.kind === "datejump") {
-    (0, import_obsidian9.setIcon)(iconWrap, "calendar-days");
+    (0, import_obsidian10.setIcon)(iconWrap, "calendar-days");
     title.setText(item.label);
     titleRow.createSpan({
       cls: item.exists ? "vault-spotlight-item-badge is-active" : "vault-spotlight-item-badge is-action",
@@ -5709,18 +6199,18 @@ function renderResultRow(row, item, options) {
     });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: item.path });
   } else if (item.kind === "capture") {
-    (0, import_obsidian9.setIcon)(iconWrap, "plus-circle");
+    (0, import_obsidian10.setIcon)(iconWrap, "plus-circle");
     title.setText(item.text || "Type something to capture\u2026");
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.label });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: item.description });
   } else if (item.kind === "snippet") {
-    (0, import_obsidian9.setIcon)(iconWrap, "clipboard-type");
+    (0, import_obsidian10.setIcon)(iconWrap, "clipboard-type");
     renderHighlightedText(title, item.name, item.matchIndices);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Snippet" });
     body.createDiv({ cls: "vault-spotlight-item-snippet", text: item.body.replace(/\s+/g, " ").slice(0, 120) });
   } else {
     row.addClass("is-emphasis");
-    (0, import_obsidian9.setIcon)(iconWrap, "file-plus");
+    (0, import_obsidian10.setIcon)(iconWrap, "file-plus");
     title.setText(`Create \u201C${item.name}\u201D`);
     titleRow.createSpan({ cls: "vault-spotlight-item-badge is-action", text: "New" });
     body.createDiv({ cls: "vault-spotlight-item-meta", text: "Create a new note" });
@@ -5728,14 +6218,14 @@ function renderResultRow(row, item, options) {
 }
 
 // src/spotlight/SpotlightModal.ts
-var formatMoment2 = import_obsidian10.moment;
+var formatMoment2 = import_obsidian11.moment;
 var SEARCH_DEBOUNCE_MS = 60;
 var RESULT_LIMIT = 60;
 var FILE_QUERY_LIMIT = 50;
 var FILE_BROWSE_LIMIT = 40;
 var SYMBOL_LIMIT = 100;
 var COMMAND_BROWSE_LIMIT = 1e3;
-var SpotlightModal = class extends import_obsidian10.Modal {
+var SpotlightModal = class extends import_obsidian11.Modal {
   constructor(app, plugin, initialQuery = "", initialMode = "files") {
     super(app);
     this.plugin = plugin;
@@ -5774,6 +6264,9 @@ var SpotlightModal = class extends import_obsidian10.Modal {
     this.drillReturnQuery = "";
     this.drillReturnMode = "files";
     this.hasNavigated = false;
+    // True while an IME composition (CJK candidate window) is active — set from the
+    // input's compositionstart/end events so the input handler can defer drill-in.
+    this.composing = false;
     this.activeWorkflowId = "";
     // Platform modifier label ("Cmd" on macOS, else "Ctrl"), resolved once in
     // onOpen so the footer hints match the real Mod-key bindings and the hint bar.
@@ -5830,7 +6323,7 @@ var SpotlightModal = class extends import_obsidian10.Modal {
     this.mode = initialMode;
   }
   onOpen() {
-    this.modifierLabel = getModifierLabel(import_obsidian10.Platform.isMacOS || import_obsidian10.Platform.isIosApp ? "mac" : "");
+    this.modifierLabel = getModifierLabel(import_obsidian11.Platform.isMacOS || import_obsidian11.Platform.isIosApp ? "mac" : "");
     this.containerEl.addClass("vault-spotlight-container");
     this.titleEl.empty();
     const { contentEl } = this;
@@ -5846,7 +6339,7 @@ var SpotlightModal = class extends import_obsidian10.Modal {
     });
     const inputWrap = header.createDiv({ cls: "vault-spotlight-input-wrap" });
     const searchIcon = inputWrap.createSpan({ cls: "vault-spotlight-search-icon" });
-    (0, import_obsidian10.setIcon)(searchIcon, "search");
+    (0, import_obsidian11.setIcon)(searchIcon, "search");
     searchIcon.setAttr("aria-hidden", "true");
     this.inputEl = inputWrap.createEl("input", {
       type: "text",
@@ -5897,7 +6390,7 @@ var SpotlightModal = class extends import_obsidian10.Modal {
       evt.stopPropagation();
       if ((item == null ? void 0 : item.kind) === "file") {
         item.isStarred = this.plugin.toggleStar(item.file.path);
-        (0, import_obsidian10.setIcon)(starBtn, item.isStarred ? "star" : "star-off");
+        (0, import_obsidian11.setIcon)(starBtn, item.isStarred ? "star" : "star-off");
         const row = starBtn.closest(".vault-spotlight-item");
         row == null ? void 0 : row.toggleClass("is-starred", item.isStarred);
       }
@@ -5932,7 +6425,7 @@ var SpotlightModal = class extends import_obsidian10.Modal {
       const cta = contentEl.createDiv({ cls: "vault-spotlight-pro-cta" });
       const lead = cta.createDiv({ cls: "vault-spotlight-pro-cta-lead" });
       const ctaIcon = lead.createDiv({ cls: "vault-spotlight-pro-cta-icon" });
-      (0, import_obsidian10.setIcon)(ctaIcon, "sparkles");
+      (0, import_obsidian11.setIcon)(ctaIcon, "sparkles");
       ctaIcon.setAttr("aria-hidden", "true");
       lead.createDiv({
         cls: "vault-spotlight-pro-cta-text",
@@ -5945,8 +6438,14 @@ var SpotlightModal = class extends import_obsidian10.Modal {
         fallback: DEFAULT_SETTINGS.purchaseUrl
       });
     }
-    this.inputEl.addEventListener("input", (evt) => {
-      if (evt.isComposing) {
+    this.inputEl.addEventListener("compositionstart", () => {
+      this.composing = true;
+    });
+    this.inputEl.addEventListener("compositionend", () => {
+      this.composing = false;
+    });
+    this.inputEl.addEventListener("input", () => {
+      if (this.composing) {
         this.hasNavigated = false;
         this.activeWorkflowId = "";
         this.scheduleSearch();
@@ -6035,7 +6534,12 @@ var SpotlightModal = class extends import_obsidian10.Modal {
     const mod = this.modifierLabel;
     this.hintEl.empty();
     const full = showOnboarding(this.plugin.settings.openCount, this.plugin.settings.onboardingDismissed);
+    const core = [
+      [`${mod}+K`, "actions"],
+      [`${mod}+S`, "save workflow"]
+    ];
     const hints = full ? [
+      ...core,
       ["2+2", "calc"],
       [prefixes.capture, "capture"],
       ["#journal", "tag"],
@@ -6043,10 +6547,7 @@ var SpotlightModal = class extends import_obsidian10.Modal {
       [prefixes.symbols, "outline"],
       [prefixes.editors, "tabs"],
       [prefixes.folders, "folders"]
-    ] : [
-      ["2+2", "calc"],
-      ["#journal", "tag"]
-    ];
+    ] : [...core];
     if (isPro && full) {
       hints.push(
         [prefixes.content, "content"],
@@ -6055,7 +6556,8 @@ var SpotlightModal = class extends import_obsidian10.Modal {
         [prefixes.snippets, "snippets"]
       );
     }
-    hints.push(["Tab", "next mode"], ["Shift+Tab", "previous mode"], [this.plugin.settings.escapeChar, "literal"]);
+    hints.push(["Tab", "next mode"], ["Shift+Tab", "previous mode"]);
+    if (full) hints.push([this.plugin.settings.escapeChar, "literal"]);
     hints.forEach(([code, label], index) => {
       if (index > 0) this.hintEl.appendText(" \xB7 ");
       this.hintEl.createEl("code", { text: code });
@@ -6169,22 +6671,7 @@ var SpotlightModal = class extends import_obsidian10.Modal {
         this.setBadge("Commands", "is-content");
         const commandResults = this.commandSearcher.search(cmdQuery, cmdQuery ? RESULT_LIMIT : COMMAND_BROWSE_LIMIT, this.plugin.settings.ranking.ignoreDiacritics);
         if (generation !== this.searchGeneration) return;
-        let ordered = commandResults;
-        const recentIds = this.plugin.settings.recentCommandIds;
-        if (cmdQuery.length === 0 && recentIds.length > 0) {
-          const byId = new Map(commandResults.map((r) => [r.id, r]));
-          const recent = recentIds.map((id) => byId.get(id)).filter((r) => !!r);
-          const recentSet2 = new Set(recent.map((r) => r.id));
-          ordered = [...recent, ...commandResults.filter((r) => !recentSet2.has(r.id))];
-        }
-        const recentSet = new Set(cmdQuery.length === 0 ? recentIds : []);
-        this.items = ordered.slice(0, RESULT_LIMIT).map((r) => ({
-          kind: "command",
-          id: r.id,
-          name: r.name,
-          matchIndices: r.matchIndices,
-          isRecent: recentSet.has(r.id)
-        }));
+        this.items = buildCommandItems(commandResults, this.plugin.settings.recentCommandIds, cmdQuery.length === 0, RESULT_LIMIT);
       } else if (mode === "content") {
         const text = body;
         this.setBadge("Content", "is-content");
@@ -6215,18 +6702,7 @@ var SpotlightModal = class extends import_obsidian10.Modal {
           excludeFolders
         });
         if (generation !== this.searchGeneration) return;
-        this.items = contentResults.map((r) => {
-          var _a2;
-          return {
-            kind: "content",
-            file: r.file,
-            line: r.line,
-            snippet: r.snippet,
-            score: r.score,
-            engine: r.engine,
-            matchIndices: (_a2 = r.matchIndices) != null ? _a2 : []
-          };
-        });
+        this.items = buildContentItems(contentResults);
       } else if (mode === "headings") {
         this.setBadge("Headings", "is-content");
         const parsed = parseHeadingQuery(body);
@@ -6239,15 +6715,7 @@ var SpotlightModal = class extends import_obsidian10.Modal {
           ignoreDiacritics: this.plugin.settings.ranking.ignoreDiacritics
         });
         if (generation !== this.searchGeneration) return;
-        this.items = headingResults.map((r) => ({
-          kind: "heading",
-          file: r.file,
-          line: r.line,
-          heading: r.heading,
-          level: r.level,
-          score: r.score,
-          matchIndices: r.matchIndices
-        }));
+        this.items = buildHeadingItems(headingResults);
       } else if (mode === "symbols") {
         const target = (_f = this.drillFile) != null ? _f : this.app.workspace.getActiveFile();
         this.setBadge(target ? `Symbols \xB7 ${target.basename}` : "Symbols", "is-content");
@@ -6264,29 +6732,12 @@ var SpotlightModal = class extends import_obsidian10.Modal {
         }
         const symbolResults = this.symbolSearcher.search(target, body, SYMBOL_LIMIT, this.plugin.settings.ranking.ignoreDiacritics);
         if (generation !== this.searchGeneration) return;
-        this.items = symbolResults.map((r) => ({
-          kind: "symbol",
-          file: r.file,
-          line: r.line,
-          text: r.text,
-          symbolType: r.symbolType,
-          level: r.level,
-          matchIndices: r.matchIndices
-        }));
+        this.items = buildSymbolItems(symbolResults);
       } else if (mode === "editors") {
         this.setBadge("Editors", "is-content");
         const editorResults = this.editorSearcher.search(body, RESULT_LIMIT, this.plugin.settings.ranking.ignoreDiacritics);
         if (generation !== this.searchGeneration) return;
-        this.items = editorResults.map((r) => ({
-          kind: "editor",
-          leaf: r.leaf,
-          file: r.file,
-          title: r.title,
-          viewType: r.viewType,
-          isActive: r.isActive,
-          isPinned: r.isPinned,
-          matchIndices: r.matchIndices
-        }));
+        this.items = buildEditorItems(editorResults);
         if (this.items.length === 0) {
           this.isLoading = false;
           this.renderEmptyState("layout", "No open editors", "Open a few notes, then jump between their tabs from here.");
@@ -6360,65 +6811,9 @@ var SpotlightModal = class extends import_obsidian10.Modal {
           rankingMode: (_h = workflow == null ? void 0 : workflow.rankingMode) != null ? _h : profile == null ? void 0 : profile.rankingMode,
           limit: isEmptyQuery ? FILE_BROWSE_LIMIT : FILE_QUERY_LIMIT
         });
-        this.items = fileResults.map((r) => ({
-          kind: "file",
-          file: r.file,
-          score: r.score,
-          matchIndices: r.matchIndices,
-          modifiedLabel: r.modifiedLabel,
-          fileKind: r.fileKind,
-          primaryMatch: r.primaryMatch,
-          aliasMatched: r.aliasMatched,
-          tags: r.tags,
-          aliases: r.aliases,
-          isRecent: r.isRecent,
-          isStarred: r.isStarred,
-          isBookmarked: r.isBookmarked
-        }));
+        this.items = buildFileItems(fileResults);
         if (isEmptyQuery) {
-          const source = isPro ? ensureStarterWorkflows(this.plugin.settings.workflowPresets) : normalizeWorkflowPresets(this.plugin.settings.workflowPresets).slice(0, FREE_WORKFLOW_LIMIT);
-          if (source.length > 0) {
-            const workflows = source.slice().sort((a, b) => {
-              var _a2, _b2;
-              return Number(b.pinned) - Number(a.pinned) || Number((_a2 = b.starter) != null ? _a2 : false) - Number((_b2 = a.starter) != null ? _b2 : false) || a.name.localeCompare(b.name);
-            }).map((workflow2) => {
-              var _a2;
-              return {
-                kind: "workflow",
-                id: workflow2.id,
-                name: workflow2.name,
-                query: workflow2.query,
-                mode: workflow2.mode,
-                profileId: workflow2.profileId,
-                isPinned: workflow2.pinned,
-                isStarter: (_a2 = workflow2.starter) != null ? _a2 : false,
-                rankingMode: workflow2.rankingMode
-              };
-            });
-            this.items = [...workflows, ...this.items];
-          }
-        }
-        if (isEmptyQuery && isPro && this.plugin.settings.searchProfiles.length > 0) {
-          const profiles = this.plugin.settings.searchProfiles.map((searchProfile) => ({
-            kind: "profile",
-            id: searchProfile.id,
-            name: searchProfile.name,
-            defaultMode: searchProfile.defaultMode,
-            defaultQuery: searchProfile.defaultQuery,
-            isActive: searchProfile.id === this.plugin.settings.activeProfileId
-          }));
-          this.items = [...profiles, ...this.items];
-        }
-        if (isEmptyQuery && isPro && this.plugin.settings.customSearches.length > 0) {
-          const pinned = new Set(this.plugin.settings.pinnedCustomSearchIds);
-          const collections = this.plugin.settings.customSearches.slice().sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)) || a.name.localeCompare(b.name)).map((search) => ({
-            kind: "collection",
-            id: search.id,
-            name: search.name,
-            query: search.query,
-            isPinned: pinned.has(search.id)
-          }));
-          this.items = [...collections, ...this.items];
+          this.items = [...buildSavedObjectItems(this.plugin.settings, isPro), ...this.items];
         }
         if (!isEmptyQuery) {
           const smartItems = this.computeSmartItems(body);
@@ -6527,7 +6922,7 @@ var SpotlightModal = class extends import_obsidian10.Modal {
     const q = query.trim();
     const rows = [];
     for (const abstract of this.app.vault.getAllLoadedFiles()) {
-      if (!(abstract instanceof import_obsidian10.TFolder) || abstract.isRoot()) continue;
+      if (!(abstract instanceof import_obsidian11.TFolder) || abstract.isRoot()) continue;
       if (q.length === 0) {
         rows.push({ folder: abstract, score: 1, indices: [] });
         continue;
@@ -6665,7 +7060,7 @@ var SpotlightModal = class extends import_obsidian10.Modal {
     this.resultsEl.removeClass("is-searching");
     const empty = this.resultsEl.createDiv({ cls: "vault-spotlight-empty" });
     const iconWrap = empty.createDiv({ cls: "vault-spotlight-empty-icon" });
-    (0, import_obsidian10.setIcon)(iconWrap, icon);
+    (0, import_obsidian11.setIcon)(iconWrap, icon);
     iconWrap.setAttr("aria-hidden", "true");
     empty.createDiv({ cls: "vault-spotlight-empty-title", text: title });
     empty.createDiv({ cls: "vault-spotlight-empty-desc", text: desc });
@@ -6716,7 +7111,7 @@ var SpotlightModal = class extends import_obsidian10.Modal {
         const check = row.createDiv({ cls: "vault-spotlight-check" });
         check.setAttr("aria-hidden", "true");
         if (this.checkedPaths.has(file.path)) {
-          (0, import_obsidian10.setIcon)(check, "check");
+          (0, import_obsidian11.setIcon)(check, "check");
         }
       }
       renderResultRow(row, item, {
@@ -6730,7 +7125,7 @@ var SpotlightModal = class extends import_obsidian10.Modal {
           cls: "vault-spotlight-star-btn",
           attr: { type: "button", tabindex: "-1", "aria-hidden": "true" }
         });
-        (0, import_obsidian10.setIcon)(starBtn, starItem.isStarred ? "star" : "star-off");
+        (0, import_obsidian11.setIcon)(starBtn, starItem.isStarred ? "star" : "star-off");
       }
     });
     this.renderedSelectedIndex = this.selectedIndex;
@@ -6911,7 +7306,7 @@ var SpotlightModal = class extends import_obsidian10.Modal {
     row == null ? void 0 : row.toggleClass("is-starred", item.isStarred);
     const starBtn = row == null ? void 0 : row.querySelector(".vault-spotlight-star-btn");
     if (starBtn) {
-      (0, import_obsidian10.setIcon)(starBtn, item.isStarred ? "star" : "star-off");
+      (0, import_obsidian11.setIcon)(starBtn, item.isStarred ? "star" : "star-off");
       starBtn.setAttr("aria-label", item.isStarred ? "Unstar" : "Star");
     }
   }
@@ -6941,7 +7336,7 @@ var SpotlightModal = class extends import_obsidian10.Modal {
   safeActivate(paneOverride = null) {
     this.activateSelection(paneOverride).catch((err) => {
       console.error("[VaultSpotlight] activation failed", err);
-      new import_obsidian10.Notice("Vault Spotlight: could not complete that action.");
+      new import_obsidian11.Notice("Vault Spotlight: could not complete that action.");
     });
   }
   async activateSelection(paneOverride = null) {
@@ -6986,14 +7381,14 @@ var SpotlightModal = class extends import_obsidian10.Modal {
     }
     if (selected.kind === "action") {
       if (selected.action.requiresPro && !this.plugin.settings.isPro) {
-        new import_obsidian10.Notice("Vault Spotlight: Pro required for this action.");
+        new import_obsidian11.Notice("Vault Spotlight: Pro required for this action.");
         return;
       }
       try {
         await selected.action.run();
       } catch (err) {
         console.error("[VaultSpotlight] action failed", err);
-        new import_obsidian10.Notice("Vault Spotlight: action failed.");
+        new import_obsidian11.Notice("Vault Spotlight: action failed.");
       }
       return;
     }
@@ -7071,7 +7466,7 @@ var SpotlightModal = class extends import_obsidian10.Modal {
     const line = item.kind === "content" || item.kind === "heading" || item.kind === "symbol" ? item.line : null;
     if (line === null) return;
     const file = itemFile(item);
-    if (!file || file.extension !== "md" || !(leaf.view instanceof import_obsidian10.MarkdownView)) return;
+    if (!file || file.extension !== "md" || !(leaf.view instanceof import_obsidian11.MarkdownView)) return;
     const editor = leaf.view.editor;
     const targetLine = Math.max(0, Math.min(line - 1, editor.lastLine()));
     const pos = { line: targetLine, ch: 0 };
@@ -7086,14 +7481,14 @@ var SpotlightModal = class extends import_obsidian10.Modal {
         (_b = (_a = this.app.workspace.getActiveFile()) == null ? void 0 : _a.path) != null ? _b : ""
       );
       const dir = parent.path ? `${parent.path}/` : "";
-      const path = (0, import_obsidian10.normalizePath)(`${dir}${cleaned}.md`);
+      const path = (0, import_obsidian11.normalizePath)(`${dir}${cleaned}.md`);
       const existing = this.app.vault.getAbstractFileByPath(path);
-      const file = existing instanceof import_obsidian10.TFile ? existing : await this.app.vault.create(path, "");
+      const file = existing instanceof import_obsidian11.TFile ? existing : await this.app.vault.create(path, "");
       await this.app.workspace.getLeaf(false).openFile(file);
       this.plugin.trackRecent(file.path);
     } catch (err) {
       console.error("[VaultSpotlight] create note failed", err);
-      new import_obsidian10.Notice("Vault Spotlight: could not create note.");
+      new import_obsidian11.Notice("Vault Spotlight: could not create note.");
     }
   }
   openActionPalette(context = ((_a) => (_a = this.items[this.selectedIndex]) != null ? _a : null)()) {
@@ -7122,7 +7517,7 @@ var SpotlightModal = class extends import_obsidian10.Modal {
   runIntegrationCommand(name) {
     const command = this.commandSearcher.search(name, 20).find((cmd) => cmd.id.toLowerCase().includes(name.replace(" ", "-")) || cmd.name.toLowerCase().includes(name));
     if (!command || !this.commandSearcher.execute(command.id)) {
-      new import_obsidian10.Notice(`Vault Spotlight: ${name} command not found.`);
+      new import_obsidian11.Notice(`Vault Spotlight: ${name} command not found.`);
       return;
     }
     this.close();
@@ -7135,228 +7530,60 @@ var SpotlightModal = class extends import_obsidian10.Modal {
   async handoffBaseToPowerPack(view, basePath) {
     const api = this.basesPowerPackApi();
     if (!(api == null ? void 0 : api.openView)) {
-      new import_obsidian10.Notice("Vault Spotlight: update Bases Power Pack to 1.2.0+ to use this action.");
+      new import_obsidian11.Notice("Vault Spotlight: update Bases Power Pack to 1.2.0+ to use this action.");
       return;
     }
     try {
       if (await api.openView(view, basePath)) this.close();
     } catch (err) {
       console.error("[VaultSpotlight] Bases Power Pack handoff failed", err);
-      new import_obsidian10.Notice("Vault Spotlight: could not open the base in Bases Power Pack.");
+      new import_obsidian11.Notice("Vault Spotlight: could not open the base in Bases Power Pack.");
     }
   }
   availableActions(context) {
+    return buildAvailableActions(context, this.actionHost());
+  }
+  /** The operations the action-palette `run` closures need — see actionBuilders.ts. */
+  actionHost() {
+    return {
+      app: this.app,
+      plugin: this.plugin,
+      workflows: this.workflows,
+      capture: this.capture,
+      integrations: () => this.installedSearchIntegrations(),
+      basesPowerPackViews: (file) => this.basesPowerPackViews(file),
+      handoffBaseToPowerPack: (view, path) => void this.handoffBaseToPowerPack(view, path),
+      batchContext: () => this.batchContext(),
+      resultItemsForBatch: () => this.resultItemsForBatch(),
+      runIntegrationCommand: (name) => this.runIntegrationCommand(name),
+      openResultAndClose: async (ctx) => {
+        this.close();
+        await this.openItem(ctx, null);
+        const file = itemFile(ctx);
+        if (file) this.plugin.trackRecent(file.path);
+      },
+      runCollectionQuery: (query) => {
+        this.actionContext = null;
+        this.inputEl.value = query;
+        void this.runSearch();
+      },
+      closeActionPalette: () => this.closeActionPalette()
+    };
+  }
+  /** Bases Power Pack views for a `.base` file — empty unless Power Pack premium is
+   * active, so the palette never offers a handoff that can only fail. */
+  basesPowerPackViews(file) {
     var _a;
-    if (context.kind === "profile") {
+    if (file.extension !== "base" || !this.installedSearchIntegrations().basesPowerPack) return [];
+    const api = this.basesPowerPackApi();
+    if ((api == null ? void 0 : api.openView) && ((_a = api.isPremiumActive) == null ? void 0 : _a.call(api)) === true) {
       return [
-        {
-          id: "activate-profile",
-          name: "Activate search profile",
-          description: `Switch to ${context.name} and run its default query.`,
-          requiresPro: true,
-          run: () => this.workflows.activateProfile(context.id)
-        },
-        {
-          id: "clear-profile",
-          name: "Clear active profile",
-          description: "Return Spotlight to the global search settings.",
-          requiresPro: true,
-          run: () => this.workflows.clearProfile()
-        }
+        ["kanban", "Kanban"],
+        ["calendar", "Calendar"],
+        ["gantt", "Gantt"]
       ];
     }
-    if (context.kind === "collection") {
-      return [
-        {
-          id: "run-collection",
-          name: "Run smart collection",
-          description: context.query,
-          run: () => {
-            this.actionContext = null;
-            this.inputEl.value = context.query;
-            void this.runSearch();
-          }
-        },
-        {
-          id: "pin-collection",
-          name: context.isPinned ? "Unpin smart collection" : "Pin smart collection",
-          description: "Keep this saved search at the top of the browse view.",
-          requiresPro: true,
-          run: () => {
-            this.plugin.togglePinnedCollection(context.id);
-            this.closeActionPalette();
-          }
-        },
-        {
-          id: "copy-collection-query",
-          name: "Copy collection query",
-          description: "Copy the saved search query to the clipboard.",
-          run: () => copyToClipboard(context.query, "Query copied")
-        }
-      ];
-    }
-    if (context.kind === "calc") {
-      return [
-        {
-          id: "copy-calc",
-          name: "Copy result",
-          description: `Copy ${context.result} to the clipboard.`,
-          run: () => this.capture.copyCalcResult(context)
-        },
-        {
-          id: "insert-calc",
-          name: "Insert at cursor",
-          description: "Insert the result into the active note.",
-          run: () => this.capture.insertCalcResult(context)
-        }
-      ];
-    }
-    if (context.kind === "datejump") {
-      return [
-        {
-          id: "open-daily",
-          name: context.exists ? "Open daily note" : "Create daily note",
-          description: context.path,
-          run: () => void this.capture.openOrCreateDatedNote(context.date)
-        }
-      ];
-    }
-    if (context.kind === "capture") {
-      return [
-        {
-          id: "run-capture",
-          name: "Capture",
-          description: context.description,
-          run: () => void this.capture.runCapture(context)
-        }
-      ];
-    }
-    if (context.kind === "snippet") {
-      return [
-        {
-          id: "insert-snippet",
-          name: "Insert snippet",
-          description: "Insert this snippet at the cursor.",
-          requiresPro: true,
-          run: () => void this.capture.insertSnippet(context)
-        },
-        {
-          id: "copy-snippet",
-          name: "Copy snippet",
-          description: "Copy the snippet body to the clipboard.",
-          run: () => copyToClipboard(context.body, "Snippet copied")
-        }
-      ];
-    }
-    const file = itemFile(context);
-    const actions = [];
-    if (file) {
-      actions.push(
-        {
-          id: "open",
-          name: "Open",
-          description: "Open the selected result.",
-          run: async () => {
-            this.close();
-            await this.openItem(context, null);
-            this.plugin.trackRecent(file.path);
-          }
-        },
-        {
-          id: "copy-link",
-          name: "Copy link",
-          description: "Copy a Markdown link for this result.",
-          run: () => copyToClipboard(this.app.fileManager.generateMarkdownLink(file, ""), "Link copied")
-        },
-        {
-          id: "copy-path",
-          name: "Copy path",
-          description: "Copy this file path.",
-          run: () => copyToClipboard(file.path, "Path copied")
-        },
-        {
-          id: "rename",
-          name: "Rename",
-          description: "Rename the selected note or file.",
-          // Rename is free (a basic file operation) and available from both the
-          // action palette and the right-click / Alt+Enter menu — the two paths
-          // are intentionally consistent (the context menu never gated it).
-          run: () => renameFile(this.app, file)
-        },
-        {
-          id: "toggle-star",
-          name: this.plugin.isStarred(file.path) ? "Unstar" : "Star",
-          description: "Toggle the selected file in Starred pins.",
-          requiresPro: true,
-          run: () => {
-            this.plugin.toggleStar(file.path);
-            this.closeActionPalette();
-          }
-        }
-      );
-    }
-    const integrations = this.installedSearchIntegrations();
-    if (file && file.extension === "base" && integrations.basesPowerPack) {
-      const api = this.basesPowerPackApi();
-      if ((api == null ? void 0 : api.openView) && ((_a = api.isPremiumActive) == null ? void 0 : _a.call(api)) === true) {
-        const views = [
-          ["kanban", "Kanban"],
-          ["calendar", "Calendar"],
-          ["gantt", "Gantt"]
-        ];
-        for (const [view, label] of views) {
-          actions.push({
-            id: `open-base-${view}`,
-            name: `Open in ${label} view`,
-            description: `Open this base in Bases Power Pack's ${label} view.`,
-            run: () => this.handoffBaseToPowerPack(view, file.path)
-          });
-        }
-      }
-    }
-    actions.push({
-      id: "save-profile",
-      name: "Save current setup as profile",
-      description: "Create a Pro search profile from the current mode, query, preview, file type, and folder settings.",
-      requiresPro: true,
-      run: () => this.workflows.saveCurrentProfile()
-    });
-    if (this.resultItemsForBatch().length > 0) {
-      const batchActions = [
-        ["copy-results", "Copy results as Markdown", "Copy selected results, or the current result list, as Markdown links.", () => copyResultsAsMarkdown(this.batchContext())],
-        ["export-results", "Export results to note", "Create a Markdown note containing selected/search results.", () => exportResultsToNote(this.batchContext())],
-        ["batch-add-tag", "Batch add tag", "Append a tag to selected Markdown files.", () => batchAddTag(this.batchContext())],
-        ["batch-remove-tag", "Batch remove tag", "Remove a tag from selected Markdown files.", () => batchRemoveTag(this.batchContext())],
-        ["batch-set-property", "Batch set property", "Set a frontmatter property on selected Markdown files.", () => batchSetProperty(this.batchContext())],
-        ["batch-move", "Batch move files", "Move selected files into a target folder.", () => batchMoveFiles(this.batchContext())],
-        ["batch-star", "Batch star results", "Add selected/current result files to Starred pins.", () => batchSetStarred(this.batchContext(), true)],
-        ["batch-unstar", "Batch unstar results", "Remove selected/current result files from Starred pins.", () => batchSetStarred(this.batchContext(), false)],
-        ["create-moc", "Create MOC from results", "Create a grouped index note from selected/current results.", () => createMocFromResults(this.batchContext())],
-        ["append-links", "Append links to active note", "Append selected/current result links to the active Markdown note.", () => appendLinksToActiveNote(this.batchContext())]
-      ];
-      for (const [id, name, description, run] of batchActions) {
-        actions.push({ id, name, description, requiresPro: true, run });
-      }
-      if (integrations.omnisearch) {
-        actions.push({
-          id: "open-omnisearch",
-          name: "Search in Omnisearch",
-          description: "Hand off to the installed Omnisearch plugin.",
-          requiresPro: true,
-          run: () => this.runIntegrationCommand("omnisearch")
-        });
-      }
-      if (integrations.textExtractor) {
-        actions.push({
-          id: "open-text-extractor",
-          name: "Run Text Extractor",
-          description: "Use the installed Text Extractor plugin for document/PDF text support.",
-          requiresPro: true,
-          run: () => this.runIntegrationCommand("text extractor")
-        });
-      }
-    }
-    return actions;
+    return [];
   }
   resultItemsForBatch() {
     const allItems = this.actionContext ? this.resultSnapshot : this.items;
@@ -7383,54 +7610,16 @@ var SpotlightModal = class extends import_obsidian10.Modal {
     };
   }
   openActionsMenu(item, evt) {
-    var _a;
-    const file = itemFile(item);
-    if (!file) return;
-    const menu = new import_obsidian10.Menu();
-    const openIn = (paneType) => {
-      this.close();
-      void (async () => {
-        const leaf = this.app.workspace.getLeaf(paneType);
-        await leaf.openFile(file);
-        this.seekToItemLine(leaf, item);
-        this.plugin.trackRecent(file.path);
-      })();
-    };
-    menu.addItem((i) => i.setTitle("Open in new tab").setIcon("file-plus").onClick(() => openIn("tab")));
-    menu.addItem(
-      (i) => i.setTitle("Open to the right").setIcon("separator-vertical").onClick(() => openIn("split"))
-    );
-    menu.addItem(
-      (i) => i.setTitle("Open in new window").setIcon("picture-in-picture-2").onClick(() => openIn("window"))
-    );
-    menu.addSeparator();
-    menu.addItem(
-      (i) => i.setTitle("Copy Obsidian link").setIcon("link").onClick(() => {
-        const link = this.app.fileManager.generateMarkdownLink(file, "");
-        copyToClipboard(link, "Link copied");
-      })
-    );
-    menu.addItem(
-      (i) => i.setTitle("Copy path").setIcon("copy").onClick(() => copyToClipboard(file.path, "Path copied"))
-    );
-    menu.addItem(
-      (i) => i.setTitle("Rename\u2026").setIcon("pencil").onClick(() => renameFile(this.app, file))
-    );
-    const showInFolder = this.app.showInFolder;
-    if (typeof showInFolder === "function") {
-      menu.addItem(
-        (i) => i.setTitle("Show in system explorer").setIcon("folder-open").onClick(() => {
-          showInFolder.call(this.app, file.path);
-        })
-      );
-    }
-    if (evt) {
-      menu.showAtMouseEvent(evt);
-    } else {
-      const rect = (_a = this.resultsEl.querySelector(".is-selected")) == null ? void 0 : _a.getBoundingClientRect();
-      if (rect) menu.showAtPosition({ x: rect.left + 40, y: rect.bottom });
-      else menu.showAtPosition({ x: 100, y: 100 });
-    }
+    openResultContextMenu(item, evt, {
+      app: this.app,
+      close: () => this.close(),
+      trackRecent: (path) => this.plugin.trackRecent(path),
+      seekToItemLine: (leaf, it) => this.seekToItemLine(leaf, it),
+      selectedRowRect: () => {
+        var _a, _b;
+        return (_b = (_a = this.resultsEl.querySelector(".is-selected")) == null ? void 0 : _a.getBoundingClientRect()) != null ? _b : null;
+      }
+    });
   }
   recordSearch() {
     const raw = this.inputEl.value.trim();
@@ -7472,129 +7661,29 @@ var SpotlightModal = class extends import_obsidian10.Modal {
     return [];
   }
   registerScopeShortcuts() {
-    this.scope.register([], "ArrowDown", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      this.moveSelection(1);
-      return false;
-    });
-    this.scope.register([], "ArrowUp", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      this.moveSelection(-1);
-      return false;
-    });
-    this.scope.register([], "Home", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "first" }));
-      return false;
-    });
-    this.scope.register([], "End", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "last" }));
-      return false;
-    });
-    this.scope.register([], "PageDown", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "page", delta: 1, pageSize: this.pageSize() }));
-      return false;
-    });
-    this.scope.register([], "PageUp", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "page", delta: -1, pageSize: this.pageSize() }));
-      return false;
-    });
-    this.scope.register(["Ctrl"], "n", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      this.moveSelection(1);
-      return false;
-    });
-    this.scope.register(["Ctrl"], "p", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      this.moveSelection(-1);
-      return false;
-    });
-    this.scope.register([], "Enter", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      this.safeActivate();
-      return false;
-    });
-    this.scope.register(["Mod"], "Enter", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      this.safeActivate(this.plugin.settings.defaultNewTab ? null : "tab");
-      return false;
-    });
-    this.scope.register(["Mod", "Alt"], "Enter", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      this.safeActivate("split");
-      return false;
-    });
-    this.scope.register(["Alt"], "Enter", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      const item = this.items[this.selectedIndex];
-      if (item) this.openActionsMenu(item);
-      return false;
-    });
-    this.scope.register(["Shift"], "Enter", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      void this.createFromQuery();
-      return false;
-    });
-    this.scope.register(["Mod"], "k", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      this.openActionPalette();
-      return false;
-    });
-    this.scope.register([], "Escape", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      if (this.actionContext) this.closeActionPalette();
-      else if (this.drillFile) this.exitDrill();
-      else this.close();
-      return false;
-    });
-    this.scope.register([], "Tab", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      this.cycleMode(1);
-      return false;
-    });
-    this.scope.register(["Shift"], "Tab", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      this.cycleMode(-1);
-      return false;
-    });
-    this.scope.register(["Mod"], "s", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      this.workflows.saveCurrentWorkflow();
-      return false;
-    });
-    if (!this.plugin.settings.isPro) return;
-    this.scope.register(["Mod"], " ", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      this.toggleCheck();
-      return false;
-    });
-    this.scope.register(["Mod"], "d", (evt) => {
-      if (evt.isComposing) return true;
-      evt.preventDefault();
-      this.toggleStarSelected();
-      return false;
+    registerSpotlightScope(this.scope, this.plugin.settings.isPro, {
+      moveSelection: (delta) => this.moveSelection(delta),
+      selectFirst: () => this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "first" })),
+      selectLast: () => this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "last" })),
+      pageMove: (delta) => this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "page", delta, pageSize: this.pageSize() })),
+      activateDefault: () => this.safeActivate(),
+      activatePreferredTab: () => this.safeActivate(this.plugin.settings.defaultNewTab ? null : "tab"),
+      activateSplit: () => this.safeActivate("split"),
+      openContextMenuForSelection: () => {
+        const item = this.items[this.selectedIndex];
+        if (item) this.openActionsMenu(item);
+      },
+      createFromQuery: () => void this.createFromQuery(),
+      openActionPalette: () => this.openActionPalette(),
+      escape: () => {
+        if (this.actionContext) this.closeActionPalette();
+        else if (this.drillFile) this.exitDrill();
+        else this.close();
+      },
+      cycleMode: (delta) => this.cycleMode(delta),
+      saveWorkflow: () => this.workflows.saveCurrentWorkflow(),
+      toggleCheck: () => this.toggleCheck(),
+      toggleStarSelected: () => this.toggleStarSelected()
     });
   }
   clearFocusTimers() {
@@ -7698,10 +7787,10 @@ function resolveLicenseTransition(before, licenseKey, verifyResult, persistUncha
 }
 
 // src/search/ContentSearcher.ts
-var import_obsidian12 = require("obsidian");
+var import_obsidian13 = require("obsidian");
 
 // src/search/RipgrepSearcher.ts
-var import_obsidian11 = require("obsidian");
+var import_obsidian12 = require("obsidian");
 function getChildProcess() {
   try {
     const req = window.require;
@@ -7964,7 +8053,7 @@ var RipgrepSearcher = class {
       const normalized = rawPath.replace(/\\/g, "/").replace(/^\.\//, "");
       let file;
       const direct = this.app.vault.getAbstractFileByPath(normalized);
-      if (direct instanceof import_obsidian11.TFile) {
+      if (direct instanceof import_obsidian12.TFile) {
         file = direct;
       } else {
         file = this.findFileBySuffix(getSuffixMap(), normalized);
@@ -8440,7 +8529,7 @@ var ContentSearcher = class {
         const results2 = [];
         for (const row of rows) {
           const file = this.app.vault.getAbstractFileByPath(row.path);
-          if (!(file instanceof import_obsidian12.TFile)) continue;
+          if (!(file instanceof import_obsidian13.TFile)) continue;
           results2.push({
             file,
             line: row.line,
@@ -8571,7 +8660,7 @@ var MAX_FRECENCY_ENTRIES = 500;
 function isSpotlightMode(value) {
   return typeof value === "string" && MODE_ORDER2.includes(value);
 }
-var VaultSpotlightPlugin = class extends import_obsidian13.Plugin {
+var VaultSpotlightPlugin = class extends import_obsidian14.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
@@ -8658,12 +8747,12 @@ var VaultSpotlightPlugin = class extends import_obsidian13.Plugin {
     });
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
-        if (this.layoutReady && file instanceof import_obsidian13.TFile) void this.contentSearcher.updateFile(file);
+        if (this.layoutReady && file instanceof import_obsidian14.TFile) void this.contentSearcher.updateFile(file);
       })
     );
     this.registerEvent(
       this.app.vault.on("create", (file) => {
-        if (this.layoutReady && file instanceof import_obsidian13.TFile) void this.contentSearcher.updateFile(file);
+        if (this.layoutReady && file instanceof import_obsidian14.TFile) void this.contentSearcher.updateFile(file);
       })
     );
     this.registerEvent(
@@ -8677,7 +8766,7 @@ var VaultSpotlightPlugin = class extends import_obsidian13.Plugin {
       this.app.vault.on("rename", (file, oldPath) => {
         if (!this.layoutReady) return;
         this.contentSearcher.removeFile(oldPath);
-        if (file instanceof import_obsidian13.TFile) void this.contentSearcher.updateFile(file);
+        if (file instanceof import_obsidian14.TFile) void this.contentSearcher.updateFile(file);
         this.renamePath(oldPath, file.path);
       })
     );
@@ -8795,8 +8884,8 @@ var VaultSpotlightPlugin = class extends import_obsidian13.Plugin {
     const active = this.app.workspace.getActiveFile();
     const path = previousFilePath(this.settings.recentPaths, (_a = active == null ? void 0 : active.path) != null ? _a : "");
     const file = path ? this.app.vault.getAbstractFileByPath(path) : null;
-    if (!(file instanceof import_obsidian13.TFile)) {
-      new import_obsidian13.Notice("Vault Spotlight: no previous file yet.");
+    if (!(file instanceof import_obsidian14.TFile)) {
+      new import_obsidian14.Notice("Vault Spotlight: no previous file yet.");
       return;
     }
     try {
@@ -8804,7 +8893,7 @@ var VaultSpotlightPlugin = class extends import_obsidian13.Plugin {
       this.trackRecent(file.path);
     } catch (err) {
       console.error("[VaultSpotlight] switch to last file failed", err);
-      new import_obsidian13.Notice("Vault Spotlight: could not open the previous file.");
+      new import_obsidian14.Notice("Vault Spotlight: could not open the previous file.");
     }
   }
   /** Record an executed command so it resurfaces on an empty command query. */

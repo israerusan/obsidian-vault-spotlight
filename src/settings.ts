@@ -292,7 +292,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			});
 		}
 
-		new Setting(containerEl).setName("General").setHeading();
+		new Setting(containerEl).setName("Display").setHeading();
 
 		new Setting(containerEl)
 			.setName("Show modified time")
@@ -697,8 +697,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 						// Offer a quick undo so a mis-click isn't silently destructive.
 						const notice = new Notice("", 6000);
 						notice.noticeEl.createSpan({ text: `Removed "${removed.name}". ` });
-						const undo = notice.noticeEl.createEl("a", { text: "Undo" });
-						undo.style.cursor = "pointer";
+						const undo = notice.noticeEl.createEl("a", { text: "Undo", cls: "vault-spotlight-clickable" });
 						undo.addEventListener("click", () => {
 							this.plugin.settings.snippets = [...this.plugin.settings.snippets, removed].slice(0, MAX_SNIPPETS);
 							void this.plugin.saveSettings().then(() => this.display());
