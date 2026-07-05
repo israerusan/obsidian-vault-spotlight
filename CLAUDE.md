@@ -30,9 +30,16 @@ npm run lint     # tsc --noEmit + eslint src
 ```
 
 - **`npm test` is the gate.** It runs `npm run lint`, then `sync-shared --check`,
-  then every `tests/*.test.mjs` file in sequence. CI (`.github/workflows/release.yml`)
-  runs `npm run build && npm test`. Always run `npm test` before committing a
-  code change.
+  then every `tests/*.test.mjs` file in sequence. CI runs `npm run build && npm test`
+  on every push to `master` and every PR (`.github/workflows/ci.yml`), and again on a
+  release tag (`release.yml`). Always run `npm test` before committing a code change.
+- **`npm ci` on the platform you run tests on.** The interaction harnesses
+  (`tests/vault-harness`, `tests/modal-harness`) bundle `src` with esbuild, which
+  ships a **native, per-OS binary**. A `node_modules` populated on Windows will make
+  `npm test` fail under WSL/Linux (and vice-versa) when it reaches the harness — run
+  `npm ci` in the same environment where you run the tests.
+- The ripgrep-specific assertions in `tests/vault-harness` only run when `rg` is on
+  PATH; they skip (loudly) otherwise. CI installs ripgrep so they always execute.
 - There is no test runner/framework: tests are plain Node scripts using the
   built-in `assert` module, added to the `test`/`test:ci` scripts in
   `package.json` by hand. If you add a test file, wire it into **both** scripts.

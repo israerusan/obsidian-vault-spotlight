@@ -1,0 +1,36 @@
+name: CI
+
+# Runs the full gate (typecheck + lint + build + all tests, incl. the fixture-vault
+# and modal interaction harnesses) on every push to master and every pull request —
+# so regressions are caught BEFORE a release tag, not only when one is pushed.
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      # ripgrep so the harness actually exercises the rg search path (recall,
+      # column-parity, ordered-parity) instead of only the in-process fallback.
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: Install, build, test
+        env:
+          VAULT_ROOT: ""
+        run: |
+          npm ci
+          npm run build
+          npm test

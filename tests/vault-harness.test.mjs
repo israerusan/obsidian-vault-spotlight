@@ -8,6 +8,8 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
 import { buildHarness } from "./harness/build.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -42,6 +44,14 @@ function fileSearch(overrides = {}) {
 }
 const content = new ContentSearcher(app, "rg");
 const keyOf = (r) => `${r.file.path}:${r.line}`;
+
+/** Write a throwaway one-file vault with `nLines` dense "gadget sprocket" lines. */
+function makeDenseVault(nLines) {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vs-recall-"));
+	const body = Array.from({ length: nLines }, (_, i) => `gadget sprocket line ${i + 1}`).join("\n");
+	fs.writeFileSync(path.join(dir, "Dense.md"), `# Dense\n\n${body}\n`);
+	return dir;
+}
 
 // --- 1. File search: type a query, get the right note -------------------------
 {
@@ -155,6 +165,26 @@ const keyOf = (r) => `${r.file.path}:${r.line}`;
 	assert.equal(fromRecall.length, 12, "all 12 'widget' lines in Recall.md are returned (no per-file cap)");
 }
 
+// --- 8b. Recall boundary (the review's missing coverage): a dense single file
+// returns up to the FULL requested limit, far beyond the old per-file caps (single
+// 4 / multi 40). NOTE the bounded residual: a file with more than max(limit*10, 500)
+// anchor-only lines BEFORE a late multi-token match can still be omitted under rg's
+// --max-count — a known, documented limitation, not a silent one.
+{
+	const dir = makeDenseVault(55);
+	try {
+		const dense = new ContentSearcher(loadVaultApp(dir).app, "rg");
+		const single = await dense.search("gadget", { useRipgrep: false, limit: 50 });
+		assert.equal(single.length, 50, "fallback single-token: dense file yields the full limit (old cap was 4)");
+		assert.ok(single.every((r) => r.file.path === "Dense.md"), "all matches come from the one dense file");
+		const multi = await dense.search("gadget sprocket", { useRipgrep: false, limit: 50 });
+		assert.equal(multi.length, 50, "fallback multi-token: dense file yields the full limit (old cap was 40)");
+		dense.dispose();
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 // --- 9. Long-line retention: a match past column 500 survives (max-columns=2000) --
 {
 	const results = await content.search("sentinelword", { useRipgrep: false, includeCanvas: false });
@@ -237,6 +267,21 @@ if (rgInstalled) {
 		rgWide.some((r) => r.file.path === "Wide.md"),
 		"ripgrep finds a multi-token match past column 500 (--max-columns aligned to 2000)"
 	);
+
+	// Recall boundary under REAL rg: a dense single file returns the full limit
+	// through ripgrep too — the old per-file caps (4 single / 40 multi) truncated it.
+	const denseDir = makeDenseVault(55);
+	try {
+		const denseRg = new ContentSearcher(loadVaultApp(denseDir).app, "rg");
+		const dSingle = await denseRg.search("gadget", { useRipgrep: true, limit: 50 });
+		assert.ok(dSingle.some((r) => r.engine === "ripgrep"), "dense single-token ran through rg");
+		assert.equal(dSingle.length, 50, "rg single-token: dense file yields the full limit (old cap was 4)");
+		const dMulti = await denseRg.search("gadget sprocket", { useRipgrep: true, limit: 50 });
+		assert.equal(dMulti.length, 50, "rg multi-token: dense file yields the full limit (old cap was 40)");
+		denseRg.dispose();
+	} finally {
+		fs.rmSync(denseDir, { recursive: true, force: true });
+	}
 
 	rgSearcher.dispose();
 	delete globalThis.window;
