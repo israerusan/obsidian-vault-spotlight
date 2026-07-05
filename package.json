@@ -1,7 +1,7 @@
 {
 	"name": "obsidian-vault-spotlight",
-	"version": "2.10.0",
-	"description": "Spotlight-style vault launcher for Obsidian: fuzzy file search, commands, headings, ripgrep-fast content search, inline calculator/converter, natural-language date jump, quick capture, snippets, and batch actions",
+	"version": "2.11.0",
+	"description": "A keyboard-first command center for Obsidian: fast search, saved workflows, and result actions — find, reopen recurring work, and act without leaving the keyboard",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",

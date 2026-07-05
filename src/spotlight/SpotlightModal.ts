@@ -2,7 +2,6 @@ import {
 	App,
 	type EventRef,
 	MarkdownView,
-	Menu,
 	Notice,
 	Modal,
 	Platform,
@@ -27,7 +26,7 @@ import { showOnboarding } from "../core/onboarding.mjs";
 import { fuzzyMatch, tokenizeQuery } from "../search/fuzzy";
 import { getVaultFileKind } from "../search/vaultFiles";
 import { activeProfile, type CoreSearchProfile } from "../core/searchProfiles.mjs";
-import { ensureStarterWorkflows, normalizeWorkflowPresets, FREE_WORKFLOW_LIMIT, type WorkflowPreset } from "../core/workflowPresets.mjs";
+import { type WorkflowPreset } from "../core/workflowPresets.mjs";
 import { detectSearchIntegrations, type SearchIntegrations } from "../core/integrations.mjs";
 import { findBacklinks, findOutlinks } from "../core/linkGraph.mjs";
 import { evaluateExpression, parseCurrencyRates } from "../core/calculator.mjs";
@@ -50,9 +49,20 @@ import {
 import { PreviewPane } from "./PreviewPane";
 import { CaptureController } from "./CaptureController";
 import { WorkflowController } from "./WorkflowController";
+import { registerSpotlightScope } from "./keymap";
+import {
+	buildCommandItems,
+	buildContentItems,
+	buildHeadingItems,
+	buildSymbolItems,
+	buildEditorItems,
+	buildFileItems,
+	buildSavedObjectItems,
+} from "./resultBuilders";
+import { buildAvailableActions, type ActionHost } from "./actionBuilders";
+import { openResultContextMenu } from "./contextMenu";
 import { renderResultRow } from "./resultRow";
 import * as batchOps from "./batchOps";
-import { copyToClipboard, renameFile } from "./batchOps";
 import { DEFAULT_SETTINGS, createExternalLink } from "../settings";
 
 
@@ -454,8 +464,16 @@ export class SpotlightModal extends Modal {
 		// enough times, condense it to the essentials so the header isn't perpetually
 		// dense. showOnboarding is pure + unit-tested in core/onboarding.
 		const full = showOnboarding(this.plugin.settings.openCount, this.plugin.settings.onboardingDismissed);
+		// The two persistent affordances are the core pillars — Actions (Cmd/Ctrl+K)
+		// and Workflows (Cmd/Ctrl+S) — so post-onboarding hints emphasize those over
+		// niche mode triggers. Both work on every tier.
+		const core: Array<[string, string]> = [
+			[`${mod}+K`, "actions"],
+			[`${mod}+S`, "save workflow"],
+		];
 		const hints: Array<[string, string]> = full
 			? [
+					...core,
 					["2+2", "calc"],
 					[prefixes.capture, "capture"],
 					["#journal", "tag"],
@@ -464,10 +482,7 @@ export class SpotlightModal extends Modal {
 					[prefixes.editors, "tabs"],
 					[prefixes.folders, "folders"],
 			  ]
-			: [
-					["2+2", "calc"],
-					["#journal", "tag"],
-			  ];
+			: [...core];
 		if (isPro && full) {
 			hints.push(
 				[prefixes.content, "content"],
@@ -476,7 +491,9 @@ export class SpotlightModal extends Modal {
 				[prefixes.snippets, "snippets"]
 			);
 		}
-		hints.push(["Tab", "next mode"], ["Shift+Tab", "previous mode"], [this.plugin.settings.escapeChar, "literal"]);
+		hints.push(["Tab", "next mode"], ["Shift+Tab", "previous mode"]);
+		// The literal-escape hint is niche; only surface it during first-run onboarding.
+		if (full) hints.push([this.plugin.settings.escapeChar, "literal"]);
 		hints.forEach(([code, label], index) => {
 			if (index > 0) this.hintEl.appendText(" · ");
 			this.hintEl.createEl("code", { text: code });
@@ -616,24 +633,7 @@ export class SpotlightModal extends Modal {
 				// Empty query: resurface recently-run commands first, then the rest.
 				const commandResults = this.commandSearcher.search(cmdQuery, cmdQuery ? RESULT_LIMIT : COMMAND_BROWSE_LIMIT, this.plugin.settings.ranking.ignoreDiacritics);
 				if (generation !== this.searchGeneration) return;
-				let ordered = commandResults;
-				const recentIds = this.plugin.settings.recentCommandIds;
-				if (cmdQuery.length === 0 && recentIds.length > 0) {
-					const byId = new Map(commandResults.map((r) => [r.id, r]));
-					const recent = recentIds
-						.map((id) => byId.get(id))
-						.filter((r): r is (typeof commandResults)[number] => !!r);
-					const recentSet = new Set(recent.map((r) => r.id));
-					ordered = [...recent, ...commandResults.filter((r) => !recentSet.has(r.id))];
-				}
-				const recentSet = new Set(cmdQuery.length === 0 ? recentIds : []);
-				this.items = ordered.slice(0, RESULT_LIMIT).map((r) => ({
-					kind: "command" as const,
-					id: r.id,
-					name: r.name,
-					matchIndices: r.matchIndices,
-					isRecent: recentSet.has(r.id),
-				}));
+				this.items = buildCommandItems(commandResults, this.plugin.settings.recentCommandIds, cmdQuery.length === 0, RESULT_LIMIT);
 			} else if (mode === "content") {
 				const text = body;
 				this.setBadge("Content", "is-content");
@@ -666,15 +666,7 @@ export class SpotlightModal extends Modal {
 					excludeFolders,
 				});
 				if (generation !== this.searchGeneration) return;
-				this.items = contentResults.map((r) => ({
-					kind: "content" as const,
-					file: r.file,
-					line: r.line,
-					snippet: r.snippet,
-					score: r.score,
-					engine: r.engine,
-					matchIndices: r.matchIndices ?? [],
-				}));
+				this.items = buildContentItems(contentResults);
 			} else if (mode === "headings") {
 				this.setBadge("Headings", "is-content");
 				// Supports `file#heading` scoping and `level:1-2` depth filters.
@@ -688,15 +680,7 @@ export class SpotlightModal extends Modal {
 					ignoreDiacritics: this.plugin.settings.ranking.ignoreDiacritics,
 				});
 				if (generation !== this.searchGeneration) return;
-				this.items = headingResults.map((r) => ({
-					kind: "heading" as const,
-					file: r.file,
-					line: r.line,
-					heading: r.heading,
-					level: r.level,
-					score: r.score,
-					matchIndices: r.matchIndices,
-				}));
+				this.items = buildHeadingItems(headingResults);
 			} else if (mode === "symbols") {
 				const target = this.drillFile ?? this.app.workspace.getActiveFile();
 				this.setBadge(target ? `Symbols · ${target.basename}` : "Symbols", "is-content");
@@ -713,29 +697,12 @@ export class SpotlightModal extends Modal {
 				}
 				const symbolResults = this.symbolSearcher.search(target, body, SYMBOL_LIMIT, this.plugin.settings.ranking.ignoreDiacritics);
 				if (generation !== this.searchGeneration) return;
-				this.items = symbolResults.map((r) => ({
-					kind: "symbol" as const,
-					file: r.file,
-					line: r.line,
-					text: r.text,
-					symbolType: r.symbolType,
-					level: r.level,
-					matchIndices: r.matchIndices,
-				}));
+				this.items = buildSymbolItems(symbolResults);
 			} else if (mode === "editors") {
 				this.setBadge("Editors", "is-content");
 				const editorResults = this.editorSearcher.search(body, RESULT_LIMIT, this.plugin.settings.ranking.ignoreDiacritics);
 				if (generation !== this.searchGeneration) return;
-				this.items = editorResults.map((r) => ({
-					kind: "editor" as const,
-					leaf: r.leaf,
-					file: r.file,
-					title: r.title,
-					viewType: r.viewType,
-					isActive: r.isActive,
-					isPinned: r.isPinned,
-					matchIndices: r.matchIndices,
-				}));
+				this.items = buildEditorItems(editorResults);
 				if (this.items.length === 0) {
 					this.isLoading = false;
 					this.renderEmptyState("layout", "No open editors", "Open a few notes, then jump between their tabs from here.");
@@ -812,74 +779,12 @@ export class SpotlightModal extends Modal {
 					limit: isEmptyQuery ? FILE_BROWSE_LIMIT : FILE_QUERY_LIMIT,
 				});
 
-				this.items = fileResults.map((r) => ({
-					kind: "file" as const,
-					file: r.file,
-					score: r.score,
-					matchIndices: r.matchIndices,
-					modifiedLabel: r.modifiedLabel,
-					fileKind: r.fileKind,
-					primaryMatch: r.primaryMatch,
-					aliasMatched: r.aliasMatched,
-					tags: r.tags,
-					aliases: r.aliases,
-					isRecent: r.isRecent,
-					isStarred: r.isStarred,
-					isBookmarked: r.isBookmarked,
-				}));
+				this.items = buildFileItems(fileResults);
 
 				if (isEmptyQuery) {
-					// Workflows are free up to FREE_WORKFLOW_LIMIT so users can feel the
-					// recurring-workflow benefit before upgrading. Pro is unlimited and
-					// gets the curated starter presets seeded when it has none of its own;
-					// free shows only the user's own saved workflows (capped).
-					const source = isPro
-						? ensureStarterWorkflows(this.plugin.settings.workflowPresets)
-						: normalizeWorkflowPresets(this.plugin.settings.workflowPresets).slice(0, FREE_WORKFLOW_LIMIT);
-					if (source.length > 0) {
-						const workflows = source
-							.slice()
-							.sort((a, b) => Number(b.pinned) - Number(a.pinned) || Number(b.starter ?? false) - Number(a.starter ?? false) || a.name.localeCompare(b.name))
-							.map((workflow) => ({
-								kind: "workflow" as const,
-								id: workflow.id,
-								name: workflow.name,
-								query: workflow.query,
-								mode: workflow.mode,
-								profileId: workflow.profileId,
-								isPinned: workflow.pinned,
-								isStarter: workflow.starter ?? false,
-								rankingMode: workflow.rankingMode,
-							}));
-						this.items = [...workflows, ...this.items];
-					}
-				}
-
-				if (isEmptyQuery && isPro && this.plugin.settings.searchProfiles.length > 0) {
-					const profiles = this.plugin.settings.searchProfiles.map((searchProfile) => ({
-						kind: "profile" as const,
-						id: searchProfile.id,
-						name: searchProfile.name,
-						defaultMode: searchProfile.defaultMode,
-						defaultQuery: searchProfile.defaultQuery,
-						isActive: searchProfile.id === this.plugin.settings.activeProfileId,
-					}));
-					this.items = [...profiles, ...this.items];
-				}
-
-				if (isEmptyQuery && isPro && this.plugin.settings.customSearches.length > 0) {
-					const pinned = new Set(this.plugin.settings.pinnedCustomSearchIds);
-					const collections = this.plugin.settings.customSearches
-						.slice()
-						.sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)) || a.name.localeCompare(b.name))
-						.map((search) => ({
-							kind: "collection" as const,
-							id: search.id,
-							name: search.name,
-							query: search.query,
-							isPinned: pinned.has(search.id),
-						}));
-					this.items = [...collections, ...this.items];
+					// Saved objects (Workflows first, then advanced profiles, then legacy
+					// collections) sit above the file list — see buildSavedObjectItems.
+					this.items = [...buildSavedObjectItems(this.plugin.settings, isPro), ...this.items];
 				}
 
 				// Ambient calculator / date-jump: when the query is a calculation or
@@ -1752,7 +1657,7 @@ export class SpotlightModal extends Modal {
 		return detectSearchIntegrations(Object.keys(plugins));
 	}
 
-	private runIntegrationCommand(name: "omnisearch" | "text extractor"): void {
+	private runIntegrationCommand(name: string): void {
 		const command = this.commandSearcher.search(name, 20).find((cmd) => cmd.id.toLowerCase().includes(name.replace(" ", "-")) || cmd.name.toLowerCase().includes(name));
 		if (!command || !this.commandSearcher.execute(command.id)) {
 			new Notice(`Vault Spotlight: ${name} command not found.`);
@@ -1778,7 +1683,7 @@ export class SpotlightModal extends Modal {
 
 	/** Open a .base result in a Bases Power Pack view via its public API. */
 	private async handoffBaseToPowerPack(
-		view: "kanban" | "calendar" | "gantt",
+		view: string,
 		basePath: string
 	): Promise<void> {
 		const api = this.basesPowerPackApi();
@@ -1797,236 +1702,50 @@ export class SpotlightModal extends Modal {
 	}
 
 	private availableActions(context: ResultItem): SpotlightAction[] {
-		if (context.kind === "profile") {
+		return buildAvailableActions(context, this.actionHost());
+	}
+
+	/** The operations the action-palette `run` closures need — see actionBuilders.ts. */
+	private actionHost(): ActionHost {
+		return {
+			app: this.app,
+			plugin: this.plugin,
+			workflows: this.workflows,
+			capture: this.capture,
+			integrations: () => this.installedSearchIntegrations(),
+			basesPowerPackViews: (file) => this.basesPowerPackViews(file),
+			handoffBaseToPowerPack: (view, path) => void this.handoffBaseToPowerPack(view, path),
+			batchContext: () => this.batchContext(),
+			resultItemsForBatch: () => this.resultItemsForBatch(),
+			runIntegrationCommand: (name) => this.runIntegrationCommand(name),
+			openResultAndClose: async (ctx) => {
+				this.close();
+				await this.openItem(ctx, null);
+				const file = itemFile(ctx);
+				if (file) this.plugin.trackRecent(file.path);
+			},
+			runCollectionQuery: (query) => {
+				this.actionContext = null;
+				this.inputEl.value = query;
+				void this.runSearch();
+			},
+			closeActionPalette: () => this.closeActionPalette(),
+		};
+	}
+
+	/** Bases Power Pack views for a `.base` file — empty unless Power Pack premium is
+	 * active, so the palette never offers a handoff that can only fail. */
+	private basesPowerPackViews(file: TFile): ReadonlyArray<readonly [string, string]> {
+		if (file.extension !== "base" || !this.installedSearchIntegrations().basesPowerPack) return [];
+		const api = this.basesPowerPackApi();
+		if (api?.openView && api.isPremiumActive?.() === true) {
 			return [
-				{
-					id: "activate-profile",
-					name: "Activate search profile",
-					description: `Switch to ${context.name} and run its default query.`,
-					requiresPro: true,
-					run: () => this.workflows.activateProfile(context.id),
-				},
-				{
-					id: "clear-profile",
-					name: "Clear active profile",
-					description: "Return Spotlight to the global search settings.",
-					requiresPro: true,
-					run: () => this.workflows.clearProfile(),
-				},
+				["kanban", "Kanban"],
+				["calendar", "Calendar"],
+				["gantt", "Gantt"],
 			];
 		}
-
-		if (context.kind === "collection") {
-			return [
-				{
-					id: "run-collection",
-					name: "Run smart collection",
-					description: context.query,
-					run: () => {
-						this.actionContext = null;
-						this.inputEl.value = context.query;
-						void this.runSearch();
-					},
-				},
-				{
-					id: "pin-collection",
-					name: context.isPinned ? "Unpin smart collection" : "Pin smart collection",
-					description: "Keep this saved search at the top of the browse view.",
-					requiresPro: true,
-					run: () => {
-						this.plugin.togglePinnedCollection(context.id);
-						this.closeActionPalette();
-					},
-				},
-				{
-					id: "copy-collection-query",
-					name: "Copy collection query",
-					description: "Copy the saved search query to the clipboard.",
-					run: () => copyToClipboard(context.query, "Query copied"),
-				},
-			];
-		}
-
-		// Delight rows get their own contextual actions instead of the generic
-		// file-batch palette, which has nothing to do with a calc/date/snippet row.
-		if (context.kind === "calc") {
-			return [
-				{
-					id: "copy-calc",
-					name: "Copy result",
-					description: `Copy ${context.result} to the clipboard.`,
-					run: () => this.capture.copyCalcResult(context),
-				},
-				{
-					id: "insert-calc",
-					name: "Insert at cursor",
-					description: "Insert the result into the active note.",
-					run: () => this.capture.insertCalcResult(context),
-				},
-			];
-		}
-		if (context.kind === "datejump") {
-			return [
-				{
-					id: "open-daily",
-					name: context.exists ? "Open daily note" : "Create daily note",
-					description: context.path,
-					run: () => void this.capture.openOrCreateDatedNote(context.date),
-				},
-			];
-		}
-		if (context.kind === "capture") {
-			return [
-				{
-					id: "run-capture",
-					name: "Capture",
-					description: context.description,
-					run: () => void this.capture.runCapture(context),
-				},
-			];
-		}
-		if (context.kind === "snippet") {
-			return [
-				{
-					id: "insert-snippet",
-					name: "Insert snippet",
-					description: "Insert this snippet at the cursor.",
-					requiresPro: true,
-					run: () => void this.capture.insertSnippet(context),
-				},
-				{
-					id: "copy-snippet",
-					name: "Copy snippet",
-					description: "Copy the snippet body to the clipboard.",
-					run: () => copyToClipboard(context.body, "Snippet copied"),
-				},
-			];
-		}
-
-		const file = itemFile(context);
-		const actions: SpotlightAction[] = [];
-		if (file) {
-			actions.push(
-				{
-					id: "open",
-					name: "Open",
-					description: "Open the selected result.",
-					run: async () => {
-						this.close();
-						await this.openItem(context, null);
-						this.plugin.trackRecent(file.path);
-					},
-				},
-				{
-					id: "copy-link",
-					name: "Copy link",
-					description: "Copy a Markdown link for this result.",
-					run: () => copyToClipboard(this.app.fileManager.generateMarkdownLink(file, ""), "Link copied"),
-				},
-				{
-					id: "copy-path",
-					name: "Copy path",
-					description: "Copy this file path.",
-					run: () => copyToClipboard(file.path, "Path copied"),
-				},
-				{
-					id: "rename",
-					name: "Rename",
-					description: "Rename the selected note or file.",
-					// Rename is free (a basic file operation) and available from both the
-					// action palette and the right-click / Alt+Enter menu — the two paths
-					// are intentionally consistent (the context menu never gated it).
-					run: () => renameFile(this.app, file),
-				},
-				{
-					id: "toggle-star",
-					name: this.plugin.isStarred(file.path) ? "Unstar" : "Star",
-					description: "Toggle the selected file in Starred pins.",
-					requiresPro: true,
-					run: () => {
-						this.plugin.toggleStar(file.path);
-						this.closeActionPalette();
-					},
-				}
-			);
-		}
-
-		const integrations = this.installedSearchIntegrations();
-
-		// Handoff: open a .base result in a Bases Power Pack view. Using a base
-		// as the data source is a Power Pack PREMIUM feature — only offer the
-		// actions when its API reports premium, so Lite users never see menu
-		// items that can only fail.
-		if (file && file.extension === "base" && integrations.basesPowerPack) {
-			const api = this.basesPowerPackApi();
-			if (api?.openView && api.isPremiumActive?.() === true) {
-				const views = [
-					["kanban", "Kanban"],
-					["calendar", "Calendar"],
-					["gantt", "Gantt"],
-				] as const;
-				for (const [view, label] of views) {
-					actions.push({
-						id: `open-base-${view}`,
-						name: `Open in ${label} view`,
-						description: `Open this base in Bases Power Pack's ${label} view.`,
-						run: () => this.handoffBaseToPowerPack(view, file.path),
-					});
-				}
-			}
-		}
-
-		actions.push({
-			id: "save-profile",
-			name: "Save current setup as profile",
-			description: "Create a Pro search profile from the current mode, query, preview, file type, and folder settings.",
-			requiresPro: true,
-			run: () => this.workflows.saveCurrentProfile(),
-		});
-
-		// The batch/export block operates on files. Only offer it when the result
-		// set actually contains files, so a command/folder/workflow row never
-		// surfaces "Batch move" or "Create MOC" that would act on the wrong set.
-		if (this.resultItemsForBatch().length > 0) {
-			// All batch/export actions are Pro and share the same shape; the only
-			// per-row differences are id/name/description and which batchOps call
-			// they run, so drive them from one table instead of ten near-identical
-			// object literals. Order here is the order shown in the palette.
-			const batchActions: Array<[id: string, name: string, description: string, run: () => void]> = [
-				["copy-results", "Copy results as Markdown", "Copy selected results, or the current result list, as Markdown links.", () => batchOps.copyResultsAsMarkdown(this.batchContext())],
-				["export-results", "Export results to note", "Create a Markdown note containing selected/search results.", () => batchOps.exportResultsToNote(this.batchContext())],
-				["batch-add-tag", "Batch add tag", "Append a tag to selected Markdown files.", () => batchOps.batchAddTag(this.batchContext())],
-				["batch-remove-tag", "Batch remove tag", "Remove a tag from selected Markdown files.", () => batchOps.batchRemoveTag(this.batchContext())],
-				["batch-set-property", "Batch set property", "Set a frontmatter property on selected Markdown files.", () => batchOps.batchSetProperty(this.batchContext())],
-				["batch-move", "Batch move files", "Move selected files into a target folder.", () => batchOps.batchMoveFiles(this.batchContext())],
-				["batch-star", "Batch star results", "Add selected/current result files to Starred pins.", () => batchOps.batchSetStarred(this.batchContext(), true)],
-				["batch-unstar", "Batch unstar results", "Remove selected/current result files from Starred pins.", () => batchOps.batchSetStarred(this.batchContext(), false)],
-				["create-moc", "Create MOC from results", "Create a grouped index note from selected/current results.", () => batchOps.createMocFromResults(this.batchContext())],
-				["append-links", "Append links to active note", "Append selected/current result links to the active Markdown note.", () => batchOps.appendLinksToActiveNote(this.batchContext())],
-			];
-			for (const [id, name, description, run] of batchActions) {
-				actions.push({ id, name, description, requiresPro: true, run });
-			}
-			if (integrations.omnisearch) {
-				actions.push({
-					id: "open-omnisearch",
-					name: "Search in Omnisearch",
-					description: "Hand off to the installed Omnisearch plugin.",
-					requiresPro: true,
-					run: () => this.runIntegrationCommand("omnisearch"),
-				});
-			}
-			if (integrations.textExtractor) {
-				actions.push({
-					id: "open-text-extractor",
-					name: "Run Text Extractor",
-					description: "Use the installed Text Extractor plugin for document/PDF text support.",
-					requiresPro: true,
-					run: () => this.runIntegrationCommand("text extractor"),
-				});
-			}
-		}
-		return actions;
+		return [];
 	}
 
 	private resultItemsForBatch(): ResultItem[] {
@@ -2056,72 +1775,13 @@ export class SpotlightModal extends Modal {
 	}
 
 	private openActionsMenu(item: ResultItem, evt?: MouseEvent): void {
-		const file = itemFile(item);
-		if (!file) return;
-		// Seek to the matched line for anything that carries one, so opening a
-		// symbol/heading/content hit via the menu lands on the passage — matching
-		// what Enter (openItem) already does.
-		const menu = new Menu();
-
-		const openIn = (paneType: "tab" | "split" | "window") => {
-			this.close();
-			void (async () => {
-				const leaf = this.app.workspace.getLeaf(paneType);
-				await leaf.openFile(file);
-				this.seekToItemLine(leaf, item);
-				this.plugin.trackRecent(file.path);
-			})();
-		};
-
-		menu.addItem((i) => i.setTitle("Open in new tab").setIcon("file-plus").onClick(() => openIn("tab")));
-		menu.addItem((i) =>
-			i.setTitle("Open to the right").setIcon("separator-vertical").onClick(() => openIn("split"))
-		);
-		menu.addItem((i) =>
-			i.setTitle("Open in new window").setIcon("picture-in-picture-2").onClick(() => openIn("window"))
-		);
-		menu.addSeparator();
-		menu.addItem((i) =>
-			i
-				.setTitle("Copy Obsidian link")
-				.setIcon("link")
-				.onClick(() => {
-					const link = this.app.fileManager.generateMarkdownLink(file, "");
-					copyToClipboard(link, "Link copied");
-				})
-		);
-		menu.addItem((i) =>
-			i
-				.setTitle("Copy path")
-				.setIcon("copy")
-				.onClick(() => copyToClipboard(file.path, "Path copied"))
-		);
-		menu.addItem((i) =>
-			i
-				.setTitle("Rename…")
-				.setIcon("pencil")
-				.onClick(() => renameFile(this.app, file))
-		);
-
-		const showInFolder = (this.app as unknown as { showInFolder?: (p: string) => void }).showInFolder;
-		if (typeof showInFolder === "function") {
-			menu.addItem((i) =>
-				i
-					.setTitle("Show in system explorer")
-					.setIcon("folder-open")
-					.onClick(() => {
-						showInFolder.call(this.app, file.path);
-					})
-			);
-		}
-
-		if (evt) {
-			menu.showAtMouseEvent(evt);
-		} else {
-			const rect = this.resultsEl.querySelector(".is-selected")?.getBoundingClientRect();
-			if (rect) menu.showAtPosition({ x: rect.left + 40, y: rect.bottom });
-			else menu.showAtPosition({ x: 100, y: 100 });
-		}
+		openResultContextMenu(item, evt, {
+			app: this.app,
+			close: () => this.close(),
+			trackRecent: (path) => this.plugin.trackRecent(path),
+			seekToItemLine: (leaf, it) => this.seekToItemLine(leaf, it),
+			selectedRowRect: () => this.resultsEl.querySelector<HTMLElement>(".is-selected")?.getBoundingClientRect() ?? null,
+		});
 	}
 
 	private recordSearch(): void {
@@ -2169,159 +1829,32 @@ export class SpotlightModal extends Modal {
 	}
 
 	private registerScopeShortcuts(): void {
-		// The modal's Scope is pushed onto Obsidian's keymap while the modal is
-		// open, so these fire regardless of which element inside the modal holds
-		// DOM focus. Typed characters are left untouched here so they flow into
-		// the focused input natively.
-		// While an IME candidate window is open (evt.isComposing / keyCode 229),
-		// these keys belong to the composition — navigating the result list or
-		// activating a result would discard the in-progress text. Let them through
-		// to the input untouched, matching Obsidian's own suggesters.
-		this.scope.register([], "ArrowDown", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.moveSelection(1);
-			return false;
-		});
-		this.scope.register([], "ArrowUp", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.moveSelection(-1);
-			return false;
-		});
-		// Jump-to-ends and page navigation for long result lists. Like the arrow
-		// keys, these defer during IME composition (isComposing) — a CJK user paging
-		// an IME candidate window with Home/End/PageUp/PageDown must not have the
-		// keypress swallowed to drive the result list instead.
-		this.scope.register([], "Home", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "first" }));
-			return false;
-		});
-		this.scope.register([], "End", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "last" }));
-			return false;
-		});
-		this.scope.register([], "PageDown", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "page", delta: 1, pageSize: this.pageSize() }));
-			return false;
-		});
-		this.scope.register([], "PageUp", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "page", delta: -1, pageSize: this.pageSize() }));
-			return false;
-		});
-		// Emacs-style aliases so hands never leave the home row.
-		this.scope.register(["Ctrl"], "n", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.moveSelection(1);
-			return false;
-		});
-		this.scope.register(["Ctrl"], "p", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.moveSelection(-1);
-			return false;
-		});
-		this.scope.register([], "Enter", (evt) => {
-			// Enter confirms the IME candidate mid-composition — don't activate a
-			// result and close the modal out from under the user's input.
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.safeActivate();
-			return false;
-		});
-		// Ctrl+Enter flips the default open target: new tab normally, current
-		// tab when "open in new tab by default" is on.
-		this.scope.register(["Mod"], "Enter", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.safeActivate(this.plugin.settings.defaultNewTab ? null : "tab");
-			return false;
-		});
-		this.scope.register(["Mod", "Alt"], "Enter", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.safeActivate("split");
-			return false;
-		});
-		this.scope.register(["Alt"], "Enter", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			const item = this.items[this.selectedIndex];
-			if (item) this.openActionsMenu(item);
-			return false;
-		});
-		this.scope.register(["Shift"], "Enter", (evt) => {
-			// A held Shift while committing an IME candidate must not fire
-			// createFromQuery and close the modal out from under the composition.
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			void this.createFromQuery();
-			return false;
-		});
-		this.scope.register(["Mod"], "k", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.openActionPalette();
-			return false;
-		});
-		this.scope.register([], "Escape", (evt) => {
-			// Escape cancels the IME composition first; only unwind modal state
-			// once there's no active composition to dismiss.
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			if (this.actionContext) this.closeActionPalette();
-			else if (this.drillFile) this.exitDrill();
-			else this.close();
-			return false;
-		});
-		this.scope.register([], "Tab", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.cycleMode(1);
-			return false;
-		});
-		this.scope.register(["Shift"], "Tab", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.cycleMode(-1);
-			return false;
-		});
-
-		// Mod+S saves the current search as a workflow — registered for ALL tiers,
-		// NOT behind the Pro gate below. Workflows are free up to FREE_WORKFLOW_LIMIT,
-		// and saveCurrentWorkflow() itself shows the upgrade notice when a free user is
-		// already at the limit. Gating this behind Pro (as it was) made the free
-		// "save a workflow" path that Settings and the changelog advertise literally
-		// unreachable — pressing Mod+S did nothing for a free user.
-		this.scope.register(["Mod"], "s", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.workflows.saveCurrentWorkflow();
-			return false;
-		});
-
-		if (!this.plugin.settings.isPro) return;
-
-		this.scope.register(["Mod"], " ", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.toggleCheck();
-			return false;
-		});
-		this.scope.register(["Mod"], "d", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.toggleStarSelected();
-			return false;
+		// The keyboard layer lives in ./keymap; the modal only supplies bound actions
+		// so its methods stay private. Behavior/order is identical to the old inline
+		// registration and is covered by the modal interaction harness.
+		registerSpotlightScope(this.scope, this.plugin.settings.isPro, {
+			moveSelection: (delta) => this.moveSelection(delta),
+			selectFirst: () => this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "first" })),
+			selectLast: () => this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "last" })),
+			pageMove: (delta: 1 | -1) => this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "page", delta, pageSize: this.pageSize() })),
+			activateDefault: () => this.safeActivate(),
+			activatePreferredTab: () => this.safeActivate(this.plugin.settings.defaultNewTab ? null : "tab"),
+			activateSplit: () => this.safeActivate("split"),
+			openContextMenuForSelection: () => {
+				const item = this.items[this.selectedIndex];
+				if (item) this.openActionsMenu(item);
+			},
+			createFromQuery: () => void this.createFromQuery(),
+			openActionPalette: () => this.openActionPalette(),
+			escape: () => {
+				if (this.actionContext) this.closeActionPalette();
+				else if (this.drillFile) this.exitDrill();
+				else this.close();
+			},
+			cycleMode: (delta: 1 | -1) => this.cycleMode(delta),
+			saveWorkflow: () => this.workflows.saveCurrentWorkflow(),
+			toggleCheck: () => this.toggleCheck(),
+			toggleStarSelected: () => this.toggleStarSelected(),
 		});
 	}
 

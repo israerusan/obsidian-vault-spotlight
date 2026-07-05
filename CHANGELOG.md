@@ -3,6 +3,42 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.11.0] - 2026-07-05
+
+Phase 2 — a product-consolidation pass: present Vault Spotlight as one command
+center (**Search / Workflows / Actions**) with Workflows as the center of gravity,
+plus a maintainability refactor of the modal. No changes to search results.
+
+### Changed
+- **Reframed around three pillars.** The README and store description now lead with
+  Search / Workflows / Actions; quick actions (calculator, date jump, capture,
+  snippets) and advanced capabilities (profiles, aliases, integrations, API) sit
+  below the fold. The pitch reads as one product, not a feature catalog.
+- **Workflows are the primary saved object.** In Browse, saved Workflows now sort
+  above search profiles and the legacy "Smart collections"; the Settings section is
+  named **Workflows**, and profiles are framed as an advanced, optional context a
+  workflow can restore.
+- **Post-onboarding hints lead with the core.** The persistent footer hints now
+  surface Actions (`Cmd/Ctrl+K`) and Workflows (`Cmd/Ctrl+S`) instead of niche mode
+  triggers; the escape-literal hint shows only during first-run.
+
+### Fixed
+- Corrected now-inaccurate README/store copy (fact-checked against the code): the
+  retired custom-search create path, the action palette being free (open/copy/rename)
+  with only star/export/batch Pro, and Canvas/PDF/Bases search being Pro-only.
+
+### Internal
+- **SpotlightModal decomposition.** The ~2,400-line modal is down ~20% (to ~1,900),
+  with its keyboard layer, search result-building, actions palette, and result
+  context menu extracted into four focused modules (`keymap`, `resultBuilders`,
+  `actionBuilders`, `contextMenu`) — all behavior-preserving and covered by the
+  fixture-vault and modal interaction harnesses.
+- CI now runs the full gate (typecheck + lint + build + both harnesses, with ripgrep
+  installed) on every push to `master` and every PR, not only on a release tag.
+- Added recall-boundary test coverage; aligned ripgrep line scoring to the 0-based
+  basis the worker/in-process scorers use; documented the per-platform `npm ci`
+  requirement for the esbuild-based harnesses.
+
 ## [2.10.0] - 2026-07-04
 
 A robustness and polish pass driven by a full multi-agent audit of the plugin.

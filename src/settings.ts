@@ -756,8 +756,8 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 		// unlimited and can seed the curated starters — so this is a plain heading,
 		// not a Pro-locked one.
 		new Setting(containerEl)
-			.setName("Workflow presets")
-			.setDesc(`Save searches to re-run from Browse. Free includes ${FREE_WORKFLOW_LIMIT}; Pro is unlimited and can load starter presets.`)
+			.setName("Workflows")
+			.setDesc(`Your primary saved object: save a search (mode + query + ranking) with ${mod}+S and re-run it from Browse. Free includes ${FREE_WORKFLOW_LIMIT}; Pro is unlimited and can load starter presets.`)
 			.setHeading();
 		const workflowList = containerEl.createDiv();
 		const isProUser = this.plugin.settings.isPro;
@@ -810,6 +810,10 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 
 		this.proHeading("Search profiles");
 		const profileList = containerEl.createDiv();
+		profileList.createEl("p", {
+			cls: "vault-spotlight-hint-text",
+			text: "Advanced: a profile is an optional context (file-type toggles, excluded folders, preview) a Workflow can restore. Most users only need Workflows.",
+		});
 
 		if (!this.plugin.settings.isPro) {
 			profileList.createEl("p", { cls: "vault-spotlight-hint-text", text: "Unlock Pro to save workspace-style search profiles." });
