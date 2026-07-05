@@ -10,14 +10,19 @@
 	--vs-radius-sm: 6px;
 	--vs-radius-md: 10px;
 	--vs-radius-lg: 14px;
-	/* Type ramp — every font-size in the modal references one of these. */
-	--vs-fz-nano: 9px;
-	--vs-fz-badge: 10px;
-	--vs-fz-micro: 11px;
-	--vs-fz-meta: 12px;
-	--vs-fz-body: 13px;
-	--vs-fz-title: 14px;
-	--vs-fz-input: 15px;
+	/* Type ramp — every font-size in the modal references one of these. Based on
+	   Obsidian's UI font scale (--font-ui-*), so the modal GROWS with the user's
+	   "Interface font size" setting and matches the rest of the app instead of
+	   staying a fixed size (which reads as tiny on high-DPI / large displays). The
+	   px fallbacks keep the ramp if a theme drops the base vars. Override any
+	   --vs-fz-* (or the --font-ui-* base) in a theme/snippet to retune. */
+	--vs-fz-nano: calc(var(--font-ui-smaller, 12px) * 0.75); /* ~9px */
+	--vs-fz-badge: calc(var(--font-ui-smaller, 12px) * 0.85); /* ~10px */
+	--vs-fz-micro: var(--font-ui-smaller, 12px); /* ~12px */
+	--vs-fz-meta: var(--font-ui-small, 13px); /* ~13px */
+	--vs-fz-body: var(--font-ui-small, 13px); /* ~13px */
+	--vs-fz-title: var(--font-ui-medium, 15px); /* ~15px */
+	--vs-fz-input: var(--font-ui-medium, 15px); /* ~15px */
 	/* Spacing scale — the modal's paddings come from here, not ad-hoc pixels, so
 	   the vertical/horizontal rhythm stays on a single system. */
 	--vs-sp-1: 4px;
@@ -42,6 +47,15 @@
 /* Container overrides — remove default Obsidian modal padding */
 .modal-container.vault-spotlight-container {
 	padding: 0;
+	/* Modal size knobs — override in a theme/snippet to taste. Wider and taller than
+	   a default palette so results (and the Pro preview) are readable on large /
+	   high-DPI displays, with a comfortable min-height so the modal doesn't resize
+	   jarringly as the result count changes while typing. */
+	--vs-modal-width: clamp(680px, 56vw, 1040px);
+	/* min(…, 78dvh) so a short viewport (mobile landscape) never gets a modal taller
+	   than the screen; 78dvh < the 80dvh max keeps min-height <= max-height always. */
+	--vs-modal-min-height: min(480px, 78dvh);
+	--vs-modal-max-height: min(80dvh, 760px);
 }
 
 .modal-container.vault-spotlight-container .modal-title {
@@ -51,7 +65,8 @@
 .modal-container.vault-spotlight-container .modal {
 	padding: 0;
 	margin: 0;
-	width: min(680px, 92vw);
+	width: var(--vs-modal-width, min(680px, 92vw));
+	max-width: calc(100vw - 32px);
 	border-radius: var(--vs-radius-lg, 14px);
 	overflow: hidden;
 	/* Layered elevation that reads in BOTH themes: a soft ambient drop plus a
@@ -84,8 +99,8 @@
 .vault-spotlight-modal {
 	display: flex;
 	flex-direction: column;
-	min-height: 420px;
-	max-height: min(72vh, 560px);
+	min-height: var(--vs-modal-min-height, 480px);
+	max-height: var(--vs-modal-max-height, min(80dvh, 760px));
 	background: var(--background-primary);
 }
 
@@ -196,7 +211,7 @@
    this bordered cap so keyboard keys never render two different ways. */
 .vault-spotlight-hint code,
 .vault-spotlight-footer kbd {
-	font-size: 10px;
+	font-size: var(--vs-fz-badge);
 	font-family: var(--font-monospace);
 	padding: 1px 6px;
 	border-radius: var(--vs-radius-sm);
@@ -479,13 +494,16 @@
 	justify-content: space-between;
 	gap: 12px;
 	padding: 6px 0;
-	font-size: var(--vs-fz-meta);
+	/* Settings tab is outside the modal, so the --vs-fz-* ramp isn't in scope; base
+	   these on the UI font directly (matching the ramp's intent) so they apply and
+	   scale with the interface font. */
+	font-size: var(--font-ui-small, 13px);
 	color: var(--text-muted);
 	border-bottom: 1px solid var(--background-modifier-border);
 }
 
 .vault-spotlight-starred-row button {
-	font-size: var(--vs-fz-micro);
+	font-size: var(--font-ui-smaller, 12px);
 }
 
 .vault-spotlight-setting-locked {
@@ -762,7 +780,9 @@
 /* Reusable PRO pill for the settings tab — same visual language as the
    modal's mode badge, so gating reads as one system. */
 .vault-spotlight-pro-pill {
-	font-size: 9px;
+	/* Settings tab lives outside the modal, so the --vs-fz-* ramp isn't in scope;
+	   base it on the UI font directly so it scales with the interface font too. */
+	font-size: calc(var(--font-ui-smaller, 12px) * 0.75);
 	font-weight: 700;
 	letter-spacing: 0.08em;
 	text-transform: uppercase;
@@ -897,7 +917,8 @@ input.vault-spotlight-prefix-input {
 }
 
 .vault-spotlight-hint-text {
-	font-size: var(--vs-fz-meta);
+	/* Settings-tab element (outside the modal scope); use the UI font directly. */
+	font-size: var(--font-ui-small, 13px);
 	color: var(--text-muted);
 	line-height: 1.5;
 	margin: 4px 0 12px;

@@ -3,6 +3,28 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.11.2] - 2026-07-05
+
+Readable, resizable modal on large / high-DPI displays (thanks @OlivierPS, #3).
+
+### Changed
+- **The modal's text now scales with your Obsidian "Interface font size."** The type
+  ramp is based on Obsidian's `--font-ui-*` variables instead of fixed pixels, so the
+  launcher grows with the rest of the app rather than staying tiny on a 14" MacBook /
+  Retina display. Fixed-px fallbacks preserve the previous look if a theme drops the
+  base variables.
+- **Larger, steadier modal.** It's wider on big screens (`clamp(680px, 56vw, 1040px)`)
+  and can grow taller (up to `min(80dvh, 760px)`), with a comfortable min-height so it
+  no longer resizes jarringly as the result count changes while typing. All three are
+  exposed as `--vs-modal-width` / `--vs-modal-min-height` / `--vs-modal-max-height`
+  variables, so a theme or CSS snippet can retune the size directly.
+- Every remaining hardcoded font size (modal keycaps, the settings Pro pill and a few
+  settings rows) now scales with the interface font too.
+
+### Fixed
+- A few settings-tab labels referenced the modal-scoped type ramp out of context, so
+  their intended font size was silently dropped; they now size correctly.
+
 ## [2.11.1] - 2026-07-05
 
 Obsidian community-review compliance fixes.
