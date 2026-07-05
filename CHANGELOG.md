@@ -3,6 +3,23 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.11.4] - 2026-07-05
+
+Make the local gate mirror Obsidian's automated review, so a review failure can't
+reach the reviewer (a failed review delists the plugin).
+
+### Internal
+- **`npm run lint` now runs `eslint-plugin-obsidianmd` — the exact ruleset
+  Obsidian's automated community-plugin review uses** — as a hard gate
+  (`eslint . --max-warnings 0`). This catches the review bot's checks locally
+  (static-style assignment, problematic settings headings, forbidden HTML
+  elements, command naming, etc.) before a release instead of after. Our own
+  type-aware rules stay layered on top of the plugin source.
+- Added a **manifest-contract test** that locks the manifest checks eslint can't
+  lint on the JSON file: the description/name/id must not contain "Obsidian" or
+  "plugin", the version must match `package.json`, and it must have a
+  `versions.json` entry.
+
 ## [2.11.3] - 2026-07-05
 
 Follow-ups from a review of 2.11.2.
