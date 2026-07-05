@@ -75,6 +75,11 @@ A robustness and polish pass driven by a full multi-agent audit of the plugin.
   diacritic folding, canvas/base, and ripgrep-vs-fallback recall/column/ordering
   parity when `rg` is installed). Unlike the prior source-string checks, it exercises
   production code end-to-end and is verified to fail when a search fix is reverted.
+- **New modal interaction harness** (`tests/modal-harness.test.mjs`): runs the real
+  `SpotlightModal` over a fake Obsidian DOM/keymap — opening the modal, checking the
+  registered shortcuts, typing a query to results, activating with Enter to open a
+  note, and saving a workflow end-to-end on the free tier. It is verified to fail
+  when the free-workflow-save regression is reintroduced.
 - Ripgrep line scoring now uses the same 0-based line basis as the worker/in-process
   scorers (was 1-based), so scores no longer drift by one at every tenth line.
 - Repository hygiene: a `.gitattributes` pins line endings to LF so a Windows clone

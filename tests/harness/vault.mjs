@@ -121,7 +121,17 @@ export function loadVaultApp(vaultDir) {
 	}
 
 	const noop = () => {};
+	const openedFiles = [];
+	const leaf = {
+		openFile: (file) => {
+			openedFiles.push(file);
+			return Promise.resolve();
+		},
+		setViewState: () => Promise.resolve(),
+		view: null,
+	};
 	const app = {
+		openedFiles, // test-visible record of workspace.openFile() calls
 		vault: {
 			getFiles: () => files.slice(),
 			getMarkdownFiles: () => files.filter((f) => f.extension === "md"),
@@ -141,11 +151,12 @@ export function loadVaultApp(vaultDir) {
 		},
 		workspace: {
 			getActiveFile: () => null,
-			getMostRecentLeaf: () => null,
+			getMostRecentLeaf: () => leaf,
+			getLeaf: () => leaf,
 			iterateAllLeaves: noop,
-			getLeaf: () => ({ openFile: () => Promise.resolve() }),
 			setActiveLeaf: noop,
 			revealLeaf: () => Promise.resolve(),
+			getActiveViewOfType: () => null,
 			on: () => ({}),
 			offref: noop,
 		},
