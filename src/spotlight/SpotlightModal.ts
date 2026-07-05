@@ -829,57 +829,61 @@ export class SpotlightModal extends Modal {
 				}));
 
 				if (isEmptyQuery) {
+					// Saved objects sit above the file list, most-canonical first:
+					// Workflows (the primary saved object) on TOP, then advanced Search
+					// profiles, then the legacy "Smart collections" (retired custom
+					// searches) at the bottom. Prepend once in that order so the hierarchy
+					// is explicit rather than an artifact of three reversed prepends.
+
 					// Workflows are free up to FREE_WORKFLOW_LIMIT so users can feel the
 					// recurring-workflow benefit before upgrading. Pro is unlimited and
-					// gets the curated starter presets seeded when it has none of its own;
-					// free shows only the user's own saved workflows (capped).
-					const source = isPro
+					// gets the curated starter presets seeded when it has none of its own.
+					const workflowSource = isPro
 						? ensureStarterWorkflows(this.plugin.settings.workflowPresets)
 						: normalizeWorkflowPresets(this.plugin.settings.workflowPresets).slice(0, FREE_WORKFLOW_LIMIT);
-					if (source.length > 0) {
-						const workflows = source
-							.slice()
-							.sort((a, b) => Number(b.pinned) - Number(a.pinned) || Number(b.starter ?? false) - Number(a.starter ?? false) || a.name.localeCompare(b.name))
-							.map((workflow) => ({
-								kind: "workflow" as const,
-								id: workflow.id,
-								name: workflow.name,
-								query: workflow.query,
-								mode: workflow.mode,
-								profileId: workflow.profileId,
-								isPinned: workflow.pinned,
-								isStarter: workflow.starter ?? false,
-								rankingMode: workflow.rankingMode,
-							}));
-						this.items = [...workflows, ...this.items];
-					}
-				}
-
-				if (isEmptyQuery && isPro && this.plugin.settings.searchProfiles.length > 0) {
-					const profiles = this.plugin.settings.searchProfiles.map((searchProfile) => ({
-						kind: "profile" as const,
-						id: searchProfile.id,
-						name: searchProfile.name,
-						defaultMode: searchProfile.defaultMode,
-						defaultQuery: searchProfile.defaultQuery,
-						isActive: searchProfile.id === this.plugin.settings.activeProfileId,
-					}));
-					this.items = [...profiles, ...this.items];
-				}
-
-				if (isEmptyQuery && isPro && this.plugin.settings.customSearches.length > 0) {
-					const pinned = new Set(this.plugin.settings.pinnedCustomSearchIds);
-					const collections = this.plugin.settings.customSearches
+					const workflowItems = workflowSource
 						.slice()
-						.sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)) || a.name.localeCompare(b.name))
-						.map((search) => ({
-							kind: "collection" as const,
-							id: search.id,
-							name: search.name,
-							query: search.query,
-							isPinned: pinned.has(search.id),
+						.sort((a, b) => Number(b.pinned) - Number(a.pinned) || Number(b.starter ?? false) - Number(a.starter ?? false) || a.name.localeCompare(b.name))
+						.map((workflow) => ({
+							kind: "workflow" as const,
+							id: workflow.id,
+							name: workflow.name,
+							query: workflow.query,
+							mode: workflow.mode,
+							profileId: workflow.profileId,
+							isPinned: workflow.pinned,
+							isStarter: workflow.starter ?? false,
+							rankingMode: workflow.rankingMode,
 						}));
-					this.items = [...collections, ...this.items];
+
+					const profileItems =
+						isPro && this.plugin.settings.searchProfiles.length > 0
+							? this.plugin.settings.searchProfiles.map((searchProfile) => ({
+									kind: "profile" as const,
+									id: searchProfile.id,
+									name: searchProfile.name,
+									defaultMode: searchProfile.defaultMode,
+									defaultQuery: searchProfile.defaultQuery,
+									isActive: searchProfile.id === this.plugin.settings.activeProfileId,
+								}))
+							: [];
+
+					let collectionItems: Array<{ kind: "collection"; id: string; name: string; query: string; isPinned: boolean }> = [];
+					if (isPro && this.plugin.settings.customSearches.length > 0) {
+						const pinned = new Set(this.plugin.settings.pinnedCustomSearchIds);
+						collectionItems = this.plugin.settings.customSearches
+							.slice()
+							.sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)) || a.name.localeCompare(b.name))
+							.map((search) => ({
+								kind: "collection" as const,
+								id: search.id,
+								name: search.name,
+								query: search.query,
+								isPinned: pinned.has(search.id),
+							}));
+					}
+
+					this.items = [...workflowItems, ...profileItems, ...collectionItems, ...this.items];
 				}
 
 				// Ambient calculator / date-jump: when the query is a calculation or

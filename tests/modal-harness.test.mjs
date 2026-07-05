@@ -142,5 +142,31 @@ const findKey = (modal, mods, key) =>
 	modal.close();
 }
 
+// --- 6. Browse hierarchy: Workflows rank above profiles and legacy collections --
+// Locks the Phase-2 Step-2 reorder: the canonical saved object (Workflows) is on top,
+// advanced profiles below, and the retired "Smart collections" (custom searches) last.
+{
+	const { app } = loadVaultApp(vaultDir);
+	const plugin = makeStubPlugin(app, {
+		isPro: true,
+		workflowPresets: [{ id: "wf", name: "My WF", query: "roadmap", mode: "files", pinned: false }],
+		searchProfiles: [
+			{ id: "pf", name: "My Profile", defaultMode: "files", defaultQuery: "", includeCanvas: true, includePdf: true, includeBases: true, excludeFolders: [], showPreview: false },
+		],
+		customSearches: [{ id: "cs", name: "Legacy Search", query: "old" }],
+		pinnedCustomSearchIds: ["cs"],
+	});
+	const modal = new SpotlightModal(app, plugin, "", "files");
+	modal.open();
+	await settle();
+	const kinds = modal.items.map((it) => it.kind);
+	const wf = kinds.indexOf("workflow");
+	const pf = kinds.indexOf("profile");
+	const col = kinds.indexOf("collection");
+	assert.ok(wf >= 0 && pf >= 0 && col >= 0, "browse shows workflow, profile, and collection groups");
+	assert.ok(wf < pf && pf < col, "Workflows rank above profiles, which rank above legacy collections");
+	modal.close();
+}
+
 uninstallWindow();
 console.log("modal harness tests passed");
