@@ -60,6 +60,7 @@ import {
 	buildFileItems,
 	buildSavedObjectItems,
 } from "./resultBuilders";
+import { buildAvailableActions, type ActionHost } from "./actionBuilders";
 import { renderResultRow } from "./resultRow";
 import * as batchOps from "./batchOps";
 import { copyToClipboard, renameFile } from "./batchOps";
@@ -1657,7 +1658,7 @@ export class SpotlightModal extends Modal {
 		return detectSearchIntegrations(Object.keys(plugins));
 	}
 
-	private runIntegrationCommand(name: "omnisearch" | "text extractor"): void {
+	private runIntegrationCommand(name: string): void {
 		const command = this.commandSearcher.search(name, 20).find((cmd) => cmd.id.toLowerCase().includes(name.replace(" ", "-")) || cmd.name.toLowerCase().includes(name));
 		if (!command || !this.commandSearcher.execute(command.id)) {
 			new Notice(`Vault Spotlight: ${name} command not found.`);
@@ -1683,7 +1684,7 @@ export class SpotlightModal extends Modal {
 
 	/** Open a .base result in a Bases Power Pack view via its public API. */
 	private async handoffBaseToPowerPack(
-		view: "kanban" | "calendar" | "gantt",
+		view: string,
 		basePath: string
 	): Promise<void> {
 		const api = this.basesPowerPackApi();
@@ -1702,236 +1703,50 @@ export class SpotlightModal extends Modal {
 	}
 
 	private availableActions(context: ResultItem): SpotlightAction[] {
-		if (context.kind === "profile") {
+		return buildAvailableActions(context, this.actionHost());
+	}
+
+	/** The operations the action-palette `run` closures need — see actionBuilders.ts. */
+	private actionHost(): ActionHost {
+		return {
+			app: this.app,
+			plugin: this.plugin,
+			workflows: this.workflows,
+			capture: this.capture,
+			integrations: () => this.installedSearchIntegrations(),
+			basesPowerPackViews: (file) => this.basesPowerPackViews(file),
+			handoffBaseToPowerPack: (view, path) => void this.handoffBaseToPowerPack(view, path),
+			batchContext: () => this.batchContext(),
+			resultItemsForBatch: () => this.resultItemsForBatch(),
+			runIntegrationCommand: (name) => this.runIntegrationCommand(name),
+			openResultAndClose: async (ctx) => {
+				this.close();
+				await this.openItem(ctx, null);
+				const file = itemFile(ctx);
+				if (file) this.plugin.trackRecent(file.path);
+			},
+			runCollectionQuery: (query) => {
+				this.actionContext = null;
+				this.inputEl.value = query;
+				void this.runSearch();
+			},
+			closeActionPalette: () => this.closeActionPalette(),
+		};
+	}
+
+	/** Bases Power Pack views for a `.base` file — empty unless Power Pack premium is
+	 * active, so the palette never offers a handoff that can only fail. */
+	private basesPowerPackViews(file: TFile): ReadonlyArray<readonly [string, string]> {
+		if (file.extension !== "base" || !this.installedSearchIntegrations().basesPowerPack) return [];
+		const api = this.basesPowerPackApi();
+		if (api?.openView && api.isPremiumActive?.() === true) {
 			return [
-				{
-					id: "activate-profile",
-					name: "Activate search profile",
-					description: `Switch to ${context.name} and run its default query.`,
-					requiresPro: true,
-					run: () => this.workflows.activateProfile(context.id),
-				},
-				{
-					id: "clear-profile",
-					name: "Clear active profile",
-					description: "Return Spotlight to the global search settings.",
-					requiresPro: true,
-					run: () => this.workflows.clearProfile(),
-				},
+				["kanban", "Kanban"],
+				["calendar", "Calendar"],
+				["gantt", "Gantt"],
 			];
 		}
-
-		if (context.kind === "collection") {
-			return [
-				{
-					id: "run-collection",
-					name: "Run smart collection",
-					description: context.query,
-					run: () => {
-						this.actionContext = null;
-						this.inputEl.value = context.query;
-						void this.runSearch();
-					},
-				},
-				{
-					id: "pin-collection",
-					name: context.isPinned ? "Unpin smart collection" : "Pin smart collection",
-					description: "Keep this saved search at the top of the browse view.",
-					requiresPro: true,
-					run: () => {
-						this.plugin.togglePinnedCollection(context.id);
-						this.closeActionPalette();
-					},
-				},
-				{
-					id: "copy-collection-query",
-					name: "Copy collection query",
-					description: "Copy the saved search query to the clipboard.",
-					run: () => copyToClipboard(context.query, "Query copied"),
-				},
-			];
-		}
-
-		// Delight rows get their own contextual actions instead of the generic
-		// file-batch palette, which has nothing to do with a calc/date/snippet row.
-		if (context.kind === "calc") {
-			return [
-				{
-					id: "copy-calc",
-					name: "Copy result",
-					description: `Copy ${context.result} to the clipboard.`,
-					run: () => this.capture.copyCalcResult(context),
-				},
-				{
-					id: "insert-calc",
-					name: "Insert at cursor",
-					description: "Insert the result into the active note.",
-					run: () => this.capture.insertCalcResult(context),
-				},
-			];
-		}
-		if (context.kind === "datejump") {
-			return [
-				{
-					id: "open-daily",
-					name: context.exists ? "Open daily note" : "Create daily note",
-					description: context.path,
-					run: () => void this.capture.openOrCreateDatedNote(context.date),
-				},
-			];
-		}
-		if (context.kind === "capture") {
-			return [
-				{
-					id: "run-capture",
-					name: "Capture",
-					description: context.description,
-					run: () => void this.capture.runCapture(context),
-				},
-			];
-		}
-		if (context.kind === "snippet") {
-			return [
-				{
-					id: "insert-snippet",
-					name: "Insert snippet",
-					description: "Insert this snippet at the cursor.",
-					requiresPro: true,
-					run: () => void this.capture.insertSnippet(context),
-				},
-				{
-					id: "copy-snippet",
-					name: "Copy snippet",
-					description: "Copy the snippet body to the clipboard.",
-					run: () => copyToClipboard(context.body, "Snippet copied"),
-				},
-			];
-		}
-
-		const file = itemFile(context);
-		const actions: SpotlightAction[] = [];
-		if (file) {
-			actions.push(
-				{
-					id: "open",
-					name: "Open",
-					description: "Open the selected result.",
-					run: async () => {
-						this.close();
-						await this.openItem(context, null);
-						this.plugin.trackRecent(file.path);
-					},
-				},
-				{
-					id: "copy-link",
-					name: "Copy link",
-					description: "Copy a Markdown link for this result.",
-					run: () => copyToClipboard(this.app.fileManager.generateMarkdownLink(file, ""), "Link copied"),
-				},
-				{
-					id: "copy-path",
-					name: "Copy path",
-					description: "Copy this file path.",
-					run: () => copyToClipboard(file.path, "Path copied"),
-				},
-				{
-					id: "rename",
-					name: "Rename",
-					description: "Rename the selected note or file.",
-					// Rename is free (a basic file operation) and available from both the
-					// action palette and the right-click / Alt+Enter menu — the two paths
-					// are intentionally consistent (the context menu never gated it).
-					run: () => renameFile(this.app, file),
-				},
-				{
-					id: "toggle-star",
-					name: this.plugin.isStarred(file.path) ? "Unstar" : "Star",
-					description: "Toggle the selected file in Starred pins.",
-					requiresPro: true,
-					run: () => {
-						this.plugin.toggleStar(file.path);
-						this.closeActionPalette();
-					},
-				}
-			);
-		}
-
-		const integrations = this.installedSearchIntegrations();
-
-		// Handoff: open a .base result in a Bases Power Pack view. Using a base
-		// as the data source is a Power Pack PREMIUM feature — only offer the
-		// actions when its API reports premium, so Lite users never see menu
-		// items that can only fail.
-		if (file && file.extension === "base" && integrations.basesPowerPack) {
-			const api = this.basesPowerPackApi();
-			if (api?.openView && api.isPremiumActive?.() === true) {
-				const views = [
-					["kanban", "Kanban"],
-					["calendar", "Calendar"],
-					["gantt", "Gantt"],
-				] as const;
-				for (const [view, label] of views) {
-					actions.push({
-						id: `open-base-${view}`,
-						name: `Open in ${label} view`,
-						description: `Open this base in Bases Power Pack's ${label} view.`,
-						run: () => this.handoffBaseToPowerPack(view, file.path),
-					});
-				}
-			}
-		}
-
-		actions.push({
-			id: "save-profile",
-			name: "Save current setup as profile",
-			description: "Create a Pro search profile from the current mode, query, preview, file type, and folder settings.",
-			requiresPro: true,
-			run: () => this.workflows.saveCurrentProfile(),
-		});
-
-		// The batch/export block operates on files. Only offer it when the result
-		// set actually contains files, so a command/folder/workflow row never
-		// surfaces "Batch move" or "Create MOC" that would act on the wrong set.
-		if (this.resultItemsForBatch().length > 0) {
-			// All batch/export actions are Pro and share the same shape; the only
-			// per-row differences are id/name/description and which batchOps call
-			// they run, so drive them from one table instead of ten near-identical
-			// object literals. Order here is the order shown in the palette.
-			const batchActions: Array<[id: string, name: string, description: string, run: () => void]> = [
-				["copy-results", "Copy results as Markdown", "Copy selected results, or the current result list, as Markdown links.", () => batchOps.copyResultsAsMarkdown(this.batchContext())],
-				["export-results", "Export results to note", "Create a Markdown note containing selected/search results.", () => batchOps.exportResultsToNote(this.batchContext())],
-				["batch-add-tag", "Batch add tag", "Append a tag to selected Markdown files.", () => batchOps.batchAddTag(this.batchContext())],
-				["batch-remove-tag", "Batch remove tag", "Remove a tag from selected Markdown files.", () => batchOps.batchRemoveTag(this.batchContext())],
-				["batch-set-property", "Batch set property", "Set a frontmatter property on selected Markdown files.", () => batchOps.batchSetProperty(this.batchContext())],
-				["batch-move", "Batch move files", "Move selected files into a target folder.", () => batchOps.batchMoveFiles(this.batchContext())],
-				["batch-star", "Batch star results", "Add selected/current result files to Starred pins.", () => batchOps.batchSetStarred(this.batchContext(), true)],
-				["batch-unstar", "Batch unstar results", "Remove selected/current result files from Starred pins.", () => batchOps.batchSetStarred(this.batchContext(), false)],
-				["create-moc", "Create MOC from results", "Create a grouped index note from selected/current results.", () => batchOps.createMocFromResults(this.batchContext())],
-				["append-links", "Append links to active note", "Append selected/current result links to the active Markdown note.", () => batchOps.appendLinksToActiveNote(this.batchContext())],
-			];
-			for (const [id, name, description, run] of batchActions) {
-				actions.push({ id, name, description, requiresPro: true, run });
-			}
-			if (integrations.omnisearch) {
-				actions.push({
-					id: "open-omnisearch",
-					name: "Search in Omnisearch",
-					description: "Hand off to the installed Omnisearch plugin.",
-					requiresPro: true,
-					run: () => this.runIntegrationCommand("omnisearch"),
-				});
-			}
-			if (integrations.textExtractor) {
-				actions.push({
-					id: "open-text-extractor",
-					name: "Run Text Extractor",
-					description: "Use the installed Text Extractor plugin for document/PDF text support.",
-					requiresPro: true,
-					run: () => this.runIntegrationCommand("text extractor"),
-				});
-			}
-		}
-		return actions;
+		return [];
 	}
 
 	private resultItemsForBatch(): ResultItem[] {
