@@ -1,15 +1,15 @@
 {
 	"name": "obsidian-vault-spotlight",
-	"version": "2.11.3",
+	"version": "2.11.4",
 	"description": "A keyboard-first command center for Obsidian: fast search, saved workflows, and result actions — find, reopen recurring work, and act without leaving the keyboard",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "node esbuild.config.mjs production",
 		"sync:shared": "node scripts/sync-shared.mjs",
-		"lint": "tsc --noEmit -p . && eslint src --max-warnings 0",
-		"test": "npm run lint && node scripts/sync-shared.mjs --check && node tests/selection-reducer.test.mjs && node tests/license-transition.test.mjs && node tests/activation-intent.test.mjs && node tests/search-aliases.test.mjs && node tests/onboarding.test.mjs && node tests/saved-workflows.test.mjs && node tests/mode-triggers.test.mjs && node tests/search.test.mjs && node tests/metadata.test.mjs && node tests/worker-index.test.mjs && node tests/verify-license.test.mjs && node tests/license.test.mjs && node tests/feature-gates.test.mjs && node tests/profile-core.test.mjs && node tests/phase1-core.test.mjs && node tests/workflow-core.test.mjs && node tests/links-core.test.mjs && node tests/calculator.test.mjs && node tests/natural-dates.test.mjs && node tests/daily-template.test.mjs && node tests/capture-snippets.test.mjs && node tests/modal-copy.test.mjs && node tests/vault-integration.test.mjs && node tests/vault-harness.test.mjs && node tests/modal-harness.test.mjs && node tests/styles-contract.test.mjs",
-		"test:ci": "node tests/selection-reducer.test.mjs && node tests/license-transition.test.mjs && node tests/activation-intent.test.mjs && node tests/search-aliases.test.mjs && node tests/onboarding.test.mjs && node tests/saved-workflows.test.mjs && node tests/mode-triggers.test.mjs && node tests/search.test.mjs && node tests/metadata.test.mjs && node tests/worker-index.test.mjs && node tests/verify-license.test.mjs && node tests/license.test.mjs && node tests/feature-gates.test.mjs && node tests/profile-core.test.mjs && node tests/phase1-core.test.mjs && node tests/workflow-core.test.mjs && node tests/links-core.test.mjs && node tests/calculator.test.mjs && node tests/natural-dates.test.mjs && node tests/daily-template.test.mjs && node tests/capture-snippets.test.mjs && node tests/modal-copy.test.mjs && node tests/vault-integration.test.mjs && node tests/vault-harness.test.mjs && node tests/modal-harness.test.mjs && node tests/styles-contract.test.mjs",
+		"lint": "tsc --noEmit -p . && eslint . --max-warnings 0",
+		"test": "npm run lint && node scripts/sync-shared.mjs --check && node tests/selection-reducer.test.mjs && node tests/license-transition.test.mjs && node tests/activation-intent.test.mjs && node tests/search-aliases.test.mjs && node tests/onboarding.test.mjs && node tests/saved-workflows.test.mjs && node tests/mode-triggers.test.mjs && node tests/search.test.mjs && node tests/metadata.test.mjs && node tests/worker-index.test.mjs && node tests/verify-license.test.mjs && node tests/license.test.mjs && node tests/feature-gates.test.mjs && node tests/profile-core.test.mjs && node tests/phase1-core.test.mjs && node tests/workflow-core.test.mjs && node tests/links-core.test.mjs && node tests/calculator.test.mjs && node tests/natural-dates.test.mjs && node tests/daily-template.test.mjs && node tests/capture-snippets.test.mjs && node tests/modal-copy.test.mjs && node tests/vault-integration.test.mjs && node tests/vault-harness.test.mjs && node tests/modal-harness.test.mjs && node tests/styles-contract.test.mjs && node tests/manifest-contract.test.mjs",
+		"test:ci": "node tests/selection-reducer.test.mjs && node tests/license-transition.test.mjs && node tests/activation-intent.test.mjs && node tests/search-aliases.test.mjs && node tests/onboarding.test.mjs && node tests/saved-workflows.test.mjs && node tests/mode-triggers.test.mjs && node tests/search.test.mjs && node tests/metadata.test.mjs && node tests/worker-index.test.mjs && node tests/verify-license.test.mjs && node tests/license.test.mjs && node tests/feature-gates.test.mjs && node tests/profile-core.test.mjs && node tests/phase1-core.test.mjs && node tests/workflow-core.test.mjs && node tests/links-core.test.mjs && node tests/calculator.test.mjs && node tests/natural-dates.test.mjs && node tests/daily-template.test.mjs && node tests/capture-snippets.test.mjs && node tests/modal-copy.test.mjs && node tests/vault-integration.test.mjs && node tests/vault-harness.test.mjs && node tests/modal-harness.test.mjs && node tests/styles-contract.test.mjs && node tests/manifest-contract.test.mjs",
 		"license:generate": "node scripts/generate-license.mjs"
 	},
 	"keywords": [
@@ -27,6 +27,7 @@
 		"@types/node": "^24.0.0",
 		"esbuild": "^0.28.1",
 		"eslint": "^10.6.0",
+		"eslint-plugin-obsidianmd": "^0.4.1",
 		"obsidian": "1.7.2",
 		"typescript": "^5.8.3",
 		"typescript-eslint": "^8.62.1"
