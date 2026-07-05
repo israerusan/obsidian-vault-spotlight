@@ -52,6 +52,8 @@
 	   high-DPI displays, with a comfortable min-height so the modal doesn't resize
 	   jarringly as the result count changes while typing. */
 	--vs-modal-width: clamp(680px, 56vw, 1040px);
+	/* With the Pro preview pane open the modal is wider to fit results + preview. */
+	--vs-modal-preview-width: min(1040px, 96vw);
 	/* min(…, 78dvh) so a short viewport (mobile landscape) never gets a modal taller
 	   than the screen; 78dvh < the 80dvh max keeps min-height <= max-height always. */
 	--vs-modal-min-height: min(480px, 78dvh);
@@ -821,7 +823,7 @@
 
 /* Preview pane (Pro) */
 .modal-container.vault-spotlight-container.has-preview .modal {
-	width: min(1040px, 96vw);
+	width: var(--vs-modal-preview-width, min(1040px, 96vw));
 }
 
 .vault-spotlight-container.has-preview .vault-spotlight-results {

@@ -3,6 +3,23 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.11.3] - 2026-07-05
+
+Follow-ups from a review of 2.11.2.
+
+### Fixed
+- The Pro **preview pane's modal width is now themeable too**: it uses a new
+  `--vs-modal-preview-width` variable instead of a hardcoded width, so a theme's
+  `--vs-modal-*` overrides apply in preview mode as advertised (previously only
+  normal mode honored the variable).
+
+### Internal
+- The release workflow now installs **ripgrep**, so the ripgrep search assertions
+  run in the tag-time gate (matching PR CI) instead of being skipped.
+- Added a **styles-contract test** that locks the modal sizing/scaling invariants
+  (themeable size variables, no literal-px font sizes, viewport-safe height/width) so
+  a regression the harness can't screenshot still fails CI.
+
 ## [2.11.2] - 2026-07-05
 
 Readable, resizable modal on large / high-DPI displays (thanks @OlivierPS, #3).
