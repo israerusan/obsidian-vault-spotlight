@@ -949,3 +949,9 @@ input.vault-spotlight-prefix-input {
 		outline: 2px solid Highlight;
 	}
 }
+
+/* Clickable text affordance (e.g. the Undo link in a Notice). Cursor set via a
+   class instead of an inline style, per Obsidian review guidelines. */
+.vault-spotlight-clickable {
+	cursor: pointer;
+}
