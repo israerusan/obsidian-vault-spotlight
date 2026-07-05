@@ -454,8 +454,16 @@ export class SpotlightModal extends Modal {
 		// enough times, condense it to the essentials so the header isn't perpetually
 		// dense. showOnboarding is pure + unit-tested in core/onboarding.
 		const full = showOnboarding(this.plugin.settings.openCount, this.plugin.settings.onboardingDismissed);
+		// The two persistent affordances are the core pillars — Actions (Cmd/Ctrl+K)
+		// and Workflows (Cmd/Ctrl+S) — so post-onboarding hints emphasize those over
+		// niche mode triggers. Both work on every tier.
+		const core: Array<[string, string]> = [
+			[`${mod}+K`, "actions"],
+			[`${mod}+S`, "save workflow"],
+		];
 		const hints: Array<[string, string]> = full
 			? [
+					...core,
 					["2+2", "calc"],
 					[prefixes.capture, "capture"],
 					["#journal", "tag"],
@@ -464,10 +472,7 @@ export class SpotlightModal extends Modal {
 					[prefixes.editors, "tabs"],
 					[prefixes.folders, "folders"],
 			  ]
-			: [
-					["2+2", "calc"],
-					["#journal", "tag"],
-			  ];
+			: [...core];
 		if (isPro && full) {
 			hints.push(
 				[prefixes.content, "content"],
@@ -476,7 +481,9 @@ export class SpotlightModal extends Modal {
 				[prefixes.snippets, "snippets"]
 			);
 		}
-		hints.push(["Tab", "next mode"], ["Shift+Tab", "previous mode"], [this.plugin.settings.escapeChar, "literal"]);
+		hints.push(["Tab", "next mode"], ["Shift+Tab", "previous mode"]);
+		// The literal-escape hint is niche; only surface it during first-run onboarding.
+		if (full) hints.push([this.plugin.settings.escapeChar, "literal"]);
 		hints.forEach(([code, label], index) => {
 			if (index > 0) this.hintEl.appendText(" · ");
 			this.hintEl.createEl("code", { text: code });
