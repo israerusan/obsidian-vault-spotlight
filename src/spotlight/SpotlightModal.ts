@@ -50,6 +50,7 @@ import {
 import { PreviewPane } from "./PreviewPane";
 import { CaptureController } from "./CaptureController";
 import { WorkflowController } from "./WorkflowController";
+import { registerSpotlightScope } from "./keymap";
 import { renderResultRow } from "./resultRow";
 import * as batchOps from "./batchOps";
 import { copyToClipboard, renameFile } from "./batchOps";
@@ -2180,159 +2181,32 @@ export class SpotlightModal extends Modal {
 	}
 
 	private registerScopeShortcuts(): void {
-		// The modal's Scope is pushed onto Obsidian's keymap while the modal is
-		// open, so these fire regardless of which element inside the modal holds
-		// DOM focus. Typed characters are left untouched here so they flow into
-		// the focused input natively.
-		// While an IME candidate window is open (evt.isComposing / keyCode 229),
-		// these keys belong to the composition — navigating the result list or
-		// activating a result would discard the in-progress text. Let them through
-		// to the input untouched, matching Obsidian's own suggesters.
-		this.scope.register([], "ArrowDown", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.moveSelection(1);
-			return false;
-		});
-		this.scope.register([], "ArrowUp", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.moveSelection(-1);
-			return false;
-		});
-		// Jump-to-ends and page navigation for long result lists. Like the arrow
-		// keys, these defer during IME composition (isComposing) — a CJK user paging
-		// an IME candidate window with Home/End/PageUp/PageDown must not have the
-		// keypress swallowed to drive the result list instead.
-		this.scope.register([], "Home", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "first" }));
-			return false;
-		});
-		this.scope.register([], "End", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "last" }));
-			return false;
-		});
-		this.scope.register([], "PageDown", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "page", delta: 1, pageSize: this.pageSize() }));
-			return false;
-		});
-		this.scope.register([], "PageUp", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "page", delta: -1, pageSize: this.pageSize() }));
-			return false;
-		});
-		// Emacs-style aliases so hands never leave the home row.
-		this.scope.register(["Ctrl"], "n", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.moveSelection(1);
-			return false;
-		});
-		this.scope.register(["Ctrl"], "p", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.moveSelection(-1);
-			return false;
-		});
-		this.scope.register([], "Enter", (evt) => {
-			// Enter confirms the IME candidate mid-composition — don't activate a
-			// result and close the modal out from under the user's input.
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.safeActivate();
-			return false;
-		});
-		// Ctrl+Enter flips the default open target: new tab normally, current
-		// tab when "open in new tab by default" is on.
-		this.scope.register(["Mod"], "Enter", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.safeActivate(this.plugin.settings.defaultNewTab ? null : "tab");
-			return false;
-		});
-		this.scope.register(["Mod", "Alt"], "Enter", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.safeActivate("split");
-			return false;
-		});
-		this.scope.register(["Alt"], "Enter", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			const item = this.items[this.selectedIndex];
-			if (item) this.openActionsMenu(item);
-			return false;
-		});
-		this.scope.register(["Shift"], "Enter", (evt) => {
-			// A held Shift while committing an IME candidate must not fire
-			// createFromQuery and close the modal out from under the composition.
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			void this.createFromQuery();
-			return false;
-		});
-		this.scope.register(["Mod"], "k", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.openActionPalette();
-			return false;
-		});
-		this.scope.register([], "Escape", (evt) => {
-			// Escape cancels the IME composition first; only unwind modal state
-			// once there's no active composition to dismiss.
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			if (this.actionContext) this.closeActionPalette();
-			else if (this.drillFile) this.exitDrill();
-			else this.close();
-			return false;
-		});
-		this.scope.register([], "Tab", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.cycleMode(1);
-			return false;
-		});
-		this.scope.register(["Shift"], "Tab", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.cycleMode(-1);
-			return false;
-		});
-
-		// Mod+S saves the current search as a workflow — registered for ALL tiers,
-		// NOT behind the Pro gate below. Workflows are free up to FREE_WORKFLOW_LIMIT,
-		// and saveCurrentWorkflow() itself shows the upgrade notice when a free user is
-		// already at the limit. Gating this behind Pro (as it was) made the free
-		// "save a workflow" path that Settings and the changelog advertise literally
-		// unreachable — pressing Mod+S did nothing for a free user.
-		this.scope.register(["Mod"], "s", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.workflows.saveCurrentWorkflow();
-			return false;
-		});
-
-		if (!this.plugin.settings.isPro) return;
-
-		this.scope.register(["Mod"], " ", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.toggleCheck();
-			return false;
-		});
-		this.scope.register(["Mod"], "d", (evt) => {
-			if (evt.isComposing) return true;
-			evt.preventDefault();
-			this.toggleStarSelected();
-			return false;
+		// The keyboard layer lives in ./keymap; the modal only supplies bound actions
+		// so its methods stay private. Behavior/order is identical to the old inline
+		// registration and is covered by the modal interaction harness.
+		registerSpotlightScope(this.scope, this.plugin.settings.isPro, {
+			moveSelection: (delta) => this.moveSelection(delta),
+			selectFirst: () => this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "first" })),
+			selectLast: () => this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "last" })),
+			pageMove: (delta: 1 | -1) => this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "page", delta, pageSize: this.pageSize() })),
+			activateDefault: () => this.safeActivate(),
+			activatePreferredTab: () => this.safeActivate(this.plugin.settings.defaultNewTab ? null : "tab"),
+			activateSplit: () => this.safeActivate("split"),
+			openContextMenuForSelection: () => {
+				const item = this.items[this.selectedIndex];
+				if (item) this.openActionsMenu(item);
+			},
+			createFromQuery: () => void this.createFromQuery(),
+			openActionPalette: () => this.openActionPalette(),
+			escape: () => {
+				if (this.actionContext) this.closeActionPalette();
+				else if (this.drillFile) this.exitDrill();
+				else this.close();
+			},
+			cycleMode: (delta: 1 | -1) => this.cycleMode(delta),
+			saveWorkflow: () => this.workflows.saveCurrentWorkflow(),
+			toggleCheck: () => this.toggleCheck(),
+			toggleStarSelected: () => this.toggleStarSelected(),
 		});
 	}
 
