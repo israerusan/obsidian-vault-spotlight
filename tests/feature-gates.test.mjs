@@ -42,16 +42,16 @@ assert.ok(spotlight.includes('"links"'), "spotlight should include Pro links mod
 assert.ok(spotlight.includes("linkModeItems"), "spotlight should resolve backlinks/outlinks in links mode");
 assert.ok(spotlight.includes("Search in Omnisearch"), "spotlight should expose Omnisearch handoff when installed");
 // Regression (critique #1): the free "save a workflow" path must be reachable.
-// A prior version registered Mod+S only AFTER `if (!isPro) return` in the modal,
-// so pressing Mod+S did nothing for free users despite Settings advertising it.
-const modalSrc = fs.readFileSync(path.join(spotlightDir, "SpotlightModal.ts"), "utf8");
-const modSaveIdx = modalSrc.indexOf('this.scope.register(["Mod"], "s"');
+// A prior version registered Mod+S only AFTER `if (!isPro) return`, so pressing
+// Mod+S did nothing for free users despite Settings advertising it. The keyboard
+// layer now lives in spotlight/keymap.ts; assert Mod+S is registered before the
+// Pro gate there. (The modal harness also verifies this behaviorally.)
+const keymapSrc = fs.readFileSync(path.join(spotlightDir, "keymap.ts"), "utf8");
+const modSaveIdx = keymapSrc.indexOf('scope.register(["Mod"], "s"');
 // Mod+Space (toggle multi-select check) is the FIRST shortcut registered after the
-// keybinding Pro gate, so Mod+S appearing before it proves Mod+S is in the ungated
-// region. (Anchoring on the isPro gate string directly is unreliable — it appears
-// elsewhere in the file too.)
-const proShortcutIdx = modalSrc.indexOf('this.scope.register(["Mod"], " "');
-assert.ok(modSaveIdx !== -1 && proShortcutIdx !== -1, "modal should register Mod+S and the Pro-only Mod+Space shortcut");
+// `if (!isPro) return` gate, so Mod+S appearing before it proves Mod+S is ungated.
+const proShortcutIdx = keymapSrc.indexOf('scope.register(["Mod"], " "');
+assert.ok(modSaveIdx !== -1 && proShortcutIdx !== -1, "keymap should register Mod+S and the Pro-only Mod+Space shortcut");
 assert.ok(modSaveIdx < proShortcutIdx, "Mod+S (save workflow) must be registered before the Pro-only shortcuts so free users can save workflows");
 assert.equal(canSaveWorkflowPreset([], false), true, "free tier can save its first workflow");
 assert.equal(canSaveWorkflowPreset([{}, {}], false), false, "free tier is capped at the free workflow limit");
