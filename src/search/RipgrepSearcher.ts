@@ -315,7 +315,9 @@ export class RipgrepSearcher {
 				// engine ran, so a mismatched base here would flip the relative order of
 				// a canvas/base hit vs a deep-line markdown hit depending on whether
 				// ripgrep happens to be installed. Keep all three markdown paths equal.
-				score: Math.max(1, 100 - Math.floor(lineNum / 10)),
+				// (lineNum - 1) matches the 0-based loop index the worker/in-process
+				// scorers use, so scores don't drift by one at every 10th line.
+				score: Math.max(1, 100 - Math.floor((lineNum - 1) / 10)),
 				engine: "ripgrep",
 			});
 		}

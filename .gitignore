@@ -1,5 +1,6 @@
 node_modules/
 main.js.map
+tests/harness/.generated/
 .DS_Store
 scripts/.license-private.key
 TEST_LICENSE.txt

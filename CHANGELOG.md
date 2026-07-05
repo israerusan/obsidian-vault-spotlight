@@ -69,6 +69,14 @@ A robustness and polish pass driven by a full multi-agent audit of the plugin.
   still managed in Settings. `Mod+S` saves a workflow.
 
 ### Internal
+- **New fixture-vault interaction harness** (`tests/vault-harness.test.mjs`): bundles
+  the real search modules and drives them over an on-disk fixture vault — typing
+  queries and asserting the actual results (AND semantics, ranking, exclusions,
+  diacritic folding, canvas/base, and ripgrep-vs-fallback recall/column/ordering
+  parity when `rg` is installed). Unlike the prior source-string checks, it exercises
+  production code end-to-end and is verified to fail when a search fix is reverted.
+- Ripgrep line scoring now uses the same 0-based line basis as the worker/in-process
+  scorers (was 1-based), so scores no longer drift by one at every tenth line.
 - Repository hygiene: a `.gitattributes` pins line endings to LF so a Windows clone
   can't produce phantom CRLF churn, and `npm run lint` now fails on any ESLint
   warning (`--max-warnings 0`) instead of letting warnings ship green.
