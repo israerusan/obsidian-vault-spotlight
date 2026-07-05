@@ -2,7 +2,6 @@ import {
 	App,
 	type EventRef,
 	MarkdownView,
-	Menu,
 	Notice,
 	Modal,
 	Platform,
@@ -61,9 +60,9 @@ import {
 	buildSavedObjectItems,
 } from "./resultBuilders";
 import { buildAvailableActions, type ActionHost } from "./actionBuilders";
+import { openResultContextMenu } from "./contextMenu";
 import { renderResultRow } from "./resultRow";
 import * as batchOps from "./batchOps";
-import { copyToClipboard, renameFile } from "./batchOps";
 import { DEFAULT_SETTINGS, createExternalLink } from "../settings";
 
 
@@ -1776,72 +1775,13 @@ export class SpotlightModal extends Modal {
 	}
 
 	private openActionsMenu(item: ResultItem, evt?: MouseEvent): void {
-		const file = itemFile(item);
-		if (!file) return;
-		// Seek to the matched line for anything that carries one, so opening a
-		// symbol/heading/content hit via the menu lands on the passage — matching
-		// what Enter (openItem) already does.
-		const menu = new Menu();
-
-		const openIn = (paneType: "tab" | "split" | "window") => {
-			this.close();
-			void (async () => {
-				const leaf = this.app.workspace.getLeaf(paneType);
-				await leaf.openFile(file);
-				this.seekToItemLine(leaf, item);
-				this.plugin.trackRecent(file.path);
-			})();
-		};
-
-		menu.addItem((i) => i.setTitle("Open in new tab").setIcon("file-plus").onClick(() => openIn("tab")));
-		menu.addItem((i) =>
-			i.setTitle("Open to the right").setIcon("separator-vertical").onClick(() => openIn("split"))
-		);
-		menu.addItem((i) =>
-			i.setTitle("Open in new window").setIcon("picture-in-picture-2").onClick(() => openIn("window"))
-		);
-		menu.addSeparator();
-		menu.addItem((i) =>
-			i
-				.setTitle("Copy Obsidian link")
-				.setIcon("link")
-				.onClick(() => {
-					const link = this.app.fileManager.generateMarkdownLink(file, "");
-					copyToClipboard(link, "Link copied");
-				})
-		);
-		menu.addItem((i) =>
-			i
-				.setTitle("Copy path")
-				.setIcon("copy")
-				.onClick(() => copyToClipboard(file.path, "Path copied"))
-		);
-		menu.addItem((i) =>
-			i
-				.setTitle("Rename…")
-				.setIcon("pencil")
-				.onClick(() => renameFile(this.app, file))
-		);
-
-		const showInFolder = (this.app as unknown as { showInFolder?: (p: string) => void }).showInFolder;
-		if (typeof showInFolder === "function") {
-			menu.addItem((i) =>
-				i
-					.setTitle("Show in system explorer")
-					.setIcon("folder-open")
-					.onClick(() => {
-						showInFolder.call(this.app, file.path);
-					})
-			);
-		}
-
-		if (evt) {
-			menu.showAtMouseEvent(evt);
-		} else {
-			const rect = this.resultsEl.querySelector(".is-selected")?.getBoundingClientRect();
-			if (rect) menu.showAtPosition({ x: rect.left + 40, y: rect.bottom });
-			else menu.showAtPosition({ x: 100, y: 100 });
-		}
+		openResultContextMenu(item, evt, {
+			app: this.app,
+			close: () => this.close(),
+			trackRecent: (path) => this.plugin.trackRecent(path),
+			seekToItemLine: (leaf, it) => this.seekToItemLine(leaf, it),
+			selectedRowRect: () => this.resultsEl.querySelector<HTMLElement>(".is-selected")?.getBoundingClientRect() ?? null,
+		});
 	}
 
 	private recordSearch(): void {
