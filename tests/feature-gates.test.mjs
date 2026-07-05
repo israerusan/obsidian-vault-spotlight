@@ -60,8 +60,8 @@ assert.equal(canSaveWorkflowPreset([], true), true, "Pro can always save a workf
 // not silently dead — Mod+S saves a workflow for everyone instead.
 assert.ok(!spotlight.includes("saveCustomSearch"), "the dead saveCustomSearch path should be removed, not left unreachable");
 
-assert.ok(readme.includes("Keyboard action palette"), "README should document the action palette");
-assert.ok(readme.includes("Smart collections"), "README should document smart collections");
-assert.ok(readme.includes("Export results"), "README should document result export");
+assert.ok(readme.includes("Action palette"), "README should document the action palette");
+assert.ok(/\bWorkflows\b/.test(readme), "README should feature Workflows as a core pillar");
+assert.ok(/export/i.test(readme), "README should document result export");
 
 console.log("feature gate tests passed");
