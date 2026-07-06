@@ -19,6 +19,8 @@ export interface SavedWorkflow {
 	exposeAsCommand?: boolean;
 }
 
+export const MAX_SAVED_WORKFLOWS: number;
+
 export function buildSavedWorkflows(legacy: {
 	workflowPresets?: unknown[];
 	searchProfiles?: unknown[];
@@ -27,3 +29,16 @@ export function buildSavedWorkflows(legacy: {
 }): SavedWorkflow[];
 
 export function migratedActiveWorkflowId(legacy: { activeProfileId?: string }): string;
+
+export function normalizeSavedWorkflows(raw: unknown): SavedWorkflow[];
+
+export function createSavedWorkflow(
+	name: string,
+	mode: string,
+	query: string,
+	options?: Partial<Omit<SavedWorkflow, "id" | "name" | "mode" | "query">>
+): SavedWorkflow;
+
+export function canSaveSavedWorkflow(savedWorkflows: unknown, isPro: boolean): boolean;
+
+export function resolveSavedWorkflows(savedWorkflows: unknown, workflowPresets: unknown): SavedWorkflow[];

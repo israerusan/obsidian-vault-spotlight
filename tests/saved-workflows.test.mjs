@@ -1,5 +1,13 @@
 import assert from "assert";
-import { buildSavedWorkflows, migratedActiveWorkflowId } from "../src/core/savedWorkflows.mjs";
+import {
+	buildSavedWorkflows,
+	canSaveSavedWorkflow,
+	createSavedWorkflow,
+	MAX_SAVED_WORKFLOWS,
+	migratedActiveWorkflowId,
+	normalizeSavedWorkflows,
+	resolveSavedWorkflows,
+} from "../src/core/savedWorkflows.mjs";
 
 // A realistic 5-array legacy data.json snapshot.
 const legacy = {
@@ -61,5 +69,58 @@ assert.equal(new Set(dupe.map((w) => w.id)).size, 2, "colliding ids across conce
 // Empty / missing legacy is safe.
 assert.deepEqual(buildSavedWorkflows({}), [], "empty legacy yields no workflows");
 assert.deepEqual(buildSavedWorkflows(null), [], "null legacy is safe");
+
+// --- normalizeSavedWorkflows: sanitize a persisted list ---
+
+// Idempotent on buildSavedWorkflows output (re-loading a migrated list is a no-op).
+assert.deepEqual(normalizeSavedWorkflows(merged), merged, "normalize is idempotent on migrated output");
+
+// Drops non-objects, coerces fields, defaults an invalid mode to files.
+const cleaned = normalizeSavedWorkflows([
+	null,
+	"nope",
+	{ id: "a", name: "A", query: "q", mode: "content" },
+	{ name: "No id", mode: "bogus-mode" },
+]);
+assert.equal(cleaned.length, 2, "malformed rows are dropped");
+assert.equal(cleaned[1].mode, "files", "an invalid mode falls back to files");
+
+// Re-mints colliding ids so pin/remove can't act on two rows at once.
+const collided = normalizeSavedWorkflows([
+	{ id: "dup", name: "One", mode: "files" },
+	{ id: "dup", name: "Two", mode: "files" },
+]);
+assert.equal(new Set(collided.map((w) => w.id)).size, 2, "colliding ids are re-minted unique");
+
+// Caps the list so a hostile/huge persisted array can't grow unbounded.
+const many = normalizeSavedWorkflows(Array.from({ length: MAX_SAVED_WORKFLOWS + 20 }, (_, i) => ({ id: `w${i}`, name: `W${i}`, mode: "files" })));
+assert.equal(many.length, MAX_SAVED_WORKFLOWS, "the list is capped at MAX_SAVED_WORKFLOWS");
+
+// --- createSavedWorkflow ---
+const created = createSavedWorkflow("My Search", "content", "widget OR gadget", { rankingMode: "recency" });
+assert.equal(created.id, "my-search", "id slugs from the name");
+assert.equal(created.mode, "content", "mode passes through when valid");
+assert.equal(created.query, "widget OR gadget", "query is preserved verbatim");
+assert.equal(created.rankingMode, "recency", "valid ranking mode is kept");
+assert.equal(createSavedWorkflow("x", "not-a-mode", "").mode, "files", "invalid mode defaults to files");
+
+// --- canSaveSavedWorkflow (free cap counts only user-created rows) ---
+assert.equal(canSaveSavedWorkflow([], false), true, "free tier can save its first");
+assert.equal(canSaveSavedWorkflow([{ id: "a" }, { id: "b" }], false), false, "free tier is capped at the limit");
+assert.equal(canSaveSavedWorkflow([{ id: "a" }, { id: "b" }], true), true, "Pro is never capped");
+assert.equal(
+	canSaveSavedWorkflow([{ id: "a", starter: true }, { id: "b", starter: true }], false),
+	true,
+	"seeded starters don't count against the free cap"
+);
+
+// --- resolveSavedWorkflows: union of savedWorkflows + legacy presets, deduped ---
+const unioned = resolveSavedWorkflows(
+	[{ id: "s1", name: "Saved", mode: "files" }],
+	[{ id: "s1", name: "Legacy dup", mode: "files" }, { id: "p1", name: "Legacy only", mode: "content" }]
+);
+assert.equal(unioned.length, 2, "union de-dupes by id (savedWorkflows win)");
+assert.equal(unioned.find((w) => w.id === "s1").name, "Saved", "the savedWorkflows entry wins a collision");
+assert.ok(unioned.some((w) => w.id === "p1"), "a legacy-only preset is included in the union");
 
 console.log("saved-workflows tests passed");

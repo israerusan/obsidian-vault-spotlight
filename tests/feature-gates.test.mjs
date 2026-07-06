@@ -2,7 +2,14 @@ import assert from "assert";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { canSaveWorkflowPreset } from "../src/core/workflowPresets.mjs";
+import { canSaveWorkflowPreset, FREE_WORKFLOW_LIMIT as PRESET_LIMIT } from "../src/core/workflowPresets.mjs";
+import {
+	FEATURES,
+	FREE_WORKFLOW_LIMIT,
+	isFeatureEnabled,
+	isProOnlyMode,
+	withinFreeLimit,
+} from "../src/core/featureGates.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
@@ -63,5 +70,38 @@ assert.ok(!spotlight.includes("saveCustomSearch"), "the dead saveCustomSearch pa
 assert.ok(readme.includes("Action palette"), "README should document the action palette");
 assert.ok(/\bWorkflows\b/.test(readme), "README should feature Workflows as a core pillar");
 assert.ok(/export/i.test(readme), "README should document result export");
+
+// --- featureGates: the single source of truth ---
+
+// Pro-only features are gated; free features are always enabled.
+for (const key of ["contentSearch", "headingSearch", "linksMode", "snippets", "previewPane", "batchActions", "searchProfiles"]) {
+	assert.equal(isFeatureEnabled(FEATURES[key], false), false, `${key} is locked on the free tier`);
+	assert.equal(isFeatureEnabled(FEATURES[key], true), true, `${key} unlocks with Pro`);
+}
+for (const key of ["fileLauncher", "tagPropertyFilters", "quickActions", "actionPalette", "workflows"]) {
+	assert.equal(isFeatureEnabled(FEATURES[key], false), true, `${key} is free`);
+}
+
+// Ranking controls & match-reason badges are FREE — matches the shipping settings
+// UI (ungated) and the modal (passes ranking + match reasons unconditionally). If
+// this flips, the README table and the code gate must move together.
+assert.equal(FEATURES.rankingControls.proOnly, false, "ranking controls are free (docs must match code)");
+assert.equal(isFeatureEnabled(FEATURES.rankingControls, false), true, "free users get ranking controls");
+
+// The Pro-only mode set has ONE definition — accept it by string too.
+assert.ok(isProOnlyMode("content") && isProOnlyMode("headings") && isProOnlyMode("links") && isProOnlyMode("snippets"), "the four Pro modes gate");
+for (const free of ["files", "symbols", "commands", "editors", "folders"]) {
+	assert.equal(isProOnlyMode(free), false, `${free} is a free mode`);
+}
+
+// Single source of truth for the free workflow cap: workflowPresets re-exports it.
+assert.equal(FREE_WORKFLOW_LIMIT, 2, "free workflow limit is 2");
+assert.equal(PRESET_LIMIT, FREE_WORKFLOW_LIMIT, "workflowPresets.FREE_WORKFLOW_LIMIT derives from featureGates (single source)");
+assert.equal(FEATURES.workflows.freeLimit, FREE_WORKFLOW_LIMIT, "the workflows feature carries the same cap");
+
+// withinFreeLimit mirrors the workflow cap and Pro override.
+assert.equal(withinFreeLimit(FEATURES.workflows, 0, false), true, "free tier can add its first workflow");
+assert.equal(withinFreeLimit(FEATURES.workflows, 2, false), false, "free tier is capped at the limit");
+assert.equal(withinFreeLimit(FEATURES.workflows, 2, true), true, "Pro is never capped");
 
 console.log("feature gate tests passed");

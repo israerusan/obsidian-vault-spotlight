@@ -102,6 +102,35 @@ function makeDenseVault(nLines) {
 	);
 }
 
+// --- 4b. File search Boolean OR: union of clauses ------------------------------
+{
+	const orClause = (o) => ({
+		textTokens: [],
+		phrases: [],
+		exclusions: [],
+		folderIncludes: [],
+		pathTerms: [],
+		nameTerms: [],
+		tags: [],
+		properties: [],
+		extFilters: [],
+		isStarred: false,
+		isBookmarked: false,
+		modifiedDays: null,
+		createdDays: null,
+		...o,
+	});
+	// "roadmap OR launch": a file matching EITHER clause is returned.
+	const results = fileSearch({
+		orClauses: [orClause({ textTokens: ["roadmap"] }), orClause({ textTokens: ["launch"] })],
+	});
+	assert.ok(results.some((r) => r.file.basename === "Roadmap"), "OR clause A (roadmap) is returned");
+	assert.ok(results.some((r) => r.file.basename === "Launch"), "OR clause B (launch) is returned");
+	// Non-vacuous: neither single clause alone returns the other's match.
+	const roadmapOnly = fileSearch({ textTokens: ["roadmap"] });
+	assert.ok(!roadmapOnly.some((r) => r.file.basename === "Launch"), "single 'roadmap' clause does not match Launch");
+}
+
 // --- 5. Heading search + diacritics plumbing (regression for the diacritics fix) --
 {
 	const launch = new HeadingSearcher(app).search("launch", { limit: 50 });
@@ -155,6 +184,23 @@ function makeDenseVault(nLines) {
 	assert.ok(
 		single.some((r) => r.file.path === "Signals.md"),
 		"the 'action'-only line is indexed and returned for a single-token query"
+	);
+}
+
+// --- 7b. Content search Boolean OR: union, in-process fallback ----------------
+{
+	// "action OR item" is the DNF complement of test 7's AND: every returned line
+	// contains action OR item, and Signals.md (tokens on SEPARATE lines) now IS a
+	// match because each of its lines satisfies one group.
+	const results = await content.search("action OR item", { useRipgrep: false, includeCanvas: false });
+	assert.ok(results.length > 0, "'action OR item' returns matches");
+	for (const r of results) {
+		const low = r.snippet.toLowerCase();
+		assert.ok(low.includes("action") || low.includes("item"), "every OR hit contains at least one alternative");
+	}
+	assert.ok(
+		results.some((r) => r.file.path === "Signals.md"),
+		"a note with the tokens on different lines IS an 'action OR item' match (union, unlike AND)"
 	);
 }
 
@@ -247,6 +293,19 @@ if (rgInstalled) {
 		viaRg.map(keyOf),
 		viaFallback.map(keyOf),
 		"ripgrep and the in-process fallback return identically-ordered results"
+	);
+
+	// Boolean OR parity: rg maps OR to multiple `-e` fixed-string anchors plus a
+	// per-group post-filter, which must reproduce the in-process fallback's DNF
+	// exactly — same rows, same order (the shared compareContentRows comparator).
+	const rgOr = await rgSearcher.search("action OR item", { useRipgrep: true, includeCanvas: false });
+	assert.ok(rgOr.some((r) => r.engine === "ripgrep"), "OR search ran through ripgrep");
+	assert.ok(rgOr.some((r) => r.file.path === "Signals.md"), "rg OR returns the cross-line Signals.md match");
+	const fallbackOr = await content.search("action OR item", { useRipgrep: false, includeCanvas: false });
+	assert.deepEqual(
+		rgOr.map(keyOf),
+		fallbackOr.map(keyOf),
+		"ripgrep OR and the in-process fallback return identically-ordered results"
 	);
 
 	// Recall fix (#3): with the old per-file --max-count of 4, rg would return only

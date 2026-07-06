@@ -14,7 +14,7 @@ export { TFile } from "obsidian";
 // Modal-driving harness surface.
 export { SpotlightModal } from "../../src/spotlight/SpotlightModal";
 export { makeStubPlugin } from "./stub-plugin.mjs";
-export { Modal, FakeEvent } from "./obsidian-mock.mjs";
+export { Modal, FakeEvent, Notice } from "./obsidian-mock.mjs";
 import { harnessWindow } from "./obsidian-mock.mjs";
 
 /** Point the bundled code's global `window` (timers, rAF) at the fake window. */

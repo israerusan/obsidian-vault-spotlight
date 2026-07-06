@@ -16,6 +16,7 @@ import { ContentSearcher } from "./search/ContentSearcher";
 import { normalizeProfiles } from "./core/searchProfiles.mjs";
 import { normalizeRankingSettings } from "./core/ranking.mjs";
 import { normalizeWorkflowPresets } from "./core/workflowPresets.mjs";
+import { buildSavedWorkflows, normalizeSavedWorkflows } from "./core/savedWorkflows.mjs";
 import { normalizeSnippets } from "./core/snippets.mjs";
 import {
 	normalizeEscapeChar,
@@ -119,12 +120,10 @@ export default class VaultSpotlightPlugin extends Plugin {
 			},
 		});
 
-		// Custom searches are a Pro feature; don't leave their commands live if
-		// the license has lapsed.
+		// Command-exposed saved workflows (migrated from the old custom searches) are
+		// a Pro feature; don't leave their commands live if the license has lapsed.
 		if (this.settings.isPro) {
-			for (const search of this.settings.customSearches) {
-				this.registerCustomSearchCommand(search);
-			}
+			this.registerSavedWorkflowCommands();
 		}
 
 		// Ignore Obsidian's initial-load event storm until the workspace is ready
@@ -257,12 +256,44 @@ export default class VaultSpotlightPlugin extends Plugin {
 		}
 	}
 
-	registerCustomSearchCommand(search: CustomSearch): void {
+	/**
+	 * The set of saved objects that register a `custom-search-<id>` command (so a
+	 * user's existing hotkeys survive). Sourced from savedWorkflows (exposeAsCommand)
+	 * unioned with any legacy customSearches not yet migrated — de-duped by id, which
+	 * is preserved verbatim through the migration so the command id and its hotkey
+	 * stay valid.
+	 */
+	private savedWorkflowCommandSources(): Array<{ id: string; name: string; query: string; mode: SpotlightMode }> {
+		const byId = new Map<string, { id: string; name: string; query: string; mode: SpotlightMode }>();
+		for (const w of this.settings.savedWorkflows) {
+			if (w.exposeAsCommand) {
+				byId.set(w.id, { id: w.id, name: w.name, query: w.query, mode: isSpotlightMode(w.mode) ? w.mode : "files" });
+			}
+		}
+		for (const search of this.settings.customSearches) {
+			if (!byId.has(search.id)) byId.set(search.id, { id: search.id, name: search.name, query: search.query, mode: "files" });
+		}
+		return [...byId.values()];
+	}
+
+	registerSavedWorkflowCommands(): void {
+		for (const source of this.savedWorkflowCommandSources()) this.registerCustomSearchCommand(source);
+	}
+
+	registerCustomSearchCommand(search: { id: string; name: string; query: string; mode?: SpotlightMode }): void {
 		this.addCommand({
 			id: `custom-search-${search.id}`,
 			name: search.name,
-			callback: () => this.openSpotlight(search.query),
+			callback: () => this.openSpotlight(search.query, search.mode ?? "files"),
 		});
+	}
+
+	/** Revoke a `custom-search-<id>` command when its saved workflow is removed. */
+	unregisterSavedWorkflowCommand(id: string): void {
+		const commands = (
+			this.app as unknown as { commands?: { removeCommand?: (id: string) => void } }
+		).commands;
+		commands?.removeCommand?.(`${this.manifest.id}:custom-search-${id}`);
 	}
 
 	deleteCustomSearch(id: string): void {
@@ -460,14 +491,11 @@ export default class VaultSpotlightPlugin extends Plugin {
 	 */
 	private syncCustomSearchCommands(): void {
 		if (this.settings.isPro) {
-			for (const search of this.settings.customSearches) this.registerCustomSearchCommand(search);
+			this.registerSavedWorkflowCommands();
 			return;
 		}
-		const commands = (
-			this.app as unknown as { commands?: { removeCommand?: (id: string) => void } }
-		).commands;
-		for (const search of this.settings.customSearches) {
-			commands?.removeCommand?.(`${this.manifest.id}:custom-search-${search.id}`);
+		for (const source of this.savedWorkflowCommandSources()) {
+			this.unregisterSavedWorkflowCommand(source.id);
 		}
 	}
 
@@ -593,6 +621,19 @@ export default class VaultSpotlightPlugin extends Plugin {
 		this.settings.pinnedCustomSearchIds = this.settings.pinnedCustomSearchIds
 			.filter((id): id is string => typeof id === "string" && customSearchIds.has(id));
 		// workflowPresets was already capped by normalizeWorkflowPresets() above.
+
+		// Consolidate the saved-search concepts into one savedWorkflows list. Always
+		// normalize what's on disk; then, ONLY when the field was ABSENT from disk (a
+		// pre-consolidation data.json — distinguished from a user who deliberately
+		// emptied the list), build it once from the now-validated legacy arrays. The
+		// legacy arrays are kept (read-through window); MAX_SAVED_WORKFLOWS (100) is the
+		// sum of the legacy caps, so nothing is truncated. Ids are reused verbatim so a
+		// migrated custom search keeps its custom-search-<id> command and hotkey.
+		this.settings.savedWorkflows = normalizeSavedWorkflows(this.settings.savedWorkflows);
+		if (loaded.savedWorkflows === undefined) {
+			this.settings.savedWorkflows = normalizeSavedWorkflows(buildSavedWorkflows(this.settings));
+			if (this.settings.schemaVersion < 1) this.settings.schemaVersion = 1;
+		}
 
 		// Enforce caps against what was loaded from disk.
 		this.settings.recentPaths = this.settings.recentPaths.slice(0, this.settings.maxRecent);

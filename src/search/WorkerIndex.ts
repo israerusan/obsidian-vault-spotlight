@@ -105,7 +105,7 @@ export class WorkerIndex {
 		return this.buildPromise;
 	}
 
-	async search(tokens: string[], limit: number, excluded: string[]): Promise<WorkerIndexRow[]> {
+	async search(groups: string[][], limit: number, excluded: string[]): Promise<WorkerIndexRow[]> {
 		await this.ensureBuilt();
 		return new Promise<WorkerIndexRow[]>((resolve, reject) => {
 			const id = this.nextId++;
@@ -127,7 +127,7 @@ export class WorkerIndex {
 				},
 			});
 			try {
-				this.worker.postMessage({ type: "search", id, tokens, limit, excluded });
+				this.worker.postMessage({ type: "search", id, groups, limit, excluded });
 			} catch (err) {
 				window.clearTimeout(timer);
 				this.pending.delete(id);

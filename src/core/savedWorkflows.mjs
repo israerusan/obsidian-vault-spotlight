@@ -19,6 +19,14 @@
  *     exposeAsCommand? }  // keep registering custom-search-<id> so hotkeys survive
  */
 
+import { PROFILE_MODES } from "./searchProfiles.mjs";
+import { RANKING_MODES } from "./ranking.mjs";
+import { FREE_WORKFLOW_LIMIT } from "./featureGates.mjs";
+
+// Sum of the legacy per-array caps (50 custom + 25 workflow + 20 profile) so a
+// one-time migration of a maxed-out user never silently truncates entries.
+export const MAX_SAVED_WORKFLOWS = 100;
+
 function scopeOf(profile) {
 	return {
 		includeCanvas: profile.includeCanvas !== false,
@@ -118,4 +126,112 @@ export function buildSavedWorkflows(legacy) {
 /** The old activeProfileId maps to the same-id standalone profile workflow. */
 export function migratedActiveWorkflowId(legacy) {
 	return legacy && typeof legacy.activeProfileId === "string" ? legacy.activeProfileId : "";
+}
+
+function cleanId(value) {
+	const id = String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+	return id || "";
+}
+
+function normalizeScope(raw) {
+	if (!raw || typeof raw !== "object") return undefined;
+	return {
+		includeCanvas: raw.includeCanvas !== false,
+		includePdf: raw.includePdf !== false,
+		includeBases: raw.includeBases !== false,
+		excludeFolders: Array.isArray(raw.excludeFolders)
+			? raw.excludeFolders.map((f) => String(f).trim()).filter(Boolean)
+			: [],
+		showPreview: raw.showPreview === true,
+	};
+}
+
+/**
+ * Sanitize a persisted (or migration-built) SavedWorkflow array: drop non-objects,
+ * coerce/validate every field, re-mint colliding ids (settings pin/remove match by
+ * id, so a shared id would act on both rows), and cap the list. Idempotent on the
+ * output of buildSavedWorkflows so re-loading a migrated list is a no-op.
+ */
+export function normalizeSavedWorkflows(raw) {
+	if (!Array.isArray(raw)) return [];
+	const seen = new Set();
+	const claim = (id, fallback, index) => {
+		const base = cleanId(id) || `${fallback}-${index}`;
+		let candidate = base;
+		let n = 2;
+		while (seen.has(candidate)) candidate = `${base}-${n++}`;
+		seen.add(candidate);
+		return candidate;
+	};
+	return raw
+		.filter((w) => w && typeof w === "object")
+		.map((w, index) => {
+			const scope = normalizeScope(w.scope);
+			return pruneUndefined({
+				id: claim(w.id, "workflow", index),
+				name: String(w.name || "Untitled workflow").trim() || "Untitled workflow",
+				query: typeof w.query === "string" ? w.query : String(w.query || ""),
+				mode: PROFILE_MODES.has(w.mode) ? w.mode : "files",
+				pinned: w.pinned === true || undefined,
+				starter: w.starter === true || undefined,
+				rankingMode: RANKING_MODES.has(w.rankingMode) ? w.rankingMode : undefined,
+				scope,
+				sticky: w.sticky === true || undefined,
+				exposeAsCommand: w.exposeAsCommand === true || undefined,
+			});
+		})
+		.slice(0, MAX_SAVED_WORKFLOWS);
+}
+
+/** Build one SavedWorkflow for the Mod+S save path (mirrors createWorkflowPreset). */
+export function createSavedWorkflow(name, mode, query, options = {}) {
+	return pruneUndefined({
+		id: cleanId(name) || `workflow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+		name: String(name || "New workflow").trim() || "New workflow",
+		mode: PROFILE_MODES.has(mode) ? mode : "files",
+		query: String(query || ""),
+		pinned: options.pinned === true || undefined,
+		starter: options.starter === true || undefined,
+		rankingMode: RANKING_MODES.has(options.rankingMode) ? options.rankingMode : undefined,
+		scope: normalizeScope(options.scope),
+		sticky: options.sticky === true || undefined,
+		exposeAsCommand: options.exposeAsCommand === true || undefined,
+	});
+}
+
+/** Free tier may save until it hits the limit (counting only user-created rows,
+ *  not seeded starters); Pro is unlimited. */
+export function canSaveSavedWorkflow(savedWorkflows, isPro) {
+	if (isPro) return true;
+	const list = Array.isArray(savedWorkflows) ? savedWorkflows : [];
+	return list.filter((w) => w && !w.starter).length < FREE_WORKFLOW_LIMIT;
+}
+
+/**
+ * The unified saved-workflow list to READ during the deprecation window: the
+ * migrated `savedWorkflows` unioned with any legacy `workflowPresets` not yet
+ * folded in, de-duped by id (savedWorkflows win). Legacy presets map to the
+ * SavedWorkflow shape (no scope — scope only exists once migrated). Lets the modal
+ * and browse resolve workflows whether or not loadSettings ran the migration (the
+ * test harness seeds legacy-only fixtures).
+ */
+export function resolveSavedWorkflows(savedWorkflows, workflowPresets) {
+	const out = normalizeSavedWorkflows(savedWorkflows);
+	const seen = new Set(out.map((w) => w.id));
+	for (const p of Array.isArray(workflowPresets) ? workflowPresets : []) {
+		if (!p || typeof p !== "object" || seen.has(p.id)) continue;
+		seen.add(p.id);
+		out.push(
+			pruneUndefined({
+				id: p.id,
+				name: p.name || "Untitled workflow",
+				query: typeof p.query === "string" ? p.query : "",
+				mode: p.mode || "files",
+				pinned: p.pinned === true || undefined,
+				starter: p.starter === true || undefined,
+				rankingMode: p.rankingMode || undefined,
+			})
+		);
+	}
+	return out;
 }

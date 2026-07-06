@@ -1,6 +1,6 @@
 import assert from "assert";
 import { fuzzyMatch } from "../src/core/fuzzy.mjs";
-import { parseAdvancedQuery } from "../src/core/advancedQuery.mjs";
+import { parseAdvancedQuery, parseContentQuery } from "../src/core/advancedQuery.mjs";
 
 // --- fuzzyMatch (the real implementation, not a copy) ---
 
@@ -91,5 +91,57 @@ assert.ok(
 	fuzzyMatch("stan", "İstanbul").indices.every((i) => i < "İstanbul".length),
 	"no highlight index may exceed the original string length"
 );
+
+// --- Boolean OR (parseAdvancedQuery) ---
+
+// No OR: orClauses is null and every flat field is populated exactly as before,
+// so existing consumers are byte-for-byte unchanged.
+const noOr = parseAdvancedQuery("foo bar");
+assert.equal(noOr.orClauses, null, "a query without OR has orClauses null");
+assert.deepEqual(noOr.textTokens, ["foo", "bar"], "no-OR flat fields unchanged");
+
+// OR splits into clauses; flat fields mirror clause 0; orClauses holds all.
+const orQuery = parseAdvancedQuery("foo OR bar");
+assert.ok(Array.isArray(orQuery.orClauses) && orQuery.orClauses.length === 2, "foo OR bar -> two clauses");
+assert.deepEqual(orQuery.orClauses[0].textTokens, ["foo"], "clause 0 is foo");
+assert.deepEqual(orQuery.orClauses[1].textTokens, ["bar"], "clause 1 is bar");
+assert.deepEqual(orQuery.textTokens, ["foo"], "flat fields mirror clause 0");
+
+// AND survives inside a clause: (foo AND bar) OR baz.
+const mixed = parseAdvancedQuery("foo bar OR baz");
+assert.equal(mixed.orClauses.length, 2, "foo bar OR baz -> two clauses");
+assert.deepEqual(mixed.orClauses[0].textTokens, ["foo", "bar"], "clause 0 keeps AND");
+assert.deepEqual(mixed.orClauses[1].textTokens, ["baz"], "clause 1 is baz");
+
+// Filters split across clauses too.
+const tagOr = parseAdvancedQuery("tag:a OR tag:b");
+assert.deepEqual(tagOr.orClauses[0].tags, ["a"], "tag clause 0");
+assert.deepEqual(tagOr.orClauses[1].tags, ["b"], "tag clause 1");
+
+// A quoted "OR" is a literal phrase, not a separator.
+const quotedOr = parseAdvancedQuery('"OR" note');
+assert.equal(quotedOr.orClauses, null, "quoted OR does not split");
+assert.deepEqual(quotedOr.phrases, ["or"], "quoted OR is a phrase");
+assert.deepEqual(quotedOr.textTokens, ["note"], "note stays a text token");
+
+// Lowercase "or" is an ordinary text token (natural language), not a separator.
+const lowerOr = parseAdvancedQuery("cats or dogs");
+assert.equal(lowerOr.orClauses, null, "lowercase or does not split");
+assert.deepEqual(lowerOr.textTokens, ["cats", "or", "dogs"], "lowercase or is text");
+
+// Empty trailing/leading/double OR collapses to no-OR.
+assert.equal(parseAdvancedQuery("foo OR").orClauses, null, "trailing OR collapses");
+assert.equal(parseAdvancedQuery("OR foo").orClauses, null, "leading OR collapses");
+assert.deepEqual(parseAdvancedQuery("foo OR").textTokens, ["foo"], "trailing OR keeps foo");
+
+// --- parseContentQuery (content-engine DNF split) ---
+
+assert.deepEqual(parseContentQuery("a OR b").groups, [["a"], ["b"]], "a OR b -> two groups");
+assert.deepEqual(parseContentQuery("a OR b").tokens, ["a", "b"], "union of tokens for highlighting");
+assert.deepEqual(parseContentQuery("a b").groups, [["a", "b"]], "a b -> one AND group");
+assert.deepEqual(parseContentQuery("A OR B").groups, [["a"], ["b"]], "uppercase OR separates, tokens lowercased");
+assert.deepEqual(parseContentQuery("cats or dogs").groups, [["cats", "or", "dogs"]], "lowercase or is a token");
+assert.deepEqual(parseContentQuery("   ").groups, [], "blank query -> no groups");
+assert.deepEqual(parseContentQuery("foo OR").groups, [["foo"]], "trailing OR drops the empty group");
 
 console.log("search tests passed");

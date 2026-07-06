@@ -87,4 +87,44 @@ assert.ok(
 );
 assert.equal(res.results[0].path, "Late/top.md", "the highest-scored match still ranks first");
 
+// --- Boolean OR: DNF groups (AND within a group, OR across groups) ---
+
+send({ type: "clear" });
+send({ type: "set", path: "A.md", content: "widget only here" });
+send({ type: "set", path: "B.md", content: "action item on this line" });
+send({ type: "set", path: "C.md", content: "action\nwidget" });
+
+// OR across two single-token groups returns the union of both (C.md matches both
+// groups on separate lines, so it yields a row per matching line — dedupe by file).
+send({ type: "search", id: 9, groups: [["widget"], ["action"]], excluded: [], limit: 40 });
+res = lastResults();
+assert.deepEqual(
+	[...new Set(res.results.map((r) => r.path))].sort(),
+	["A.md", "B.md", "C.md"],
+	"OR across groups returns the union of matching files"
+);
+
+// A single AND group requires BOTH tokens on one line: only B.md has them together.
+send({ type: "search", id: 10, groups: [["action", "item"]], excluded: [], limit: 40 });
+res = lastResults();
+assert.deepEqual(
+	res.results.map((r) => r.path),
+	["B.md"],
+	"a single AND group requires every token on the same line"
+);
+
+// Contrast: OR of the two tokens matches any line with either — B.md and C.md.
+send({ type: "search", id: 11, groups: [["action"], ["item"]], excluded: [], limit: 40 });
+res = lastResults();
+assert.deepEqual(
+	res.results.map((r) => r.path).sort(),
+	["B.md", "C.md"],
+	"OR of two tokens is the union, wider than the AND group"
+);
+
+// An empty group must not vacuously match every line.
+send({ type: "search", id: 12, groups: [[]], excluded: [], limit: 40 });
+res = lastResults();
+assert.equal(res.results.length, 0, "an empty group matches nothing, not everything");
+
 console.log("worker index tests passed");

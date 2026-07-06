@@ -18,9 +18,11 @@ export class CanvasSearcher {
 
 	constructor(private app: App) {}
 
-	async search(tokens: string[], limit = 20, excluded: string[] = []): Promise<ContentSearchResult[]> {
-		const needAll = tokens.map((t) => t.toLowerCase()).filter(Boolean);
-		if (needAll.length === 0) return [];
+	async search(groups: string[][], limit = 20, excluded: string[] = []): Promise<ContentSearchResult[]> {
+		// DNF: AND within a group, OR across groups. Drop empty groups so they can't
+		// vacuously match every node.
+		const orGroups = groups.map((g) => g.map((t) => t.toLowerCase()).filter(Boolean)).filter((g) => g.length > 0);
+		if (orGroups.length === 0) return [];
 		const results: ContentSearchResult[] = [];
 		// Prune to top-`limit` past a soft cap so a huge canvas can't grow an
 		// unbounded array, without dropping any genuinely top-scored node.
@@ -35,7 +37,7 @@ export class CanvasSearcher {
 			const snippets = await this.getSearchableLines(file);
 			for (const { line, text } of snippets) {
 				const low = text.toLowerCase();
-				if (!needAll.every((tk) => low.includes(tk))) continue;
+				if (!orGroups.some((g) => g.every((tk) => low.includes(tk)))) continue;
 				results.push({
 					file,
 					line,

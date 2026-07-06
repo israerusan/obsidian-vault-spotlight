@@ -3,7 +3,8 @@ import { renderHighlightedText } from "../search/fuzzy";
 import { getVaultFileKind, iconForFileKind } from "../search/vaultFiles";
 import { iconForSymbolType } from "../search/SymbolSearcher";
 import { buildFileDecorations } from "../core/resultDecorators.mjs";
-import { capitalize, type ResultItem } from "./resultTypes";
+import { getShortcutHints } from "../core/modalCopy.mjs";
+import { capitalize, itemFile, type ResultItem } from "./resultTypes";
 
 export interface ResultRowOptions {
 	isEmptyQuery: boolean;
@@ -174,4 +175,269 @@ export function renderResultRow(
 		titleRow.createSpan({ cls: "vault-spotlight-item-badge is-action", text: "New" });
 		body.createDiv({ cls: "vault-spotlight-item-meta", text: "Create a new note" });
 	}
+}
+
+/**
+ * Group label for a browse (empty-query) row, or null when the query is active or
+ * the row kind doesn't head a section. Saved objects (Workflows / profiles /
+ * collections) and the file browse buckets (Starred / Bookmarks / Recent / All).
+ */
+function browseSection(item: ResultItem, isEmptyQuery: boolean): string | null {
+	if (item.kind === "workflow" && isEmptyQuery) return "Workflows";
+	if (item.kind === "profile" && isEmptyQuery) return "Search profiles";
+	if (item.kind === "collection" && isEmptyQuery) return "Smart collections";
+	if (item.kind !== "file" || !isEmptyQuery) return null;
+	if (item.isStarred) return "Starred";
+	if (item.isBookmarked) return "Bookmarks";
+	if (item.isRecent) return "Recent";
+	return "All notes";
+}
+
+export interface ResultListContext {
+	items: ResultItem[];
+	selectedIndex: number;
+	checkedPaths: Set<string>;
+	isPro: boolean;
+	isEmptyQuery: boolean;
+	showModifiedTime: boolean;
+	showMatchReasons: boolean;
+}
+
+/**
+ * Render the (non-empty) result rows into `resultsEl`, with section labels, the
+ * per-row selected/checked state, the Pro multi-select check + star affordances,
+ * and the combobox's aria-activedescendant + scroll-into-view for the selected row.
+ * The caller empties `resultsEl` first and rebuilds the footer afterwards. Hover /
+ * click / star / context-menu are handled by delegated listeners on `resultsEl`.
+ */
+export function renderResultList(
+	resultsEl: HTMLDivElement,
+	inputEl: HTMLInputElement,
+	ctx: ResultListContext
+): void {
+	let lastSection = "";
+	ctx.items.forEach((item, index) => {
+		const section = browseSection(item, ctx.isEmptyQuery);
+		if (section && section !== lastSection) {
+			// role=presentation: a listbox may only contain option (and group)
+			// children, so a bare label div is exposed as presentational rather
+			// than as a stray, roleless node inside the options.
+			resultsEl.createDiv({ cls: "vault-spotlight-section-label", text: section, attr: { role: "presentation" } });
+			lastSection = section;
+		}
+
+		const row = resultsEl.createDiv({
+			cls: "vault-spotlight-item",
+			attr: { role: "option", id: `vault-spotlight-opt-${index}` },
+		});
+		row.dataset.index = String(index);
+		const file = itemFile(item);
+		const selected = index === ctx.selectedIndex;
+		row.toggleClass("is-selected", selected);
+		row.setAttribute("aria-selected", String(selected));
+		if (file) {
+			const checked = ctx.checkedPaths.has(file.path);
+			row.toggleClass("is-checked", checked);
+			if (ctx.isPro) row.setAttribute("aria-checked", String(checked));
+		}
+
+		if (ctx.isPro && file) {
+			const check = row.createDiv({ cls: "vault-spotlight-check" });
+			check.setAttr("aria-hidden", "true");
+			if (ctx.checkedPaths.has(file.path)) {
+				setIcon(check, "check");
+			}
+		}
+
+		renderResultRow(row, item, {
+			isEmptyQuery: ctx.isEmptyQuery,
+			showModifiedTime: ctx.showModifiedTime,
+			showMatchReasons: ctx.showMatchReasons,
+		});
+
+		if (ctx.isPro && item.kind === "file") {
+			const starItem = item;
+			// A focusable/interactive descendant is invalid inside role=option, so
+			// this stays a mouse-only affordance (tabindex -1, hidden from AT); the
+			// keyboard/AT path to star is the Mod+D shortcut.
+			const starBtn = row.createEl("button", {
+				cls: "vault-spotlight-star-btn",
+				attr: { type: "button", tabindex: "-1", "aria-hidden": "true" },
+			});
+			setIcon(starBtn, starItem.isStarred ? "star" : "star-off");
+		}
+	});
+
+	// Point the combobox at the selected option so a screen reader announces it on
+	// first render — not only after the first arrow key.
+	const selectedRow = resultsEl.querySelector<HTMLElement>(".is-selected");
+	if (selectedRow?.id) inputEl.setAttribute("aria-activedescendant", selectedRow.id);
+	else inputEl.removeAttribute("aria-activedescendant");
+	// Keep a preserved mid-list selection visible after a full re-render (a passive
+	// metadata re-index can restore a non-zero selectedIndex). A fresh search resets
+	// to 0, so this no-ops on the common path.
+	if (ctx.selectedIndex > 0) selectedRow?.scrollIntoView({ block: "nearest" });
+}
+
+export interface RenderResultsContext extends ResultListContext {
+	/** Empty-state placeholder + no-selection footer/preview reset (modal side). */
+	renderEmptyState(icon: string, title: string, desc: string): void;
+	/** Rebuild the footer chips for the freshly-selected row. */
+	renderFooter(): void;
+}
+
+/**
+ * Full results render: clears the list, shows the right empty state when there are
+ * no rows, otherwise builds the row list + refreshes the footer. Returns the DOM's
+ * new "selected row index" (the modal caches it so a selection move only restyles
+ * two rows) — -1 when the list holds no real rows.
+ */
+export function renderResults(
+	resultsEl: HTMLDivElement,
+	inputEl: HTMLInputElement,
+	ctx: RenderResultsContext
+): number {
+	resultsEl.empty();
+	resultsEl.removeClass("vault-spotlight-loading");
+	resultsEl.removeClass("is-searching");
+
+	if (ctx.items.length === 0) {
+		if (ctx.isEmptyQuery) {
+			ctx.renderEmptyState(
+				"files",
+				"No notes in this vault yet",
+				"Create a note and it will show up here instantly."
+			);
+		} else {
+			ctx.renderEmptyState(
+				"search",
+				"No matches found",
+				"Try a shorter query, fewer filters, or check your spelling."
+			);
+		}
+		inputEl.removeAttribute("aria-activedescendant");
+		return -1;
+	}
+
+	renderResultList(resultsEl, inputEl, ctx);
+	// Refresh the footer for the freshly-selected row: after a new search or a Tab
+	// mode switch the chips still described the previous item's kind. The footerSig
+	// cache no-ops when unchanged.
+	ctx.renderFooter();
+	return ctx.selectedIndex;
+}
+
+export interface RowStateContext {
+	items: ResultItem[];
+	selectedIndex: number;
+	checkedPaths: Set<string>;
+	isPro: boolean;
+}
+
+/** Apply the selected + (Pro) multi-select checked state to a single row. Used to
+ * restyle just the two rows a selection move touches, not the whole list. */
+export function applyRowState(row: HTMLElement, index: number, ctx: RowStateContext): void {
+	const selected = index === ctx.selectedIndex;
+	row.toggleClass("is-selected", selected);
+	row.setAttribute("aria-selected", String(selected));
+	const item = ctx.items[index];
+	const file = item ? itemFile(item) : null;
+	if (file) {
+		const checked = ctx.checkedPaths.has(file.path);
+		row.toggleClass("is-checked", checked);
+		// Expose per-row checked state so screen readers can tell which individual
+		// rows are selected, not just an aggregate "N selected".
+		if (ctx.isPro) row.setAttribute("aria-checked", String(checked));
+	}
+}
+
+/**
+ * Update the aria-live status ("N results" / "N selected" / "No results") and the
+ * combobox's aria-expanded to reflect the real listbox state for assistive tech.
+ */
+export function renderStatus(
+	statusEl: HTMLSpanElement | undefined,
+	inputEl: HTMLInputElement | undefined,
+	opts: { count: number; checkedSize: number }
+): void {
+	inputEl?.setAttribute("aria-expanded", opts.count > 0 ? "true" : "false");
+	if (!statusEl) return;
+	if (opts.checkedSize > 0) {
+		statusEl.setText(`${opts.checkedSize} selected`);
+		return;
+	}
+	if (opts.count === 0) {
+		// Announce the zero-results transition instead of going silent — the
+		// aria-live region is the only cue a screen-reader user gets.
+		statusEl.setText("No results");
+		return;
+	}
+	statusEl.setText(`${opts.count} result${opts.count === 1 ? "" : "s"}`);
+}
+
+/** Set the mode badge text and its content/Pro accent class. */
+export function setModeBadge(badgeEl: HTMLElement, text: string, cls: "is-content" | "is-pro" | null): void {
+	badgeEl.setText(text);
+	badgeEl.removeClass("is-content");
+	badgeEl.removeClass("is-pro");
+	if (cls) badgeEl.addClass(cls);
+}
+
+/** Skeleton rows shown on the first render while the initial search runs. */
+export function renderLoadingSkeletons(resultsEl: HTMLDivElement): void {
+	resultsEl.empty();
+	resultsEl.addClass("vault-spotlight-loading");
+	// Mirror the real row (icon tile + title line + meta line) so the swap to
+	// loaded content is seamless rather than a visible jump.
+	for (let i = 0; i < 5; i++) {
+		const row = resultsEl.createDiv({ cls: "vault-spotlight-skeleton" });
+		row.createDiv({ cls: "vault-spotlight-skeleton-icon" });
+		const lines = row.createDiv({ cls: "vault-spotlight-skeleton-lines" });
+		lines.createDiv({ cls: "vault-spotlight-skeleton-line is-title" });
+		lines.createDiv({ cls: "vault-spotlight-skeleton-line is-meta" });
+	}
+}
+
+/** The "nothing here" placeholder (icon + title + description). */
+export function renderEmptyStateInto(resultsEl: HTMLDivElement, icon: string, title: string, desc: string): void {
+	resultsEl.empty();
+	resultsEl.removeClass("vault-spotlight-loading");
+	resultsEl.removeClass("is-searching");
+	const empty = resultsEl.createDiv({ cls: "vault-spotlight-empty" });
+	const iconWrap = empty.createDiv({ cls: "vault-spotlight-empty-icon" });
+	setIcon(iconWrap, icon);
+	iconWrap.setAttr("aria-hidden", "true");
+	empty.createDiv({ cls: "vault-spotlight-empty-title", text: title });
+	empty.createDiv({ cls: "vault-spotlight-empty-desc", text: desc });
+}
+
+export interface FooterShortcutContext {
+	selected: ResultItem | null;
+	defaultNewTab: boolean;
+	isPro: boolean;
+	modifierLabel: string;
+}
+
+/** Rebuild the footer's shortcut chips for the selected row's kind. */
+export function renderFooterShortcuts(shortcutsEl: HTMLElement, ctx: FooterShortcutContext): void {
+	shortcutsEl.empty();
+	for (const hint of getShortcutHints({
+		itemKind: ctx.selected?.kind ?? null,
+		defaultNewTab: ctx.defaultNewTab,
+		isPro: ctx.isPro,
+		modifierLabel: ctx.modifierLabel,
+	})) {
+		addShortcut(shortcutsEl, hint.keys, hint.label);
+	}
+	// The context menu (Alt+Enter) only opens for rows backed by a file — gate the
+	// chip on the same check the handler uses so it's never a dead key.
+	if (ctx.selected && itemFile(ctx.selected)) addShortcut(shortcutsEl, ["Alt", "↵"], "menu");
+}
+
+function addShortcut(container: HTMLElement, keys: string[], label: string): void {
+	const wrap = container.createSpan({ cls: "vault-spotlight-shortcut" });
+	for (const key of keys) {
+		wrap.createEl("kbd", { text: key });
+	}
+	wrap.appendText(` ${label}`);
 }

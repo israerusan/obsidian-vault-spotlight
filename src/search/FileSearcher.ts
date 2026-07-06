@@ -9,6 +9,7 @@ import {
 import { getSearchableFiles, getVaultFileKind, type VaultFileKind } from "./vaultFiles";
 import { aliasMatches as frontmatterAliasMatches, extractAliases } from "../core/fileAliases.mjs";
 import { normalizeRankingSettings, rankingBoosts, resolveRankingMode, type RankingSettings } from "../core/ranking.mjs";
+import type { AdvancedQueryClause } from "../core/advancedQuery.mjs";
 
 export interface FileSearchResult {
 	file: TFile;
@@ -39,6 +40,39 @@ interface ScanRow {
 	aliasMatched: boolean;
 }
 
+/**
+ * The per-alternative field set an OR query iterates over. A no-OR search is a
+ * single clause built straight from the flat options, so FileSearchOptions
+ * structurally satisfies this and the single-clause path stays identical to the
+ * pre-OR behavior.
+ */
+type FileSearchClause = Pick<
+	FileSearchOptions,
+	| "textTokens"
+	| "phrases"
+	| "exclusions"
+	| "folderIncludes"
+	| "pathTerms"
+	| "nameTerms"
+	| "tags"
+	| "properties"
+	| "extFilters"
+	| "isStarred"
+	| "isBookmarked"
+	| "modifiedDays"
+	| "createdDays"
+>;
+
+/** The raw (pre-shared-boost) score a single clause yields for a file. */
+interface ClauseScore {
+	score: number;
+	indices: number[];
+	primaryMatch: FileSearchResult["primaryMatch"];
+	aliasMatched: boolean;
+	isBrowse: boolean;
+	isFilterOnly: boolean;
+}
+
 export interface FileSearchOptions {
 	textTokens: string[];
 	phrases?: string[];
@@ -53,6 +87,11 @@ export interface FileSearchOptions {
 	isBookmarked?: boolean;
 	modifiedDays?: number | null;
 	createdDays?: number | null;
+	// When set (a Boolean-OR query), a file matches if it satisfies ANY clause; the
+	// flat fields above mirror clause 0 for callers that don't pass this. Null/absent
+	// means the single-clause path built from the flat fields — byte-identical to the
+	// pre-OR behavior.
+	orClauses?: AdvancedQueryClause[] | null;
 	recentPaths: string[];
 	starredPaths: string[];
 	bookmarkedPaths?: string[];
@@ -83,12 +122,10 @@ export class FileSearcher {
 		const recentSet = new Map(options.recentPaths.map((p, i) => [p, i]));
 		const starredSet = new Map(options.starredPaths.map((p, i) => [p, i]));
 		const bookmarkedSet = new Set(options.bookmarkedPaths ?? []);
-		const hasActiveFilters =
-			options.tags.length > 0 || options.properties.length > 0 || options.extFilters.length > 0;
-		const isBrowseMode = options.textTokens.length === 0 && !hasActiveFilters;
-		const isFilterOnly = options.textTokens.length === 0 && hasActiveFilters;
-		// Build the combined token list once, not per file, inside the vault loop.
-		const searchTokens = [...(options.nameTerms ?? []), ...options.textTokens];
+		// OR support: iterate each alternative clause and keep the best-scoring one.
+		// With no OR this is a single clause built from the flat options, so the
+		// scoring arithmetic below is unchanged for every existing query.
+		const clauses: FileSearchClause[] = options.orClauses && options.orClauses.length ? options.orClauses : [options];
 
 		// Scan every file for a score, but only capture the cheap fields here. The
 		// expensive per-file display metadata (tag/alias cache reads, relative-time
@@ -97,50 +134,20 @@ export class FileSearcher {
 		const scanned: ScanRow[] = [];
 
 		for (const file of files) {
-			if (!this.matchesExtFilter(file, options.extFilters)) continue;
-			if (!this.matchesAdvancedFileFilters(file, options, starredSet.has(file.path), bookmarkedSet.has(file.path))) continue;
-			if (!this.matchesFilters(file, options)) continue;
+			const isStarred = starredSet.has(file.path);
+			const isBookmarked = bookmarkedSet.has(file.path);
 
-			const basename = file.basename;
-			let score = 0;
-			let primaryMatch: FileSearchResult["primaryMatch"] = isBrowseMode ? "browse" : isFilterOnly ? "filters" : "filename";
-			let aliasMatched = false;
-			const indices: number[] = [];
-
-			if (isBrowseMode) {
-				score = 1;
-			} else if (isFilterOnly) {
-				score = 100;
-				primaryMatch = "filters";
-			} else {
-				let matched = true;
-				for (const token of searchTokens) {
-					const basenameMatch = fuzzyMatch(token, basename, { ignoreDiacritics: ranking.ignoreDiacritics });
-					if (basenameMatch) {
-						score += basenameMatch.score + boosts.basename;
-						primaryMatch = "filename";
-						indices.push(...basenameMatch.indices);
-						continue;
-					}
-					const pathMatch = fuzzyMatch(token, file.path, { ignoreDiacritics: ranking.ignoreDiacritics });
-					const aliasHit = this.aliasMatches(file, token);
-					if (!pathMatch && !aliasHit) {
-						matched = false;
-						break;
-					}
-					if (aliasHit) {
-						aliasMatched = true;
-						primaryMatch = "alias";
-						score += boosts.alias;
-					} else if (pathMatch) {
-						if (primaryMatch !== "filename") primaryMatch = "path";
-						score += Math.floor(pathMatch.score / 2) + boosts.path;
-					}
-				}
-				if (!matched) score = 0;
+			// Best matching clause wins; a file is skipped only if no clause matches.
+			let best: ClauseScore | null = null;
+			for (const clause of clauses) {
+				const result = this.scoreFileForClause(file, clause, ranking, boosts, isStarred, isBookmarked);
+				if (result && (best === null || result.score > best.score)) best = result;
 			}
+			if (!best) continue;
 
-			if (score <= 0) continue;
+			let score = best.score;
+			const isBrowseMode = best.isBrowse;
+			const isFilterOnly = best.isFilterOnly;
 
 			const starredRank = starredSet.get(file.path);
 			const recentRank = recentSet.get(file.path);
@@ -172,7 +179,7 @@ export class FileSearcher {
 				score += Math.floor((freqBoost + recencyBoost) * weight);
 			}
 
-			scanned.push({ file, score, matchIndices: indices, primaryMatch, aliasMatched });
+			scanned.push({ file, score, matchIndices: best.indices, primaryMatch: best.primaryMatch, aliasMatched: best.aliasMatched });
 		}
 
 		// Rank and cut to the visible window BEFORE paying for display metadata, so
@@ -201,6 +208,76 @@ export class FileSearcher {
 		});
 	}
 
+	/**
+	 * Score one file against one clause (one OR alternative). Returns null when the
+	 * clause's filters exclude the file or its text tokens don't match. The score is
+	 * the RAW score before the shared, clause-independent boosts (starred/recent/
+	 * frecency/mtime) that search() applies once to the winning clause. For a no-OR
+	 * query there is a single clause (the flat options), so this reproduces the
+	 * original per-file scoring exactly.
+	 */
+	private scoreFileForClause(
+		file: TFile,
+		clause: FileSearchClause,
+		ranking: RankingSettings,
+		boosts: ReturnType<typeof rankingBoosts>,
+		isStarred: boolean,
+		isBookmarked: boolean
+	): ClauseScore | null {
+		if (!this.matchesExtFilter(file, clause.extFilters)) return null;
+		if (!this.matchesAdvancedFileFilters(file, clause, ranking.ignoreDiacritics, isStarred, isBookmarked)) return null;
+		if (!this.matchesFilters(file, clause)) return null;
+
+		const hasActiveFilters =
+			clause.tags.length > 0 || clause.properties.length > 0 || clause.extFilters.length > 0;
+		const isBrowse = clause.textTokens.length === 0 && !hasActiveFilters;
+		const isFilterOnly = clause.textTokens.length === 0 && hasActiveFilters;
+		// Build the combined token list once per clause, not per file.
+		const searchTokens = [...(clause.nameTerms ?? []), ...clause.textTokens];
+
+		const basename = file.basename;
+		let score = 0;
+		let primaryMatch: FileSearchResult["primaryMatch"] = isBrowse ? "browse" : isFilterOnly ? "filters" : "filename";
+		let aliasMatched = false;
+		const indices: number[] = [];
+
+		if (isBrowse) {
+			score = 1;
+		} else if (isFilterOnly) {
+			score = 100;
+			primaryMatch = "filters";
+		} else {
+			let matched = true;
+			for (const token of searchTokens) {
+				const basenameMatch = fuzzyMatch(token, basename, { ignoreDiacritics: ranking.ignoreDiacritics });
+				if (basenameMatch) {
+					score += basenameMatch.score + boosts.basename;
+					primaryMatch = "filename";
+					indices.push(...basenameMatch.indices);
+					continue;
+				}
+				const pathMatch = fuzzyMatch(token, file.path, { ignoreDiacritics: ranking.ignoreDiacritics });
+				const aliasHit = this.aliasMatches(file, token);
+				if (!pathMatch && !aliasHit) {
+					matched = false;
+					break;
+				}
+				if (aliasHit) {
+					aliasMatched = true;
+					primaryMatch = "alias";
+					score += boosts.alias;
+				} else if (pathMatch) {
+					if (primaryMatch !== "filename") primaryMatch = "path";
+					score += Math.floor(pathMatch.score / 2) + boosts.path;
+				}
+			}
+			if (!matched) score = 0;
+		}
+
+		if (score <= 0) return null;
+		return { score, indices, primaryMatch, aliasMatched, isBrowse, isFilterOnly };
+	}
+
 	private matchesExtFilter(file: TFile, extFilters: string[]): boolean {
 		if (extFilters.length === 0) return true;
 		return extFilters.includes(file.extension.toLowerCase());
@@ -212,20 +289,20 @@ export class FileSearcher {
 		return frontmatterAliasMatches(cache?.frontmatter ?? null, token);
 	}
 
-	private matchesFilters(file: TFile, options: FileSearchOptions): boolean {
+	private matchesFilters(file: TFile, clause: FileSearchClause): boolean {
 		if (file.extension !== "md") {
-			return options.tags.length === 0 && options.properties.length === 0;
+			return clause.tags.length === 0 && clause.properties.length === 0;
 		}
 
 		const cache = this.app.metadataCache.getFileCache(file);
-		if (!cache) return options.tags.length === 0 && options.properties.length === 0;
+		if (!cache) return clause.tags.length === 0 && clause.properties.length === 0;
 
-		if (options.tags.length > 0) {
+		if (clause.tags.length > 0) {
 			const tags = collectFileTags(cache);
-			if (!fileMatchesTags(tags, options.tags)) return false;
+			if (!fileMatchesTags(tags, clause.tags)) return false;
 		}
 
-		for (const prop of options.properties) {
+		for (const prop of clause.properties) {
 			const fm = cache.frontmatter as Record<string, unknown> | null | undefined;
 			if (!fm) return false;
 			const raw = getFrontmatterValue(fm, prop.key);
@@ -235,32 +312,32 @@ export class FileSearcher {
 		return true;
 	}
 
-	private matchesAdvancedFileFilters(file: TFile, options: FileSearchOptions, isStarred: boolean, isBookmarked: boolean): boolean {
+	private matchesAdvancedFileFilters(file: TFile, clause: FileSearchClause, ignoreDiacritics: boolean, isStarred: boolean, isBookmarked: boolean): boolean {
 		const lowerPath = file.path.toLowerCase();
 		const lowerName = file.basename.toLowerCase();
-		if (options.isStarred && !isStarred) return false;
-		if (options.isBookmarked && !isBookmarked) return false;
-		for (const folder of options.folderIncludes ?? []) {
+		if (clause.isStarred && !isStarred) return false;
+		if (clause.isBookmarked && !isBookmarked) return false;
+		for (const folder of clause.folderIncludes ?? []) {
 			const normalized = folder.toLowerCase().replace(/\/$/, "");
 			if (!lowerPath.startsWith(`${normalized}/`) && !lowerPath.includes(`/${normalized}/`)) return false;
 		}
-		for (const term of options.pathTerms ?? []) {
+		for (const term of clause.pathTerms ?? []) {
 			if (!lowerPath.includes(term.toLowerCase())) return false;
 		}
-		for (const term of options.nameTerms ?? []) {
-			if (!lowerName.includes(term.toLowerCase()) && !fuzzyMatch(term, lowerName, { ignoreDiacritics: options.ranking?.ignoreDiacritics === true })) return false;
+		for (const term of clause.nameTerms ?? []) {
+			if (!lowerName.includes(term.toLowerCase()) && !fuzzyMatch(term, lowerName, { ignoreDiacritics })) return false;
 		}
-		for (const phrase of options.phrases ?? []) {
+		for (const phrase of clause.phrases ?? []) {
 			if (!lowerPath.includes(phrase.toLowerCase())) return false;
 		}
-		for (const exclusion of options.exclusions ?? []) {
+		for (const exclusion of clause.exclusions ?? []) {
 			if (lowerPath.includes(exclusion.toLowerCase())) return false;
 		}
-		if (options.modifiedDays !== null && options.modifiedDays !== undefined) {
-			if (Date.now() - file.stat.mtime > options.modifiedDays * 86400000) return false;
+		if (clause.modifiedDays !== null && clause.modifiedDays !== undefined) {
+			if (Date.now() - file.stat.mtime > clause.modifiedDays * 86400000) return false;
 		}
-		if (options.createdDays !== null && options.createdDays !== undefined) {
-			if (Date.now() - file.stat.ctime > options.createdDays * 86400000) return false;
+		if (clause.createdDays !== null && clause.createdDays !== undefined) {
+			if (Date.now() - file.stat.ctime > clause.createdDays * 86400000) return false;
 		}
 		return true;
 	}

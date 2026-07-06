@@ -15,9 +15,11 @@ export class BaseSearcher {
 
 	constructor(private app: App) {}
 
-	async search(tokens: string[], limit = 20, excluded: string[] = []): Promise<ContentSearchResult[]> {
-		const needAll = tokens.map((t) => t.toLowerCase()).filter(Boolean);
-		if (needAll.length === 0) return [];
+	async search(groups: string[][], limit = 20, excluded: string[] = []): Promise<ContentSearchResult[]> {
+		// DNF: AND within a group, OR across groups. Drop empty groups so they can't
+		// vacuously match every line.
+		const orGroups = groups.map((g) => g.map((t) => t.toLowerCase()).filter(Boolean)).filter((g) => g.length > 0);
+		if (orGroups.length === 0) return [];
 		const results: ContentSearchResult[] = [];
 		// Prune to top-`limit` past a soft cap so a huge base file can't grow an
 		// unbounded array, without dropping any genuinely top-scored line.
@@ -34,8 +36,8 @@ export class BaseSearcher {
 				const text = lines[i].trim();
 				if (!text) continue;
 				const low = text.toLowerCase();
-				// AND semantics: the line must contain every token.
-				if (!needAll.every((tk) => low.includes(tk))) continue;
+				// DNF: keep the line if it satisfies ANY group (OR across groups).
+				if (!orGroups.some((g) => g.every((tk) => low.includes(tk)))) continue;
 				results.push({
 					file,
 					line: i + 1,

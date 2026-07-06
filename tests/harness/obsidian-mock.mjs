@@ -31,11 +31,19 @@ export class TFolder extends TAbstractFile {}
 export class WorkspaceLeaf {}
 export class App {}
 export class Notice {
+	// Record every notice so a journey test can assert on user-facing messages
+	// (upgrade prompts, capture confirmations, "Pro required", …).
+	static messages = [];
+	static reset() {
+		Notice.messages = [];
+	}
 	constructor(message) {
 		this.message = message;
+		if (message != null) Notice.messages.push(String(message));
 	}
 	setMessage(m) {
 		this.message = m;
+		if (m != null) Notice.messages.push(String(m));
 		return this;
 	}
 	hide() {}

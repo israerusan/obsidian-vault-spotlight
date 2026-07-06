@@ -4,7 +4,8 @@
  * spinning up Obsidian UI objects.
  */
 
-const PRO_ONLY_MODE_SET = new Set(["content", "headings", "links", "snippets"]);
+import { PRO_ONLY_MODES } from "./featureGates.mjs";
+
 const MODE_ORDER = ["files", "content", "headings", "symbols", "commands", "links", "editors", "folders", "capture", "snippets"];
 
 function normalizeHeading(heading) {
@@ -33,7 +34,7 @@ export function describeCaptureTarget({ hasText, targetLabel, mode = "append", h
 }
 
 export function getAvailableModeOrder({ isPro = false } = {}) {
-	return MODE_ORDER.filter((mode) => isPro || !PRO_ONLY_MODE_SET.has(mode));
+	return MODE_ORDER.filter((mode) => isPro || !PRO_ONLY_MODES.has(mode));
 }
 
 export function cycleMode(currentMode, { isPro = false, direction = 1 } = {}) {

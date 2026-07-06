@@ -1,5 +1,41 @@
 export function parseAdvancedQuery(raw) {
 	const tokens = tokenizeAdvanced(raw);
+	// Split the token stream into OR-separated groups on a standalone, unquoted,
+	// UPPERCASE "OR". A quoted "OR" stays a phrase and a lowercase "or" stays an
+	// ordinary text token, so the English word "or" in a natural query is never
+	// hijacked (Google/GitHub convention). Empty groups from a leading, trailing,
+	// or doubled OR are dropped.
+	const groups = [];
+	let group = [];
+	for (const token of tokens) {
+		if (!token.quoted && token.value.trim() === "OR") {
+			if (group.length) groups.push(group);
+			group = [];
+			continue;
+		}
+		group.push(token);
+	}
+	if (group.length) groups.push(group);
+
+	// No usable tokens (empty query, or only OR separators): return an empty clause
+	// with orClauses null so every existing no-OR consumer is byte-for-byte
+	// unchanged.
+	if (groups.length === 0) return { ...parseClause([]), orClauses: null };
+	const clauses = groups.map(parseClause);
+	// A single group is the common (no-OR) case: flat fields ARE the clause and
+	// orClauses stays null so nothing downstream has to know about OR.
+	if (clauses.length === 1) return { ...clauses[0], orClauses: null };
+	// Real OR: the flat fields mirror clause 0 (naive consumers see the first
+	// alternative), and orClauses holds every clause INCLUDING clause 0 for
+	// OR-aware engines to iterate.
+	return { ...clauses[0], orClauses: clauses };
+}
+
+/**
+ * Classify one group of tokens into the flat clause shape (the pre-OR `out`
+ * object). Every OR alternative is one clause; a no-OR query is a single clause.
+ */
+function parseClause(tokens) {
 	const out = {
 		textTokens: [],
 		phrases: [],
@@ -39,6 +75,39 @@ export function parseAdvancedQuery(raw) {
 		else if (lower !== "#" && lower !== "@" && lower !== "ext:") out.textTokens.push(lower);
 	}
 	return out;
+}
+
+/**
+ * Split a raw CONTENT-search query into disjunctive-normal-form groups for the
+ * content engines (ContentSearcher fallback, worker, ripgrep, canvas, base).
+ *
+ * Content search never went through parseAdvancedQuery — it plain whitespace-
+ * splits the body — so OR gets its own dedicated splitter here to keep one owner
+ * of the rule. A line matches if it satisfies ANY group (`groups.some`), and
+ * every token within a group is required (`group.every`) — i.e. AND within a
+ * group, OR across groups. Only an uppercase standalone `OR` separates (compared
+ * before lowercasing); everything else is a lowercased search token. `tokens` is
+ * the de-duplicated union of every group, used for snippet highlighting so a hit
+ * matched via one alternative still highlights that alternative's terms.
+ */
+export function parseContentQuery(query) {
+	const parts = String(query || "")
+		.trim()
+		.split(/\s+/)
+		.filter(Boolean);
+	const groups = [];
+	let group = [];
+	for (const part of parts) {
+		if (part === "OR") {
+			if (group.length) groups.push(group);
+			group = [];
+			continue;
+		}
+		group.push(part.toLowerCase());
+	}
+	if (group.length) groups.push(group);
+	const tokens = Array.from(new Set(groups.flat()));
+	return { groups, tokens };
 }
 
 function addProperty(out, raw) {

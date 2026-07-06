@@ -39,7 +39,10 @@ self.onmessage = (evt) => {
 	} else if (msg.type === "clear") {
 		index.clear();
 	} else if (msg.type === "search") {
-		const tokens = msg.tokens || [];
+		// DNF groups: AND within a group, OR across groups. Accept a legacy
+		// tokens-only message (a single AND group) so older callers/tests still
+		// work. MUST stay identical to ContentSearcher.searchVaultIndex's DNF test.
+		const groups = msg.groups || (msg.tokens && msg.tokens.length ? [msg.tokens] : []);
 		const excluded = msg.excluded || [];
 		const limit = msg.limit || 40;
 		// Bound memory without dropping the true top matches: a one-character
@@ -60,9 +63,17 @@ self.onmessage = (evt) => {
 			if (skip) continue;
 			for (let i = 0; i < lines.length; i++) {
 				const low = lines[i].toLowerCase();
-				let ok = true;
-				for (const tk of tokens) {
-					if (!low.includes(tk)) { ok = false; break; }
+				// Keep the line if it satisfies ANY group (OR across groups) with
+				// every token in that group present (AND within a group). An empty
+				// group is skipped so it can't vacuously match everything.
+				let ok = false;
+				for (const g of groups) {
+					if (!g.length) continue;
+					let all = true;
+					for (const tk of g) {
+						if (!low.includes(tk)) { all = false; break; }
+					}
+					if (all) { ok = true; break; }
 				}
 				if (!ok) continue;
 				results.push({

@@ -1,5 +1,6 @@
 import { App, TFile } from "obsidian";
 import { compareContentRows, MAX_INDEXED_LINE_LEN, type ContentSearchResult } from "./ContentSearcher";
+import { parseContentQuery } from "../core/advancedQuery.mjs";
 
 interface ChildProcessModule {
 	execFile: (
@@ -128,8 +129,9 @@ export class RipgrepSearcher {
 			excludeFolders?: string[];
 		}
 	): Promise<ContentSearchResult[] | null> {
-		const tokens = query.trim().split(/\s+/).filter(Boolean);
-		if (tokens.length === 0) return [];
+		// DNF groups: AND within a group, OR across groups (see parseContentQuery).
+		const { groups } = parseContentQuery(query);
+		if (groups.length === 0) return [];
 		const cp = getChildProcess();
 		const command = await this.resolveCommand();
 		if (!cp || !command) return null;
@@ -137,11 +139,16 @@ export class RipgrepSearcher {
 		const vaultPath = (this.app.vault.adapter as { basePath?: string }).basePath;
 		if (!vaultPath) return null;
 
-		// Anchor rg on the longest (typically most selective) token, then verify
-		// the remaining tokens against each returned line for AND semantics —
-		// rg's default regex engine can't express unordered "contains all".
-		const anchor = tokens.reduce((a, b) => (b.length >= a.length ? b : a));
-		const multi = tokens.length > 1;
+		// Anchor rg on the longest (typically most selective) token of EACH group,
+		// passed as one `-e` fixed-string pattern per anchor — giving OR at the rg
+		// level across groups. Then verify each returned line against the full DNF
+		// below, since rg's default regex engine can't express unordered "contains
+		// all" per group.
+		const anchors = Array.from(new Set(groups.map((g) => g.reduce((a, b) => (b.length >= a.length ? b : a)))));
+		// Post-filtering is needed whenever a single anchor per line can't prove the
+		// whole query: multiple OR groups (a line matching anchor A might not satisfy
+		// group A's other tokens) or any group with more than one token.
+		const needsPostFilter = groups.length > 1 || groups.some((g) => g.length > 1);
 
 		const args = [
 			"-i",
@@ -171,7 +178,7 @@ export class RipgrepSearcher {
 			// meaning a file would need more anchor hits than the fallback ever
 			// considers before rg could return fewer results. maxBuffer overflow is
 			// handled gracefully downstream.
-			multi ? String(Math.max(options.limit * 10, 500)) : String(options.limit),
+			needsPostFilter ? String(Math.max(options.limit * 10, 500)) : String(options.limit),
 			// Cap line length so a minified/one-line file can't blow maxBuffer.
 			// `--max-columns-preview` still prints a usable prefix of an over-long line
 			// instead of an "omitted" notice, so the AND filter and snippet below see
@@ -197,11 +204,15 @@ export class RipgrepSearcher {
 			if (f) args.push("--iglob", `!${f}/**`);
 		}
 
-		// Search "." with cwd=vaultPath so rg emits vault-relative paths that
-		// map straight onto TFile.path (no absolute-prefix / drive-colon parsing).
-		args.push("--", anchor, ".");
+		// One `-e` fixed-string pattern per group anchor gives OR across groups at
+		// the rg level. Search "." with cwd=vaultPath so rg emits vault-relative
+		// paths that map straight onto TFile.path (no absolute-prefix parsing).
+		for (const anchor of anchors) args.push("-e", anchor);
+		args.push("--", ".");
 
-		const needAll = multi ? tokens.map((t) => t.toLowerCase()) : null;
+		// Per-group AND post-filter (a line matches if it satisfies ANY group), or
+		// null when the single-anchor rg match already proves the whole query.
+		const needAnyGroup = needsPostFilter ? groups.map((g) => g.map((t) => t.toLowerCase())) : null;
 
 		// A new keystroke supersedes any still-running search: kill it so fast
 		// typing can't stack up concurrent full-vault rg processes.
@@ -222,13 +233,13 @@ export class RipgrepSearcher {
 					(error, stdout) => {
 						if (this.currentChild === child) this.currentChild = null;
 						if (!error) {
-							resolve(this.parseOutput(String(stdout ?? ""), options.limit, needAll));
+							resolve(this.parseOutput(String(stdout ?? ""), options.limit, needAnyGroup));
 							return;
 						}
 						// Exit code 1 = ran successfully, no matches. Trust it (return
 						// the parsed — usually empty — result, NOT null).
 						if (error.code === 1) {
-							resolve(this.parseOutput(String(stdout ?? ""), options.limit, needAll));
+							resolve(this.parseOutput(String(stdout ?? ""), options.limit, needAnyGroup));
 							return;
 						}
 						// Killed because a newer search superseded this one: return
@@ -245,7 +256,7 @@ export class RipgrepSearcher {
 						// keystroke for a common query rebuilds a full-vault index,
 						// exactly the work rg was meant to avoid.
 						if (error.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
-							resolve(this.parseOutput(String(stdout ?? ""), options.limit, needAll));
+							resolve(this.parseOutput(String(stdout ?? ""), options.limit, needAnyGroup));
 							return;
 						}
 						// Spawn failure (ENOENT): the cached binary moved or was
@@ -284,7 +295,7 @@ export class RipgrepSearcher {
 	private parseOutput(
 		output: string,
 		limit: number,
-		needAll: string[] | null
+		needAnyGroup: string[][] | null
 	): ContentSearchResult[] {
 		const results: ContentSearchResult[] = [];
 		const lines = output.split("\n").filter(Boolean);
@@ -297,11 +308,12 @@ export class RipgrepSearcher {
 			if (!resolved) continue;
 			const { file, lineNum, snippet } = resolved;
 
-			// AND filter for multi-word queries: rg only guaranteed the anchor
-			// token; require every token to appear on the line.
-			if (needAll) {
+			// DNF post-filter: rg only guaranteed one anchor per line, so keep the
+			// line only if it fully satisfies ANY group (every token of that group
+			// present) — mirroring the in-process fallback's groups.some(g=>g.every()).
+			if (needAnyGroup) {
 				const low = snippet.toLowerCase();
-				if (!needAll.every((tk) => low.includes(tk))) continue;
+				if (!needAnyGroup.some((g) => g.every((tk) => low.includes(tk)))) continue;
 			}
 
 			results.push({

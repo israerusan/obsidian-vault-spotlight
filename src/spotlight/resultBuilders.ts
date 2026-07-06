@@ -9,9 +9,12 @@ import type { HeadingResult } from "../search/HeadingSearcher";
 import type { SymbolResult } from "../search/SymbolSearcher";
 import type { EditorResult } from "../search/EditorSearcher";
 import type { FileSearchResult } from "../search/FileSearcher";
-import type { ResultItem } from "./resultTypes";
+import type { ResultItem, SpotlightMode } from "./resultTypes";
+import type { RankingMode } from "../core/ranking.mjs";
 import type { VaultSpotlightSettings } from "../settings";
-import { ensureStarterWorkflows, normalizeWorkflowPresets, FREE_WORKFLOW_LIMIT } from "../core/workflowPresets.mjs";
+import { STARTER_WORKFLOWS } from "../core/workflowPresets.mjs";
+import { FREE_WORKFLOW_LIMIT } from "../core/featureGates.mjs";
+import { normalizeSavedWorkflows, resolveSavedWorkflows } from "../core/savedWorkflows.mjs";
 
 /** Command rows, with recently-run commands floated to the top on an empty query. */
 export function buildCommandItems(
@@ -111,9 +114,15 @@ export function buildFileItems(results: FileSearchResult[]): ResultItem[] {
  * user's own workflows (capped); Pro is unlimited and gets curated starters seeded.
  */
 export function buildSavedObjectItems(settings: VaultSpotlightSettings, isPro: boolean): ResultItem[] {
+	// Read the unified list (savedWorkflows unioned with any legacy workflowPresets
+	// not yet migrated). Pro seeds curated starters when the list is empty; free
+	// shows the user's own workflows capped at the free limit.
+	const resolved = resolveSavedWorkflows(settings.savedWorkflows, settings.workflowPresets);
 	const workflowSource = isPro
-		? ensureStarterWorkflows(settings.workflowPresets)
-		: normalizeWorkflowPresets(settings.workflowPresets).slice(0, FREE_WORKFLOW_LIMIT);
+		? resolved.length > 0
+			? resolved
+			: normalizeSavedWorkflows(STARTER_WORKFLOWS)
+		: resolved.slice(0, FREE_WORKFLOW_LIMIT);
 	const workflowItems: ResultItem[] = workflowSource
 		.slice()
 		.sort((a, b) => Number(b.pinned) - Number(a.pinned) || Number(b.starter ?? false) - Number(a.starter ?? false) || a.name.localeCompare(b.name))
@@ -122,11 +131,15 @@ export function buildSavedObjectItems(settings: VaultSpotlightSettings, isPro: b
 			id: workflow.id,
 			name: workflow.name,
 			query: workflow.query,
-			mode: workflow.mode,
-			profileId: workflow.profileId,
-			isPinned: workflow.pinned,
+			// normalizeSavedWorkflows validated these against the mode/ranking unions,
+			// so the narrowing casts are sound.
+			mode: workflow.mode as SpotlightMode,
+			// SavedWorkflow has no profileId (scope is inlined); the legacy field on the
+			// ResultItem stays for the read-through window.
+			profileId: "",
+			isPinned: workflow.pinned ?? false,
 			isStarter: workflow.starter ?? false,
-			rankingMode: workflow.rankingMode,
+			rankingMode: workflow.rankingMode as RankingMode | undefined,
 		}));
 
 	const profileItems: ResultItem[] =

@@ -1,8 +1,8 @@
 import { App, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type VaultSpotlightPlugin from "./main";
-import { createProfileFromSettings, MAX_SEARCH_PROFILES } from "./core/searchProfiles.mjs";
 import { DEFAULT_RANKING_SETTINGS } from "./core/ranking.mjs";
-import { ensureStarterWorkflows, FREE_WORKFLOW_LIMIT } from "./core/workflowPresets.mjs";
+import { FREE_WORKFLOW_LIMIT, STARTER_WORKFLOWS } from "./core/workflowPresets.mjs";
+import { normalizeSavedWorkflows, type SavedWorkflow } from "./core/savedWorkflows.mjs";
 import { createSnippet, MAX_SNIPPETS } from "./core/snippets.mjs";
 import {
 	DEFAULT_ESCAPE_CHAR,
@@ -12,6 +12,7 @@ import {
 	reconcileEscapeChar,
 } from "./core/modeTriggers.mjs";
 import { getModifierLabel } from "./core/modalCopy.mjs";
+import { isProOnlyMode, PRO_UNLOCK_SUMMARY } from "./core/featureGates.mjs";
 
 /** Returns `url` if it is a well-formed http(s) URL, otherwise `fallback`. */
 export function safeHttpUrl(url: string, fallback: string): string {
@@ -109,6 +110,12 @@ export interface VaultSpotlightSettings {
 	starredPaths: string[];
 	maxRecent: number;
 	maxStarred: number;
+	// The unified saved-object list — the ONE concept going forward. The legacy
+	// arrays below (customSearches, pinnedCustomSearchIds, workflowPresets,
+	// searchProfiles, activeProfileId) are kept, non-destructively, only so a
+	// migrated user's data.json isn't rewritten lossily during the deprecation
+	// window; new writes go to savedWorkflows.
+	savedWorkflows: SavedWorkflow[];
 	customSearches: CustomSearch[];
 	pinnedCustomSearchIds: string[];
 	workflowPresets: WorkflowPreset[];
@@ -141,9 +148,9 @@ export interface VaultSpotlightSettings {
 	// and whether the user dismissed the first-run guidance early.
 	openCount: number;
 	onboardingDismissed: boolean;
-	// Data-model version marker. Groundwork for the future saved-search consolidation
-	// migration; unused today beyond being persisted so a later loadSettings can
-	// branch on it.
+	// Data-model version marker. schemaVersion < 1 (or a data.json with no
+	// savedWorkflows field) triggers the one-time saved-search consolidation in
+	// loadSettings, which folds the legacy arrays into savedWorkflows.
 	schemaVersion: number;
 }
 
@@ -160,6 +167,7 @@ export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	starredPaths: [],
 	maxRecent: 30,
 	maxStarred: 50,
+	savedWorkflows: [],
 	customSearches: [],
 	pinnedCustomSearchIds: [],
 	workflowPresets: [],
@@ -282,7 +290,7 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			});
 		} else {
 			status.createEl("p", {
-				text: "Free tier active. Upgrade to unlock content, heading & link search, live preview, snippets, saved workflows, batch actions, and more.",
+				text: `Free tier active. Upgrade to unlock ${PRO_UNLOCK_SUMMARY}.`,
 			});
 			createExternalLink(status, {
 				cls: "vault-spotlight-pro-btn",
@@ -458,21 +466,24 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 				})
 			);
 
+		// The "(Pro)" suffix is DERIVED from featureGates.isProOnlyMode, not typed
+		// per-row, so a future gating change can't leave a label lying.
 		const prefixLabels: Array<{ key: keyof ModePrefixes; name: string; desc: string }> = [
-			{ key: "content", name: "Content search trigger", desc: "Search inside note bodies (Pro)." },
+			{ key: "content", name: "Content search trigger", desc: "Search inside note bodies." },
 			{ key: "commands", name: "Command trigger", desc: "Search and run commands." },
-			{ key: "headings", name: "Headings trigger", desc: "Jump to headings across the vault (Pro)." },
+			{ key: "headings", name: "Headings trigger", desc: "Jump to headings across the vault." },
 			{ key: "symbols", name: "Symbols trigger", desc: "Outline of the active note: headings, links, tags, blocks." },
-			{ key: "links", name: "Links trigger", desc: "Backlinks and outlinks (Pro)." },
+			{ key: "links", name: "Links trigger", desc: "Backlinks and outlinks." },
 			{ key: "editors", name: "Open editors trigger", desc: "Jump between open tabs and panes." },
 			{ key: "folders", name: "Folders trigger", desc: "Find a folder and browse its files." },
 			{ key: "capture", name: "Quick capture trigger", desc: "Append a note to your daily note or inbox without opening it." },
-			{ key: "snippets", name: "Snippets trigger", desc: "Insert reusable text snippets at the cursor (Pro)." },
+			{ key: "snippets", name: "Snippets trigger", desc: "Insert reusable text snippets at the cursor." },
 		];
 		for (const { key, name, desc } of prefixLabels) {
+			const proSuffix = isProOnlyMode(key) ? " (Pro)" : "";
 			new Setting(containerEl)
 				.setName(name)
-				.setDesc(`${desc} Default: ${DEFAULT_MODE_PREFIXES[key]}`)
+				.setDesc(`${desc}${proSuffix} Default: ${DEFAULT_MODE_PREFIXES[key]}`)
 				.addText((text) => {
 					text.inputEl.maxLength = 4;
 					text.inputEl.addClass("vault-spotlight-prefix-input");
@@ -751,42 +762,58 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			});
 		}
 
-		// Workflows are free up to FREE_WORKFLOW_LIMIT (save/run your own); Pro is
-		// unlimited and can seed the curated starters — so this is a plain heading,
-		// not a Pro-locked one.
+		// ONE saved-object list. Workflows, Search profiles, and Custom searches used
+		// to be three separate sections; they were folded into this single list and a
+		// user's existing entries were migrated on load (see loadSettings). Free is
+		// capped; Pro is unlimited and can seed curated starters — a plain heading, not
+		// a Pro-locked one.
 		new Setting(containerEl)
-			.setName("Workflows")
-			.setDesc(`Your primary saved object: save a search (mode + query + ranking) with ${mod}+S and re-run it from Browse. Free includes ${FREE_WORKFLOW_LIMIT}; Pro is unlimited and can load starter presets.`)
+			.setName("Saved workflows")
+			.setDesc(`Your one saved object: save a search (mode + query, plus optional scope) with ${mod}+S and re-run it from Browse. Free includes ${FREE_WORKFLOW_LIMIT}; Pro is unlimited and can load starters.`)
 			.setHeading();
 		const workflowList = containerEl.createDiv();
 		const isProUser = this.plugin.settings.isPro;
 		if (isProUser) {
 			new Setting(workflowList)
 				.setName("Starter workflows")
-				.setDesc("Seed Browse mode with a few high-signal workflow presets.")
+				.setDesc("Seed Browse with a few high-signal saved workflows.")
 				.addButton((button) =>
 					button.setButtonText("Load starters").onClick(() => {
-						this.plugin.settings.workflowPresets = ensureStarterWorkflows(this.plugin.settings.workflowPresets);
+						// Match the old ensureStarterWorkflows semantics: only seed when the
+						// list is empty, so this never duplicates a user's own workflows.
+						if (this.plugin.settings.savedWorkflows.length === 0) {
+							this.plugin.settings.savedWorkflows = normalizeSavedWorkflows(STARTER_WORKFLOWS);
+						}
 						void this.plugin.saveSettings().then(() => this.display());
 					})
 				);
 		}
-		if (this.plugin.settings.workflowPresets.length === 0) {
+		const saved = this.plugin.settings.savedWorkflows;
+		if (saved.length === 0) {
 			workflowList.createEl("p", {
 				text: isProUser
-					? `No workflows yet. Save one from Spotlight with ${mod}+S, or load the starter workflows.`
-					: `No workflows yet. Save up to ${FREE_WORKFLOW_LIMIT} from Spotlight — press ${mod}+S on any search to keep it.`,
+					? `No saved workflows yet. Save one from Spotlight with ${mod}+S, or load the starters.`
+					: `No saved workflows yet. Save up to ${FREE_WORKFLOW_LIMIT} from Spotlight — press ${mod}+S on any search to keep it.`,
 			});
 		} else {
-			for (const workflow of this.plugin.settings.workflowPresets) {
+			for (const workflow of saved) {
 				const row = workflowList.createDiv({ cls: "vault-spotlight-starred-row" });
+				// Advanced facets (scope / sticky / command) surface as inline tags so
+				// the one list still shows the depth folded in from profiles + custom
+				// searches, without three separate sections.
+				const tags = [
+					workflow.rankingMode ? workflow.rankingMode : "",
+					workflow.scope ? "scoped" : "",
+					workflow.sticky ? "sticky" : "",
+					workflow.exposeAsCommand ? "command" : "",
+				].filter(Boolean);
 				row.createSpan({
-					text: `${workflow.pinned ? "★ " : ""}${workflow.name}: ${workflow.mode}${workflow.query ? ` · ${workflow.query}` : ""}${workflow.rankingMode ? ` · ${workflow.rankingMode}` : ""}`,
+					text: `${workflow.pinned ? "★ " : ""}${workflow.name}: ${workflow.mode}${workflow.query ? ` · ${workflow.query}` : ""}${tags.length ? ` · ${tags.join(" · ")}` : ""}`,
 				});
 				const pinBtn = row.createEl("button", { text: workflow.pinned ? "Unpin" : "Pin" });
 				pinBtn.setAttribute("aria-label", `${workflow.pinned ? "Unpin" : "Pin"} workflow ${workflow.name}`);
 				pinBtn.addEventListener("click", () => {
-					this.plugin.settings.workflowPresets = this.plugin.settings.workflowPresets.map((entry) =>
+					this.plugin.settings.savedWorkflows = this.plugin.settings.savedWorkflows.map((entry) =>
 						entry.id === workflow.id ? { ...entry, pinned: !entry.pinned } : entry
 					);
 					void this.plugin.saveSettings().then(() => this.display());
@@ -794,99 +821,21 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 				const remove = row.createEl("button", { text: workflow.starter ? "Hide" : "Remove" });
 				remove.setAttribute("aria-label", `${workflow.starter ? "Hide" : "Remove"} workflow ${workflow.name}`);
 				remove.addEventListener("click", () => {
-					this.plugin.settings.workflowPresets = this.plugin.settings.workflowPresets.filter((entry) => entry.id !== workflow.id);
+					this.plugin.settings.savedWorkflows = this.plugin.settings.savedWorkflows.filter((entry) => entry.id !== workflow.id);
+					// A command-exposed workflow also unregisters its custom-search-<id>
+					// command so a removed row can't leave a live (bindable) command.
+					if (workflow.exposeAsCommand) this.plugin.unregisterSavedWorkflowCommand(workflow.id);
 					void this.plugin.saveSettings().then(() => this.display());
 				});
 			}
 		}
 		// Free-tier allowance + upgrade path once at least one workflow exists.
-		if (!isProUser && this.plugin.settings.workflowPresets.length > 0) {
+		if (!isProUser && saved.length > 0) {
+			const used = saved.filter((w) => !w.starter).length;
 			const usage = new Setting(workflowList).setName(
-				`${Math.min(this.plugin.settings.workflowPresets.length, FREE_WORKFLOW_LIMIT)} of ${FREE_WORKFLOW_LIMIT} free workflows used`
+				`${Math.min(used, FREE_WORKFLOW_LIMIT)} of ${FREE_WORKFLOW_LIMIT} free workflows used`
 			);
 			this.appendUpgrade(usage);
-		}
-
-		this.proHeading("Search profiles");
-		const profileList = containerEl.createDiv();
-		profileList.createEl("p", {
-			cls: "vault-spotlight-hint-text",
-			text: "Advanced: a profile is an optional context (file-type toggles, excluded folders, preview) a Workflow can restore. Most users only need Workflows.",
-		});
-
-		if (!this.plugin.settings.isPro) {
-			profileList.createEl("p", { cls: "vault-spotlight-hint-text", text: "Unlock Pro to save workspace-style search profiles." });
-		} else {
-			new Setting(profileList)
-				.setName("Save current settings as profile")
-				.setDesc("Profiles remember file type toggles, excluded folders, preview preference, and a default query/mode.")
-				.addButton((button) =>
-					button.setButtonText("Add profile").onClick(() => {
-						const profile = createProfileFromSettings(
-							`Profile ${this.plugin.settings.searchProfiles.length + 1}`,
-							this.plugin.settings,
-							"files",
-							"",
-							this.plugin.settings.searchProfiles.map((p) => p.id)
-						);
-						this.plugin.settings.searchProfiles = [...this.plugin.settings.searchProfiles, profile].slice(0, MAX_SEARCH_PROFILES);
-						void this.plugin.saveSettings().then(() => this.display());
-					})
-				);
-			if (this.plugin.settings.searchProfiles.length === 0) {
-				profileList.createEl("p", { text: "No search profiles yet. Add one here or save one from the action palette." });
-			} else {
-				for (const profile of this.plugin.settings.searchProfiles) {
-					const row = profileList.createDiv({ cls: "vault-spotlight-starred-row" });
-					const active = profile.id === this.plugin.settings.activeProfileId;
-					row.createSpan({ text: `${active ? "✓ " : ""}${profile.name}: ${profile.defaultMode}${profile.defaultQuery ? ` · ${profile.defaultQuery}` : ""}` });
-					const activate = row.createEl("button", { text: active ? "Active" : "Activate" });
-					activate.disabled = active;
-					activate.setAttribute("aria-label", active ? `${profile.name} is the active profile` : `Activate profile ${profile.name}`);
-					activate.addEventListener("click", () => {
-						this.plugin.settings.activeProfileId = profile.id;
-						void this.plugin.saveSettings().then(() => this.display());
-					});
-					const remove = row.createEl("button", { text: "Remove" });
-					remove.setAttribute("aria-label", `Remove profile ${profile.name}`);
-					remove.addEventListener("click", () => {
-						this.plugin.settings.searchProfiles = this.plugin.settings.searchProfiles.filter((p) => p.id !== profile.id);
-						if (this.plugin.settings.activeProfileId === profile.id) this.plugin.settings.activeProfileId = "";
-						void this.plugin.saveSettings().then(() => this.display());
-					});
-				}
-			}
-		}
-
-		// Custom searches are a LEGACY concept now consolidated into Workflows: there
-		// is no create path anymore (Mod+S saves a workflow for every tier). Only
-		// surface the section for users who already have some, so they can keep
-		// running and managing them; hide it entirely otherwise rather than advertise
-		// a retired feature.
-		if (this.plugin.settings.customSearches.length > 0) {
-			this.proHeading("Custom searches");
-			const customList = containerEl.createDiv();
-			customList.createEl("p", {
-				cls: "vault-spotlight-hint-text",
-				text: `Legacy saved searches that also run as commands (bindable under Settings → Hotkeys). New saved searches are now Workflows — press ${mod}+S on any search. Remove one here to retire it.`,
-			});
-			for (const search of this.plugin.settings.customSearches) {
-				const row = customList.createDiv({ cls: "vault-spotlight-starred-row" });
-				const pinned = this.plugin.settings.pinnedCustomSearchIds.includes(search.id);
-				row.createSpan({ text: `${pinned ? "★ " : ""}${search.name}: ${search.query}` });
-				const pinBtn = row.createEl("button", { text: pinned ? "Unpin" : "Pin" });
-				pinBtn.setAttribute("aria-label", `${pinned ? "Unpin" : "Pin"} custom search ${search.name}`);
-				pinBtn.addEventListener("click", () => {
-					this.plugin.togglePinnedCollection(search.id);
-					this.display();
-				});
-				const btn = row.createEl("button", { text: "Remove" });
-				btn.setAttribute("aria-label", `Remove custom search ${search.name}`);
-				btn.addEventListener("click", () => {
-					this.plugin.deleteCustomSearch(search.id);
-					this.display();
-				});
-			}
 		}
 	}
 }

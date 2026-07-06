@@ -1,13 +1,16 @@
 import { PROFILE_MODES } from "./searchProfiles.mjs";
 import { RANKING_MODES } from "./ranking.mjs";
+// Single source of truth for the free cap — re-exported so existing
+// `import { FREE_WORKFLOW_LIMIT } from "./workflowPresets.mjs"` callers keep
+// working while the number itself lives in featureGates.
+export { FREE_WORKFLOW_LIMIT } from "./featureGates.mjs";
+import { FREE_WORKFLOW_LIMIT } from "./featureGates.mjs";
 
-export const FREE_WORKFLOW_LIMIT = 2;
 export const MAX_WORKFLOW_PRESETS = 25;
 
-// Starter queries MUST use syntax the engines actually run — the query language
-// has no Boolean OR (parseAdvancedQuery treats a bare "OR" as a required text
-// token and AND-s tag filters), so an "#a OR #b" starter would demonstrate Pro
-// value by returning nothing. Keep each starter to one working filter.
+// Keep each starter to one working filter. Boolean OR now exists (`#a OR #b`), but
+// starters stay single-filter so each one demonstrates a distinct, self-evident
+// use rather than teaching query syntax.
 export const STARTER_WORKFLOWS = [
 	{ id: "starter-recent-work", name: "Recent work", mode: "files", query: "modified:7", pinned: true, starter: true },
 	{ id: "starter-follow-ups", name: "Follow-ups", mode: "files", query: "#followup", pinned: true, starter: true },

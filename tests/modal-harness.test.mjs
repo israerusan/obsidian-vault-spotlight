@@ -95,7 +95,7 @@ const findKey = (modal, mods, key) =>
 	const modal = new SpotlightModal(app, plugin, "action item", "content");
 	modal.open();
 	await settle();
-	assert.equal(plugin.settings.workflowPresets.length, 0, "starts with no workflows");
+	assert.equal(plugin.settings.savedWorkflows.length, 0, "starts with no workflows");
 
 	// Press Mod+S — opens the name prompt (a PromptModal). Assert a NEW modal opened
 	// via a count delta rather than assuming it's last in the static registry.
@@ -113,8 +113,8 @@ const findKey = (modal, mods, key) =>
 	input.value = "My Saved Search";
 	input.dispatchEvent(new FakeEvent("keydown", { key: "Enter" }));
 
-	assert.equal(plugin.settings.workflowPresets.length, 1, "the workflow was persisted on the FREE tier");
-	const saved = plugin.settings.workflowPresets[0];
+	assert.equal(plugin.settings.savedWorkflows.length, 1, "the workflow was persisted on the FREE tier");
+	const saved = plugin.settings.savedWorkflows[0];
 	assert.equal(saved.name, "My Saved Search", "saved with the entered name");
 	assert.equal(saved.query, "action item", "saved with the live query");
 	assert.ok(plugin.saveCalls > 0, "settings were saved");
@@ -126,9 +126,9 @@ const findKey = (modal, mods, key) =>
 	const { app } = loadVaultApp(vaultDir);
 	const plugin = makeStubPlugin(app, {
 		isPro: false,
-		workflowPresets: [
-			{ id: "w1", name: "One", query: "a", mode: "files", pinned: false },
-			{ id: "w2", name: "Two", query: "b", mode: "files", pinned: false },
+		savedWorkflows: [
+			{ id: "w1", name: "One", query: "a", mode: "files" },
+			{ id: "w2", name: "Two", query: "b", mode: "files" },
 		],
 	});
 	const modal = new SpotlightModal(app, plugin, "roadmap", "files");
@@ -138,7 +138,7 @@ const findKey = (modal, mods, key) =>
 	const openedBefore = Modal.opened.length;
 	findKey(modal, ["Mod"], "s").handler(new FakeEvent("keydown", { isComposing: false }));
 	assert.equal(Modal.opened.length, openedBefore, "at the free cap, Mod+S opens no save prompt");
-	assert.equal(plugin.settings.workflowPresets.length, 2, "no workflow added past the free cap");
+	assert.equal(plugin.settings.savedWorkflows.length, 2, "no workflow added past the free cap");
 	modal.close();
 }
 

@@ -4,6 +4,7 @@ import { CanvasSearcher } from "./CanvasSearcher";
 import { BaseSearcher } from "./BaseSearcher";
 import { WorkerIndex, WorkerTimeoutError } from "./WorkerIndex";
 import { isPathExcluded, normalizeExcludeFolders } from "./vaultFiles";
+import { parseContentQuery } from "../core/advancedQuery.mjs";
 
 export interface ContentSearchResult {
 	file: TFile;
@@ -136,8 +137,11 @@ export class ContentSearcher {
 		if (!query.trim()) return [];
 		const limit = options.limit ?? 40;
 		const excluded = normalizeExcludeFolders(options.excludeFolders);
-		const tokens = query.trim().split(/\s+/).filter(Boolean).map((t) => t.toLowerCase());
-		if (tokens.length === 0) return [];
+		// DNF groups: AND within a group, OR across groups. `tokens` is the flat
+		// union used only for snippet highlighting so a row matched via one OR
+		// alternative still highlights that alternative's terms.
+		const { groups, tokens } = parseContentQuery(query);
+		if (groups.length === 0) return [];
 
 		// Canvas and Bases hold structure ripgrep can't parse line-by-line — a
 		// canvas note is a single line of JSON, a base is a YAML view/filter
@@ -147,10 +151,10 @@ export class ContentSearcher {
 		const extraLimit = Math.max(10, Math.floor(limit / 2));
 		const extras: ContentSearchResult[] = [];
 		if (options.includeCanvas) {
-			extras.push(...(await this.canvas.search(tokens, extraLimit, excluded)));
+			extras.push(...(await this.canvas.search(groups, extraLimit, excluded)));
 		}
 		if (options.includeBases) {
-			extras.push(...(await this.bases.search(tokens, extraLimit, excluded)));
+			extras.push(...(await this.bases.search(groups, extraLimit, excluded)));
 		}
 
 		// A non-null ripgrep result means rg ran — trust it even when empty, so a
@@ -162,7 +166,7 @@ export class ContentSearcher {
 				limit,
 			});
 		}
-		if (base === null) base = await this.searchVaultIndex(tokens, limit, excluded);
+		if (base === null) base = await this.searchVaultIndex(groups, limit, excluded);
 
 		const results = extras.length === 0 ? base : this.mergeResults(base, extras, limit);
 		// Annotate in one place so every engine's rows highlight identically.
@@ -173,7 +177,7 @@ export class ContentSearcher {
 	}
 
 	private async searchVaultIndex(
-		tokens: string[],
+		groups: string[][],
 		limit: number,
 		excluded: string[]
 	): Promise<ContentSearchResult[]> {
@@ -182,7 +186,7 @@ export class ContentSearcher {
 		const worker = this.getWorkerIndex();
 		if (worker) {
 			try {
-				const rows = await worker.search(tokens, limit, excluded);
+				const rows = await worker.search(groups, limit, excluded);
 				// A scan came back: the worker is alive and responsive, so clear the
 				// timeout streak.
 				this.workerTimeouts = 0;
@@ -246,8 +250,10 @@ export class ContentSearcher {
 			for (let i = 0; i < lines.length; i++) {
 				const line = lines[i];
 				const low = line.toLowerCase();
-				// AND semantics: the line must contain every token.
-				if (!tokens.every((tk) => low.includes(tk))) continue;
+				// DNF: keep the line if it satisfies ANY group (OR across groups),
+				// with every token in that group present (AND within a group). MUST
+				// stay identical to the same test inlined in core/workerSource.mjs.
+				if (!groups.some((g) => g.every((tk) => low.includes(tk)))) continue;
 				results.push({
 					file,
 					line: i + 1,

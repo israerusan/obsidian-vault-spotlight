@@ -3,6 +3,52 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.12.0] - 2026-07-05
+
+Boolean `OR` search, one unified saved-object model, a smaller bundle, and a
+large internal refactor of the modal — all behind a green test gate.
+
+### Changed
+- **One saved object.** Workflows, Search profiles, and Custom searches are
+  consolidated into a single **Saved workflows** list. Your existing entries are
+  migrated automatically on first load (nothing is lost; command hotkeys on
+  migrated custom searches keep working), and Settings now shows one list instead
+  of three. A profile's file-type/exclude/preview context survives as optional
+  per-workflow *scope*. `schemaVersion` is now a real migration marker rather than
+  unused groundwork.
+
+### Fixed
+- **Ranking controls & match-reason badges are now correctly labeled Free.** They
+  have always shipped free (the settings section is ungated and the modal applies
+  ranking + match reasons on any tier), but the README table and the Search
+  section called them Pro. The docs now match the code.
+
+### Added
+- **Boolean `OR` in advanced queries** — `foo OR bar`, `tag:a OR tag:b`,
+  `"launch plan" OR kickoff` return the union of either alternative. `OR` must be
+  uppercase and unquoted (a lowercase `or` or a quoted `"OR"` stays a literal
+  term), and it is honored consistently across the file, content, ripgrep, worker,
+  canvas, and base engines. Queries without `OR` behave exactly as before.
+
+### Internal
+- **`SpotlightModal` was split into a dumb view plus `SearchController` (query
+  execution + result set) and `ModeController` (mode state + activations)**, with
+  view-tier DOM helpers. The modal dropped from ~1940 to under 600 lines with no
+  behavior change, guarded by the modal harness and five new end-to-end journeys.
+- **Added five end-to-end journey tests** (`tests/journeys.test.mjs`) driving the
+  real modal through complete flows — save-and-rerun a workflow, the free cap +
+  upgrade path, the `Cmd/Ctrl+K` action palette, copy-to-clipboard, and an OR
+  content search — instead of more parser unit tests.
+- **Feature gating now has one source of truth** (`src/core/featureGates.mjs`).
+  The Pro-only mode set, the free workflow cap, and the "what Pro unlocks" copy
+  used by the settings blurb and the modal CTA all derive from it, replacing three
+  hand-maintained definitions that had drifted apart.
+- **Production bundle is now minified** (`main.js` ~339 KB → ~186 KB, ~45%
+  smaller). Dev/watch builds stay unminified for debugging. Lazy-loading the
+  content/ripgrep path was evaluated and rejected: an Obsidian plugin ships a
+  single `main.js`, so code-splitting can't reduce what's on disk, and the heavy
+  content work (worker + ripgrep) is already deferred to first use.
+
 ## [2.11.4] - 2026-07-05
 
 Make the local gate mirror Obsidian's automated review, so a review failure can't

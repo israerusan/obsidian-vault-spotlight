@@ -2,7 +2,8 @@ import { App, Notice } from "obsidian";
 import type VaultSpotlightPlugin from "../main";
 import { PromptModal } from "./PromptModal";
 import { activeProfile, createProfileFromSettings, MAX_SEARCH_PROFILES } from "../core/searchProfiles.mjs";
-import { canSaveWorkflowPreset, createWorkflowPreset, ensureStarterWorkflows, FREE_WORKFLOW_LIMIT, MAX_WORKFLOW_PRESETS } from "../core/workflowPresets.mjs";
+import { FREE_WORKFLOW_LIMIT } from "../core/featureGates.mjs";
+import { canSaveSavedWorkflow, createSavedWorkflow, MAX_SAVED_WORKFLOWS, resolveSavedWorkflows } from "../core/savedWorkflows.mjs";
 import type { RankingMode } from "../core/ranking.mjs";
 import type { SpotlightMode } from "./resultTypes";
 
@@ -68,15 +69,16 @@ export class WorkflowController {
 	}
 
 	applyWorkflow(id: string): void {
-		const workflows = ensureStarterWorkflows(this.settings.workflowPresets);
+		// Read from the unified list (savedWorkflows), unioned with any legacy
+		// workflowPresets not yet migrated. The workflow's inlined scope/sticky is read
+		// by the modal via currentWorkflow() at search time, so there's no activeProfile
+		// to set anymore.
+		const workflows = resolveSavedWorkflows(this.settings.savedWorkflows, this.settings.workflowPresets);
 		const workflow = workflows.find((entry) => entry.id === id);
 		if (!workflow) return;
 		this.host.setActiveWorkflowId(workflow.id);
 		this.host.clearActionContext();
-		if (workflow.profileId) {
-			this.settings.activeProfileId = workflow.profileId;
-		}
-		this.host.setMode(workflow.mode);
+		this.host.setMode(workflow.mode as SpotlightMode);
 		this.host.setQuery(workflow.query);
 		void this.host.plugin.saveSettings();
 		this.host.focusInput();
@@ -111,7 +113,7 @@ export class WorkflowController {
 		// `|| liveMode` could never reach the live mode.
 		const mode = this.host.hasActionContext() ? this.host.actionReturnMode() : this.host.liveMode();
 		const query = (this.host.hasActionContext() ? this.host.actionReturnQuery() : this.host.liveQuery()).trim();
-		if (!canSaveWorkflowPreset(this.settings.workflowPresets, this.settings.isPro)) {
+		if (!canSaveSavedWorkflow(this.settings.savedWorkflows, this.settings.isPro)) {
 			new Notice(`Vault Spotlight: the free plan includes ${FREE_WORKFLOW_LIMIT} workflows — upgrade to Pro for unlimited.`);
 			return;
 		}
@@ -120,16 +122,15 @@ export class WorkflowController {
 			initial: query.slice(0, 40) || "New workflow",
 			cta: "Save workflow",
 			onSubmit: (name) => {
-				const workflow = createWorkflowPreset(name, mode, query, {
-					profileId: this.settings.activeProfileId,
+				const workflow = createSavedWorkflow(name, mode, query, {
 					rankingMode: this.host.currentProfileRankingMode(),
 				});
 				// Two workflows whose names slugify to the same id (e.g. both "Meeting")
 				// would otherwise coexist, and settings pin/remove match by id —
 				// Remove-one would delete both. Suffix a colliding id.
-				const exists = this.settings.workflowPresets.some((w) => w.id === workflow.id);
+				const exists = this.settings.savedWorkflows.some((w) => w.id === workflow.id);
 				if (exists) workflow.id = `${workflow.id}-${Date.now()}`;
-				this.settings.workflowPresets = [workflow, ...this.settings.workflowPresets].slice(0, MAX_WORKFLOW_PRESETS);
+				this.settings.savedWorkflows = [workflow, ...this.settings.savedWorkflows].slice(0, MAX_SAVED_WORKFLOWS);
 				this.host.setActiveWorkflowId(workflow.id);
 				void this.host.plugin.saveSettings();
 				new Notice("Vault Spotlight: workflow saved.");
