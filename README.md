@@ -2,25 +2,27 @@
 
 > A Raycast-style command center for [Obsidian](https://obsidian.md): find notes fast, reopen recurring work instantly, and act on results — all without leaving the keyboard.
 
-![Vault Spotlight hero](assets/spotlight-hero.svg)
+![Vault Spotlight search screenshot](assets/marketing/search-shot.png)
 
-Vault Spotlight is one keyboard-first command center built around three jobs: **Search**, **Workflows**, and **Actions**.
+Vault Spotlight is a keyboard-first command center for three jobs: **Search**, **Workflows**, and **Actions**.
 
-In 5 seconds, here's the product:
+In 5 seconds, here's why people install it:
 
 - **Find the right note fast** — fuzzy search, commands, headings, links, folders, and open editors in one launcher.
-- **Reopen repeated work** — save a search as a workflow and bring back the same project, meeting, or follow-up context in one keystroke.
+- **Reopen repeated work instantly** — save a search as a workflow and bring back the same project, meeting, or follow-up context in one keystroke.
 - **Do useful work immediately** — open, copy, rename, batch-edit, export, or preview results without breaking keyboard flow.
 
-## Why people install it
+Free is useful on day one. Pro adds deeper search, unlimited workflows, and batch actions for people who live in the launcher.
 
-1. **Jump anywhere fast.** Type a few letters to open any note, run any command, or jump to a heading — with recents and open tabs boosted so the thing you want is usually first.
-2. **Reopen recurring work instantly.** Save a search you run often as a *workflow* and re-launch it from Browse in one keystroke.
-3. **Act without leaving the keyboard.** Press `Cmd/Ctrl+K` on a result to copy, rename, or act on it — the launcher *does* things, it doesn't just find them.
+## Why it clicks
 
-## See the workflow loop
+- **Jump anywhere fast.** Type a few letters to open any note, run any command, or jump to a heading — with recents and open tabs boosted so the thing you want is usually first.
+- **Bring back recurring work.** Save a search you run often as a workflow and relaunch it from Browse in one keystroke.
+- **Stay in flow.** Press `Cmd/Ctrl+K` on a result to open it, copy it, rename it, or act on it without dropping into file-by-file cleanup.
 
-![Workflow loop](assets/spotlight-workflow-loop.svg)
+## Browse mode and workflows
+
+![Vault Spotlight workflows screenshot](assets/marketing/workflow-shot.png)
 
 Typical use cases:
 
