@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">Vault Spotlight workflow loop</title>
+  <desc id="desc">A simple three-step flow showing Search, Save workflow, and Act on results.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#0b1220"/>
+      <stop offset="100%" stop-color="#131c30"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#22c55e"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="420" rx="28" fill="url(#bg)"/>
+  <text x="72" y="78" fill="#eef4ff" font-size="34" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="700">The core workflow loop</text>
+  <text x="72" y="112" fill="#9eb0cc" font-size="20" font-family="Inter, Segoe UI, Arial, sans-serif">One launcher, three moves: find, save the context, then act.</text>
+
+  <g>
+    <rect x="72" y="164" width="292" height="176" rx="22" fill="#111827" stroke="#30415f"/>
+    <text x="104" y="214" fill="#f8fbff" font-size="28" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="700">1. Search</text>
+    <text x="104" y="252" fill="#cbd8eb" font-size="18" font-family="Inter, Segoe UI, Arial, sans-serif">Find notes, headings, commands,</text>
+    <text x="104" y="280" fill="#cbd8eb" font-size="18" font-family="Inter, Segoe UI, Arial, sans-serif">links, folders, and open editors</text>
+    <text x="104" y="308" fill="#cbd8eb" font-size="18" font-family="Inter, Segoe UI, Arial, sans-serif">from one keyboard-first modal.</text>
+  </g>
+
+  <g>
+    <rect x="454" y="164" width="292" height="176" rx="22" fill="#111827" stroke="#30415f"/>
+    <text x="486" y="214" fill="#f8fbff" font-size="28" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="700">2. Save workflow</text>
+    <text x="486" y="252" fill="#cbd8eb" font-size="18" font-family="Inter, Segoe UI, Arial, sans-serif">Press Cmd/Ctrl+S to keep a</text>
+    <text x="486" y="280" fill="#cbd8eb" font-size="18" font-family="Inter, Segoe UI, Arial, sans-serif">recurring search like Meetings,</text>
+    <text x="486" y="308" fill="#cbd8eb" font-size="18" font-family="Inter, Segoe UI, Arial, sans-serif">Follow-ups, or Weekly review.</text>
+  </g>
+
+  <g>
+    <rect x="836" y="164" width="292" height="176" rx="22" fill="#111827" stroke="#30415f"/>
+    <text x="868" y="214" fill="#f8fbff" font-size="28" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="700">3. Act</text>
+    <text x="868" y="252" fill="#cbd8eb" font-size="18" font-family="Inter, Segoe UI, Arial, sans-serif">Open, copy, rename, batch-edit,</text>
+    <text x="868" y="280" fill="#cbd8eb" font-size="18" font-family="Inter, Segoe UI, Arial, sans-serif">export, or preview results</text>
+    <text x="868" y="308" fill="#cbd8eb" font-size="18" font-family="Inter, Segoe UI, Arial, sans-serif">without losing context.</text>
+  </g>
+
+  <path d="M364 252 H434" stroke="url(#accent)" stroke-width="8" stroke-linecap="round"/>
+  <path d="M746 252 H816" stroke="url(#accent)" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="434" cy="252" r="8" fill="#22c55e"/>
+  <circle cx="816" cy="252" r="8" fill="#22c55e"/>
+</svg>

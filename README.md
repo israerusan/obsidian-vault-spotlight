@@ -2,13 +2,31 @@
 
 > A Raycast-style command center for [Obsidian](https://obsidian.md): find notes fast, reopen recurring work instantly, and act on results — all without leaving the keyboard.
 
-Vault Spotlight is one keyboard-first modal built around three jobs — **Search**, **Workflows**, and **Actions**. Everything else (calculator, capture, snippets, file-type support, integrations) is a supporting detail of those three.
+![Vault Spotlight hero](assets/spotlight-hero.svg)
+
+Vault Spotlight is one keyboard-first command center built around three jobs: **Search**, **Workflows**, and **Actions**.
+
+In 5 seconds, here's the product:
+
+- **Find the right note fast** — fuzzy search, commands, headings, links, folders, and open editors in one launcher.
+- **Reopen repeated work** — save a search as a workflow and bring back the same project, meeting, or follow-up context in one keystroke.
+- **Do useful work immediately** — open, copy, rename, batch-edit, export, or preview results without breaking keyboard flow.
 
 ## Why people install it
 
 1. **Jump anywhere fast.** Type a few letters to open any note, run any command, or jump to a heading — with recents and open tabs boosted so the thing you want is usually first.
 2. **Reopen recurring work instantly.** Save a search you run often as a *workflow* and re-launch it from Browse in one keystroke.
 3. **Act without leaving the keyboard.** Press `Cmd/Ctrl+K` on a result to copy, rename, or act on it — the launcher *does* things, it doesn't just find them.
+
+## See the workflow loop
+
+![Workflow loop](assets/spotlight-workflow-loop.svg)
+
+Typical use cases:
+
+- **Daily work hub** — bounce between active project notes, meeting notes, and follow-ups from one launcher.
+- **Writer / researcher flow** — save recurring searches for drafts, sources, reading queues, and literature notes.
+- **Operations / client work** — collect a result set, then rename, tag, move, export, or turn it into a MOC without hand-editing files one by one.
 
 ---
 
