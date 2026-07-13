@@ -3,6 +3,26 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.12.1] - 2026-07-13
+
+### Security
+
+- **A working Pro license key was committed to this public repository.**
+  `tests/fixtures/test-license.key` held a real, production-signed `vault-spotlight`
+  license that verified against the public key shipped in every release. Anyone who
+  opened that file on GitHub could paste the string into the plugin and unlock Pro for
+  free, permanently. It was found by a security review of a sibling project that had
+  inherited the same test-fixture pattern.
+
+  The leaked key is now **revoked by value** (`src/core/revokedLicenses.mjs`), and the
+  fixture has been re-minted under a product id the plugin never requests, so it is inert
+  twice over.
+
+  **The signing keypair was deliberately NOT rotated.** Rotating it would have revoked Pro
+  for every paying customer, since their keys are signed by that same private key. If you
+  bought Vault Spotlight Pro, your key is unaffected and needs no action. The only key that
+  stops working is the one that was published in this repository.
+
 ## [2.12.0] - 2026-07-05
 
 Boolean `OR` search, one unified saved-object model, a smaller bundle, and a
