@@ -1,9 +1,19 @@
-import { App, Component, MarkdownRenderer, TFile, setIcon } from "obsidian";
+import { App, Component, MarkdownRenderer, Menu, TFile, setIcon } from "obsidian";
 import { buildPreviewExcerpt } from "../core/previewWindow.mjs";
+import { copyToClipboard } from "./batchOps";
+
+/** Host hooks the pane needs from the modal (kept tiny, batchOps-style). */
+export interface PreviewHost {
+	/** Close the modal — called when the user follows an internal link. */
+	close(): void;
+}
 
 /**
  * The Pro live-preview pane beside the results list: debounced rendering of
- * the highlighted note, scrolled to the first matched term.
+ * the highlighted note, scrolled to the first matched term. Links in the body
+ * are clickable (internal links follow via the workspace, external links open
+ * in the browser) and the header offers a copy menu — both so a Pro user can
+ * act on a result without opening the note first.
  */
 export class PreviewPane {
 	private el: HTMLDivElement | null = null;
@@ -12,13 +22,22 @@ export class PreviewPane {
 	// Bumped on every update() so a slower async read from an earlier selection
 	// can't render into the pane after a newer selection replaced it.
 	private token = 0;
+	// The note currently rendered — the source path for resolving relative
+	// internal links clicked in the body.
+	private currentFile: TFile | null = null;
 
-	constructor(private app: App) {}
+	constructor(
+		private app: App,
+		private host: PreviewHost
+	) {}
 
 	mount(parent: HTMLElement): void {
 		this.el = parent.createDiv({ cls: "vault-spotlight-preview" });
 		this.component = new Component();
 		this.component.load();
+		// One delegated listener on the persistent pane element (survives the
+		// per-render .empty()/swap of its children) handles every link click.
+		this.el.addEventListener("click", (evt) => this.handleLinkClick(evt));
 	}
 
 	get isMounted(): boolean {
@@ -40,11 +59,13 @@ export class PreviewPane {
 			// The empty/non-markdown states render instantly, so clearing up front
 			// costs no visible flash.
 			if (!file) {
+				this.currentFile = null;
 				previewEl.empty();
 				renderPreviewEmpty(previewEl, "eye", "Nothing selected", "Pick a result and its note previews here, scrolled to the match.");
 				return;
 			}
 			if (file.extension !== "md") {
+				this.currentFile = null;
 				previewEl.empty();
 				renderPreviewEmpty(
 					previewEl,
@@ -60,30 +81,105 @@ export class PreviewPane {
 			// until the replacement is ready. The token/component/isConnected guards
 			// still ensure a slower read from an older selection can't win the swap.
 			const staged = previewEl.ownerDocument.createElement("div");
-			staged.createDiv({ cls: "vault-spotlight-preview-title", text: file.basename });
+			const header = staged.createDiv({ cls: "vault-spotlight-preview-header" });
+			header.createDiv({ cls: "vault-spotlight-preview-title", text: file.basename });
+			// Copy menu: act on the note (contents / link / path) without opening it.
+			const copyBtn = header.createEl("button", {
+				cls: "vault-spotlight-preview-copy",
+				attr: { "aria-label": "Copy…", title: "Copy…" },
+			});
+			setIcon(copyBtn, "copy");
 			const bodyEl = staged.createDiv({ cls: "vault-spotlight-preview-body markdown-rendered" });
 			void this.app.vault
 				.cachedRead(file)
 				.then((content) => {
 					if (this.token !== token || this.component !== component || !previewEl.isConnected) return;
+					// Wire the copy button to the just-read contents; the button node
+					// survives the swap below, so this closure stays valid.
+					copyBtn.onclick = (evt) => {
+						evt.stopPropagation();
+						this.showCopyMenu(evt, file, content);
+					};
 					const excerpt = buildPreviewExcerpt(content, { focusText, terms });
-					return MarkdownRenderer.render(this.app, excerpt, bodyEl, file.path, component);
+					return MarkdownRenderer.render(this.app, excerpt, bodyEl, file.path, component).then(() => content);
 				})
-				.then(() => {
+				.then((content) => {
 					if (this.token !== token || this.component !== component || !previewEl.isConnected) return;
 					// Replacement is fully rendered — swap it in, then highlight/scroll
 					// on the now-connected nodes so scrollIntoView actually moves.
 					previewEl.empty();
 					while (staged.firstChild) previewEl.appendChild(staged.firstChild);
+					// Record what's on screen so link clicks resolve relative to it.
+					this.currentFile = file;
 					const hit = highlightFirstMatch(previewEl, [focusText, ...terms]);
 					hit?.scrollIntoView({ block: "center" });
 				})
 				.catch(() => {
 					if (this.token !== token || !previewEl.isConnected) return;
+					this.currentFile = null;
 					previewEl.empty();
 					renderPreviewEmpty(previewEl, "alert-triangle", "Preview unavailable", "This note couldn't be read. Try selecting it again.");
 				});
 		}, 120);
+	}
+
+	/**
+	 * Follow a link clicked in the rendered body. Internal links jump through the
+	 * workspace (closing the modal, like activating a result); external links open
+	 * in the browser. Anything else falls through to the default behavior.
+	 */
+	private handleLinkClick(evt: MouseEvent): void {
+		const target = evt.target;
+		if (!(target instanceof HTMLElement)) return;
+		const anchor = target.closest("a");
+		if (!anchor) return;
+
+		if (anchor.classList.contains("internal-link")) {
+			evt.preventDefault();
+			// MarkdownRenderer resolves the display text into data-href; fall back to
+			// href for links it didn't rewrite.
+			const linktext = anchor.getAttribute("data-href") ?? anchor.getAttribute("href") ?? "";
+			if (!linktext) return;
+			const sourcePath = this.currentFile?.path ?? "";
+			// New pane on Cmd/Ctrl-click, mirroring Obsidian's own link behavior.
+			const newLeaf = evt.metaKey || evt.ctrlKey;
+			this.host.close();
+			void this.app.workspace.openLinkText(linktext, sourcePath, newLeaf);
+			return;
+		}
+
+		if (anchor.classList.contains("external-link")) {
+			evt.preventDefault();
+			const href = anchor.getAttribute("href") ?? "";
+			if (!/^https?:\/\//i.test(href)) return;
+			// Open in the pane's own window so popout modals open links correctly.
+			anchor.ownerDocument.defaultView?.open(href, "_blank");
+		}
+	}
+
+	/** Copy menu for the previewed note: contents, a link to it, or its path. */
+	private showCopyMenu(evt: MouseEvent, file: TFile, content: string): void {
+		const menu = new Menu();
+		menu.addItem((item) =>
+			item
+				.setTitle("Copy contents")
+				.setIcon("clipboard-type")
+				.onClick(() => copyToClipboard(content, "note contents copied"))
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle("Copy link to note")
+				.setIcon("link")
+				// generateMarkdownLink honors the user's wikilink/markdown link setting.
+				.onClick(() => copyToClipboard(this.app.fileManager.generateMarkdownLink(file, ""), "link copied"))
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle("Copy path")
+				.setIcon("folder")
+				.onClick(() => copyToClipboard(file.path, "path copied"))
+		);
+		menu.showAtMouseEvent(evt);
 	}
 
 	unload(): void {
@@ -99,6 +195,7 @@ export class PreviewPane {
 		// toggles preview back on) doesn't leave an orphaned pane behind.
 		this.el?.remove();
 		this.el = null;
+		this.currentFile = null;
 	}
 }
 

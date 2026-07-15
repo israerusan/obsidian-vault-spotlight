@@ -110,7 +110,9 @@ export class SpotlightModal extends Modal {
 		super(app);
 		this.shouldRestoreSelection = false;
 		this.initialQuery = initialQuery;
-		this.preview = new PreviewPane(app);
+		// The preview follows internal links itself (closing the modal, like
+		// activating a result does) so a Pro user can jump straight from the pane.
+		this.preview = new PreviewPane(app, { close: () => this.close() });
 		// Delight-action side effects (daily notes, capture, snippets, calc) live in
 		// their own controller behind a tiny host (the batchOps pattern).
 		this.capture = new CaptureController({

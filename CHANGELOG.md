@@ -3,6 +3,17 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.13.0] - 2026-07-14
+
+### Added
+
+- **Live preview: clickable links and a copy menu.** In the Pro preview pane you can
+  now act on a result without opening the note first. Links in the previewed body are
+  clickable — internal `[[links]]` jump to the target (Cmd/Ctrl-click opens it in a new
+  pane), external URLs open in the browser. A copy button in the preview header offers
+  "Copy contents", "Copy link to note" (honoring your wikilink/markdown link setting),
+  and "Copy path".
+
 ## [2.12.1] - 2026-07-13
 
 ### Security

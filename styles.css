@@ -840,15 +840,60 @@
 	background: var(--background-primary);
 }
 
+/* Title + copy button sit on one row above the divider. */
+.vault-spotlight-preview-header {
+	display: flex;
+	align-items: center;
+	gap: var(--vs-sp-4);
+	margin-bottom: 10px;
+	padding-bottom: 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
 .vault-spotlight-preview-title {
+	flex: 1;
+	min-width: 0;
 	font-size: var(--vs-fz-meta);
 	font-weight: 600;
 	color: var(--text-muted);
 	text-transform: uppercase;
 	letter-spacing: 0.04em;
-	margin-bottom: 10px;
-	padding-bottom: 8px;
-	border-bottom: 1px solid var(--background-modifier-border);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* Icon-only copy trigger; reveals a menu (contents / link / path). */
+.vault-spotlight-preview-copy {
+	flex: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 26px;
+	padding: 0;
+	border: none;
+	border-radius: var(--vs-radius-xs);
+	background: transparent;
+	color: var(--text-muted);
+	cursor: pointer;
+	box-shadow: none;
+}
+
+.vault-spotlight-preview-copy:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.vault-spotlight-preview-copy .svg-icon {
+	width: 16px;
+	height: 16px;
+}
+
+/* Links in the rendered body are actionable — signal it on hover. */
+.vault-spotlight-preview-body a.internal-link,
+.vault-spotlight-preview-body a.external-link {
+	cursor: pointer;
 }
 
 /* The reading surface a paying user leans on: full-strength body text. */
