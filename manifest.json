@@ -1,7 +1,7 @@
 {
   "id": "vault-spotlight",
   "name": "Vault Spotlight",
-  "version": "2.13.0",
+  "version": "2.14.0",
   "minAppVersion": "1.5.0",
   "description": "A keyboard-first command center: fast search, saved workflows, and result actions — find notes, reopen recurring work, and act on results without leaving the keyboard.",
   "author": "iavil",

@@ -184,8 +184,10 @@ export class FileSearcher {
 
 		// Rank and cut to the visible window BEFORE paying for display metadata, so
 		// tag/alias cache reads and time formatting run for ~limit files, not every
-		// match (in browse mode that is the whole vault).
-		scanned.sort((a, b) => b.score - a.score);
+		// match (in browse mode that is the whole vault). Break score ties on path so
+		// the top-N (and thus which rows survive the cut) is stable across identical
+		// queries instead of depending on getSearchableFiles() enumeration order.
+		scanned.sort((a, b) => b.score - a.score || (a.file.path < b.file.path ? -1 : a.file.path > b.file.path ? 1 : 0));
 		return scanned.slice(0, limit).map((row) => {
 			const file = row.file;
 			const cache = file.extension === "md" ? this.app.metadataCache.getFileCache(file) : null;

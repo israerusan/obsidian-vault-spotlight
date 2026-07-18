@@ -68,6 +68,14 @@ assert.deepEqual(parsed.textTokens, ["project"]);
 assert.deepEqual(parsed.tags, ["work"]);
 assert.deepEqual(parsed.properties, [{ key: "status", value: "done" }]);
 
+// textTokensRaw mirrors textTokens but preserves the ORIGINAL case, so the
+// "Create <name>" dead-end row builds a filename with the user's capitalization
+// (and without the filter fragments) instead of force-lowercasing it.
+const cased = parseAdvancedQuery("Meeting Notes 2026 #project");
+assert.deepEqual(cased.textTokens, ["meeting", "notes", "2026"], "textTokens stay lowercased for matching");
+assert.deepEqual(cased.textTokensRaw, ["Meeting", "Notes", "2026"], "textTokensRaw preserves typed case and drops the #tag");
+assert.equal(cased.textTokensRaw.join(" "), "Meeting Notes 2026", "create-row name keeps case, strips filters");
+
 const extParsed = parseAdvancedQuery("report ext:pdf ext:canvas");
 assert.deepEqual(extParsed.extFilters, ["pdf", "canvas"]);
 assert.deepEqual(extParsed.textTokens, ["report"]);
@@ -91,6 +99,23 @@ assert.ok(
 	fuzzyMatch("stan", "İstanbul").indices.every((i) => i < "İstanbul".length),
 	"no highlight index may exceed the original string length"
 );
+
+// The lowercase/fold fast path is guarded to ASCII only: outside ASCII an
+// equal-length transform is NOT a 1:1 index map, and taking the fast path there
+// would change matches or misplace highlights. These pin the two proven cases.
+//
+// Greek context-sensitive final sigma: "ΑΣ".toLowerCase() === "ας" (final sigma
+// U+03C2, same length), but a typed σ is U+03C3. A whole-string-lowercase fast
+// path would make this miss; the per-character path folds Σ→σ and matches.
+const finalSigma = fuzzyMatch("σ", "ΑΣ");
+assert.ok(finalSigma && finalSigma.indices.length === 1 && finalSigma.indices[0] === 1, "Greek final sigma Σ still matches a typed σ");
+
+// A composed char that folds to a non-diacritic combining mark (kept) beside a
+// standalone diacritic that folds to nothing: net length is preserved, yet the
+// original indices shift. The highlight for 'x' must point at its real index (1),
+// not slide onto the trailing mark.
+const cancel = fuzzyMatch("x", "آx´", { ignoreDiacritics: true });
+assert.ok(cancel && cancel.indices.length === 1 && cancel.indices[0] === 1, "cancelling fold expand/contract keeps the highlight on the real char");
 
 // --- Boolean OR (parseAdvancedQuery) ---
 

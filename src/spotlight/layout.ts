@@ -1,11 +1,12 @@
 import { setIcon, type TFile } from "obsidian";
 import { createExternalLink, DEFAULT_SETTINGS } from "../settings";
-import { getDrillPrefixMatch } from "../core/modalCopy.mjs";
+import { getDrillPrefixMatch, type HelpSection } from "../core/modalCopy.mjs";
 import { itemFile, type ResultItem, type SpotlightMode } from "./resultTypes";
 
 /** The stable DOM nodes the modal keeps references to after onOpen builds them. */
 export interface SpotlightLayoutRefs {
 	modeBadgeEl: HTMLSpanElement;
+	helpBtn: HTMLButtonElement;
 	inputEl: HTMLInputElement;
 	hintEl: HTMLDivElement;
 	bodyEl: HTMLDivElement;
@@ -38,9 +39,19 @@ export function buildSpotlightLayout(
 	const header = contentEl.createDiv({ cls: "vault-spotlight-header" });
 	const titleRow = header.createDiv({ cls: "vault-spotlight-title-row" });
 	titleRow.createDiv({ cls: "vault-spotlight-title", text: "Vault Spotlight" });
+	// Badge + help button share the right side of the title row.
+	const titleAside = titleRow.createDiv({ cls: "vault-spotlight-title-aside" });
+	// A real, focusable button (it lives in the header, not inside the listbox) so
+	// the shortcut cheatsheet is reachable by mouse and assistive tech, not only by
+	// the Mod+/ key — the fix for discoverability collapsing after the first opens.
+	const helpBtn = titleAside.createEl("button", {
+		cls: "vault-spotlight-help-btn",
+		attr: { type: "button", "aria-label": "Keyboard shortcuts", "aria-haspopup": "dialog", "aria-expanded": "false" },
+	});
+	setIcon(helpBtn, "keyboard");
 	// Polite live region so cycling modes (Tab) is announced to screen readers
 	// as the badge text changes (Files → Commands → Content …).
-	const modeBadgeEl = titleRow.createSpan({
+	const modeBadgeEl = titleAside.createSpan({
 		cls: "vault-spotlight-mode-badge",
 		text: "Files",
 		attr: { "aria-live": "polite" },
@@ -106,7 +117,65 @@ export function buildSpotlightLayout(
 		});
 	}
 
-	return { modeBadgeEl, inputEl, hintEl, bodyEl, resultsEl, footerEl, shortcutsEl, statusEl };
+	return { modeBadgeEl, helpBtn, inputEl, hintEl, bodyEl, resultsEl, footerEl, shortcutsEl, statusEl };
+}
+
+/**
+ * Build the in-modal keyboard-shortcut overlay from pure section data and return
+ * its root (mounted by the caller). The overlay is a modeless dialog laid over the
+ * modal; a close button and the section list are the whole surface. Keeping the DOM
+ * assembly here (like buildSpotlightLayout) leaves the modal owning only state.
+ */
+export function renderHelpOverlay(
+	container: HTMLElement,
+	sections: HelpSection[],
+	opts: { onClose: () => void; onDismissHints?: (() => void) | null }
+): HTMLDivElement {
+	const overlay = container.createDiv({
+		cls: "vault-spotlight-help",
+		attr: { role: "dialog", "aria-label": "Keyboard shortcuts", "aria-modal": "false" },
+	});
+	const panel = overlay.createDiv({ cls: "vault-spotlight-help-panel" });
+	const head = panel.createDiv({ cls: "vault-spotlight-help-head" });
+	head.createSpan({ cls: "vault-spotlight-help-title", text: "Keyboard shortcuts" });
+	const closeBtn = head.createEl("button", {
+		cls: "vault-spotlight-help-close",
+		attr: { type: "button", "aria-label": "Close shortcuts" },
+	});
+	setIcon(closeBtn, "x");
+	closeBtn.addEventListener("click", () => opts.onClose());
+
+	const grid = panel.createDiv({ cls: "vault-spotlight-help-grid" });
+	for (const section of sections) {
+		const col = grid.createDiv({ cls: "vault-spotlight-help-section" });
+		col.createDiv({ cls: "vault-spotlight-help-section-title", text: section.title });
+		for (const entry of section.entries) {
+			// A mode whose trigger is (defensively) empty would render an empty keycap;
+			// skip it so the cheatsheet never shows a blank key.
+			const keys = entry.keys.filter((k) => k && k.length > 0);
+			if (keys.length === 0) continue;
+			const row = col.createDiv({ cls: "vault-spotlight-help-row" });
+			const keysEl = row.createSpan({ cls: "vault-spotlight-help-keys" });
+			keys.forEach((key, i) => {
+				if (i > 0) keysEl.appendText(" ");
+				keysEl.createEl("kbd", { text: key });
+			});
+			const labelEl = row.createSpan({ cls: "vault-spotlight-help-label", text: entry.label });
+			if (entry.proOnly) labelEl.createSpan({ cls: "vault-spotlight-pro-pill", text: "Pro" });
+		}
+	}
+
+	const foot = panel.createDiv({ cls: "vault-spotlight-help-foot" });
+	if (opts.onDismissHints) {
+		const dismiss = foot.createEl("button", {
+			cls: "vault-spotlight-help-dismiss",
+			attr: { type: "button" },
+			text: "Hide inline hints",
+		});
+		dismiss.addEventListener("click", () => opts.onDismissHints?.());
+	}
+	foot.createSpan({ cls: "vault-spotlight-help-foot-hint", text: "Esc to close" });
+	return overlay;
 }
 
 /**
@@ -226,7 +295,8 @@ export function attachSpotlightListeners(
 		evt.stopPropagation();
 		if (item?.kind === "file") {
 			item.isStarred = host.toggleStar(item.file.path);
-			setIcon(starBtn, item.isStarred ? "star" : "star-off");
+			// Hollow star for both states; the is-starred class recolours it.
+			setIcon(starBtn, "star");
 			const row = starBtn.closest<HTMLElement>(".vault-spotlight-item");
 			row?.toggleClass("is-starred", item.isStarred);
 		}

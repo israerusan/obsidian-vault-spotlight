@@ -1,6 +1,8 @@
 /** One AND-clause of a parsed query — the flat field set that predates OR. */
 export interface AdvancedQueryClause {
 	textTokens: string[];
+	/** Same words as textTokens, in their original (un-lowercased) case. */
+	textTokensRaw: string[];
 	phrases: string[];
 	exclusions: string[];
 	folderIncludes: string[];

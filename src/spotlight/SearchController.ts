@@ -69,6 +69,7 @@ export interface SearchHost {
 	drillFile(): TFile | null;
 	activeWorkflowId(): string;
 	setBadge(text: string, cls: "is-content" | "is-pro" | null): void;
+	setPlaceholder(mode: SpotlightMode): void;
 	renderResults(): void;
 	renderEmptyState(icon: string, title: string, desc: string): void;
 	renderLoading(): void;
@@ -89,9 +90,11 @@ export class SearchController {
 	items: ResultItem[] = [];
 	selectedIndex = 0;
 	checkedPaths = new Set<string>();
-	// Set by the background metadata listener so a passive re-index preserves the
-	// user's place instead of snapping the selection back to the top.
-	preserveSelection = false;
+	// One-shot "keep the user's place" intent for the NEXT search, set only via
+	// scheduleSearch(true) (the passive metadata re-index path) and consumed + cleared
+	// at the top of runSearch. Private: no external writer since it moved onto the
+	// scheduleSearch seam, so a racing keystroke can't inherit a stale flag.
+	private preserveSelection = false;
 
 	private searchTimer: number | null = null;
 	private loadingTimer: number | null = null;
@@ -159,7 +162,14 @@ export class SearchController {
 		});
 	}
 
-	scheduleSearch(): void {
+	scheduleSearch(preserve = false): void {
+		// Carry the "keep the user's place" intent on the coalescing seam, not as a
+		// standalone field any runSearch consumes: several scheduleSearch calls inside
+		// the 60ms window collapse to ONE runSearch, so whichever schedule fires last
+		// must set the intent. Writing preserveSelection directly on the passive
+		// re-index path let a racing keystroke inherit its flag and fail to snap the
+		// selection back to the top result for the freshly-typed query.
+		this.preserveSelection = preserve;
 		if (this.searchTimer !== null) window.clearTimeout(this.searchTimer);
 		this.searchTimer = window.setTimeout(() => void this.runSearch(), SEARCH_DEBOUNCE_MS);
 	}
@@ -173,6 +183,9 @@ export class SearchController {
 		const raw = this.expandAliases(this.host.inputValue());
 		const trimmed = raw.trim();
 		const { mode, body } = this.host.resolveQuery(raw);
+		// The field prompt tracks the active mode (resolved here, before the per-mode
+		// branches), so the large input never advertises the wrong action.
+		this.host.setPlaceholder(mode);
 		const isEmptyQuery = body.length === 0;
 		const isPro = this.plugin.settings.isPro;
 		const profile = this.currentProfile();
@@ -424,22 +437,16 @@ export class SearchController {
 					if (smartItems.length > 0) this.items = [...smartItems, ...this.items];
 				}
 
-				// Offer to create a note when a plain name search finds nothing.
-				const noFilters =
-					parsed.tags.length === 0 &&
-					parsed.properties.length === 0 &&
-					parsed.extFilters.length === 0 &&
-					parsed.phrases.length === 0 &&
-					parsed.exclusions.length === 0 &&
-					parsed.folderIncludes.length === 0 &&
-					parsed.pathTerms.length === 0 &&
-					parsed.nameTerms.length === 0 &&
-					!parsed.isStarred &&
-					!parsed.isBookmarked &&
-					parsed.modifiedDays === null &&
-					parsed.createdDays === null;
-				if (this.items.length === 0 && !isEmptyQuery && noFilters) {
-					this.items = [{ kind: "create", name: body }];
+				// Offer to create a note whenever a search carrying real text finds
+				// nothing — including a filtered query like `roadmap #project` that
+				// previously dead-ended with no actionable next step. Use the plain text
+				// tokens, not the raw body, so `#tag`/`ext:` fragments never leak into
+				// the new note's filename.
+				if (this.items.length === 0 && !isEmptyQuery && parsed.textTokensRaw.length > 0) {
+					// Original-case words (textTokensRaw), so a plain "Meeting Notes" search
+					// creates "Meeting Notes.md", not "meeting notes.md" — and matches the
+					// name the Shift+Enter (createFromQuery) path produces for the same query.
+					this.items = [{ kind: "create", name: parsed.textTokensRaw.join(" ") }];
 				}
 			}
 		} catch (err) {

@@ -168,5 +168,39 @@ const findKey = (modal, mods, key) =>
 	modal.close();
 }
 
+// --- 7. Help overlay gates the list keys ---------------------------------------
+// The cheatsheet (Mod+/) is a modeless overlay, so the fix must make the scope's
+// nav/activation keys inert while it's open — otherwise a reflexive Enter would open
+// the selected result and tear the whole modal down behind the overlay.
+{
+	const { app } = loadVaultApp(vaultDir);
+	const plugin = makeStubPlugin(app, { isPro: false });
+	const modal = new SpotlightModal(app, plugin, "roadmap", "files");
+	modal.open();
+	await settle();
+	assert.ok(modal.items.length > 0, "has results to (not) activate");
+
+	// Open the overlay via Mod+/.
+	findKey(modal, ["Mod"], "/").handler(new FakeEvent("keydown", { isComposing: false }));
+	assert.ok(modal.contentEl.querySelector(".vault-spotlight-help"), "Mod+/ opened the shortcut overlay");
+
+	// Enter while help is open must be inert: no file opened, and it passes through.
+	const before = app.openedFiles.length;
+	const ret = findKey(modal, [], "Enter").handler(new FakeEvent("keydown", { isComposing: false }));
+	assert.equal(app.openedFiles.length, before, "Enter does NOT activate a result while help is open");
+	assert.equal(ret, true, "a gated key passes through (returns true)");
+
+	// Escape closes the overlay, not the modal.
+	findKey(modal, [], "Escape").handler(new FakeEvent("keydown", { isComposing: false }));
+	assert.ok(!modal.contentEl.querySelector(".vault-spotlight-help"), "Escape dismissed the help overlay");
+
+	// With help closed, Enter activates again.
+	modal.selectedIndex = 0;
+	findKey(modal, [], "Enter").handler(new FakeEvent("keydown", { isComposing: false }));
+	await settle();
+	assert.equal(app.openedFiles.length, before + 1, "Enter activates again once help is closed");
+	modal.close();
+}
+
 uninstallWindow();
 console.log("modal harness tests passed");

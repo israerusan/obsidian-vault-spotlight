@@ -56,3 +56,25 @@ export function getPreviewFocusText(item: {
 	text?: string;
 } | null | undefined): string;
 
+export function getModePlaceholder(
+	mode: "files" | "content" | "headings" | "symbols" | "commands" | "links" | "editors" | "folders" | "capture" | "snippets"
+): string;
+
+export interface HelpEntry {
+	keys: string[];
+	label: string;
+	proOnly?: boolean;
+}
+
+export interface HelpSection {
+	title: string;
+	entries: HelpEntry[];
+}
+
+export function getHelpSections(args?: {
+	isPro?: boolean;
+	prefixes?: Record<string, string>;
+	modifierLabel?: string;
+	escapeChar?: string;
+}): HelpSection[];
+

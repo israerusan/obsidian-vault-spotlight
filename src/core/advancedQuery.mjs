@@ -38,6 +38,11 @@ export function parseAdvancedQuery(raw) {
 function parseClause(tokens) {
 	const out = {
 		textTokens: [],
+		// Same plain words as textTokens but in their ORIGINAL case, so a consumer that
+		// turns the query back into user-facing text (the "Create <name>" row) doesn't
+		// force-lowercase the note's filename. Filter fragments (#tag, ext:, …) are
+		// still excluded, exactly like textTokens.
+		textTokensRaw: [],
 		phrases: [],
 		exclusions: [],
 		folderIncludes: [],
@@ -72,7 +77,10 @@ function parseClause(tokens) {
 		else if (lower.startsWith("created:") && lower.length > 8) out.createdDays = parseDays(lower.slice(8));
 		else if (lower === "is:starred") out.isStarred = true;
 		else if (lower === "is:bookmarked") out.isBookmarked = true;
-		else if (lower !== "#" && lower !== "@" && lower !== "ext:") out.textTokens.push(lower);
+		else if (lower !== "#" && lower !== "@" && lower !== "ext:") {
+			out.textTokens.push(lower);
+			out.textTokensRaw.push(value);
+		}
 	}
 	return out;
 }

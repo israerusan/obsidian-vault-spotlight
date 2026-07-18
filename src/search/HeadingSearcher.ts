@@ -11,6 +11,19 @@ export interface HeadingResult {
 	matchIndices: number[];
 }
 
+/**
+ * Total order for headings: score desc, then (path, line) — which is unique per
+ * heading. Mirrors ContentSearcher's compareContentRows so the soft-cap prune and
+ * the final sort don't depend on getMarkdownFiles() iteration order when many
+ * headings tie on score (a broad 1–2 char query, or the empty-query outline where
+ * every heading scores 1).
+ */
+function compareHeadingRows(a: HeadingResult, b: HeadingResult): number {
+	if (b.score !== a.score) return b.score - a.score;
+	if (a.file.path !== b.file.path) return a.file.path < b.file.path ? -1 : 1;
+	return a.line - b.line;
+}
+
 export class HeadingSearcher {
 	constructor(private app: App) {}
 
@@ -66,12 +79,12 @@ export class HeadingSearcher {
 					matchIndices,
 				});
 				if (results.length >= softCap) {
-					results.sort((a, b) => b.score - a.score);
+					results.sort(compareHeadingRows);
 					results.length = limit;
 				}
 			}
 		}
 
-		return results.sort((a, b) => b.score - a.score).slice(0, limit);
+		return results.sort(compareHeadingRows).slice(0, limit);
 	}
 }

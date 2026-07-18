@@ -3,6 +3,47 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.14.0] - 2026-07-18
+
+### Added
+
+- **In-modal keyboard-shortcut overlay.** Press `Cmd/Ctrl+/` (or the new keyboard
+  button in the header) to open a full cheatsheet of every shortcut and mode trigger.
+  It builds the trigger list from your *live, configured* prefixes, so the whole
+  vocabulary stays one keystroke away instead of disappearing from the header hints
+  after the first few opens. The overlay also carries a real "Hide inline hints"
+  control — finally making the first-run hints genuinely dismissible.
+
+### Changed
+
+- **The search field prompt now tracks the active mode** — Capture mode says "Capture
+  to your daily note…", Commands says "Search commands…", and so on, instead of always
+  advertising "Search notes, tags, or properties…".
+- **Result rows scan more cleanly.** Long badges ellipsise themselves instead of
+  squeezing the note title; multi-word state labels ("Recent search", "Create daily
+  note") are sentence-case rather than cramped uppercase; content-search rows show the
+  parent folder instead of a full path that just restated the title.
+- **Clearer selection.** The keyboard-selected row is never out-shouted by a checked
+  (multi-select) row, and its icon keeps proper contrast on pale accent colours.
+- **A "Create <name>" row is now offered on filtered dead-ends** (e.g. `roadmap
+  #project` with no match), not only on plain-text misses.
+
+### Fixed
+
+- The un-starred control now shows a hollow star (a click-to-favourite affordance)
+  instead of the slashed "star-off" icon that read as "starring disabled".
+- File and heading results now have a stable, deterministic order when scores tie, so
+  repeating a similar search no longer reshuffles rows.
+- A passive metadata re-index can no longer steal a racing keystroke's selection reset.
+- Removed a stray `console` warning emitted on a normal free-tier API call.
+- Preview copy button now has a visible keyboard focus ring.
+
+### Performance
+
+- Faster fuzzy matching: the common ASCII case skips the per-character index-map
+  allocation on every keystroke (with the full, correct mapping still used for
+  accented / non-ASCII text so highlights stay aligned).
+
 ## [2.13.0] - 2026-07-14
 
 ### Added

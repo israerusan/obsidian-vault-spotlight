@@ -8,7 +8,7 @@ import {
 import type VaultSpotlightPlugin from "../main";
 import { clampIndex, nextSelectedIndex } from "../core/selectionReducer.mjs";
 import { showOnboarding } from "../core/onboarding.mjs";
-import { getModifierLabel, getPreviewFocusText } from "../core/modalCopy.mjs";
+import { getHelpSections, getModePlaceholder, getModifierLabel, getPreviewFocusText } from "../core/modalCopy.mjs";
 import { PRO_UNLOCK_SUMMARY } from "../core/featureGates.mjs";
 import { itemFile, type ResultItem, type SpotlightMode } from "./resultTypes";
 import { PreviewPane } from "./PreviewPane";
@@ -26,7 +26,7 @@ import {
 	renderStatus,
 	setModeBadge,
 } from "./resultRow";
-import { attachSpotlightListeners, buildSpotlightLayout, InputFocuser } from "./layout";
+import { attachSpotlightListeners, buildSpotlightLayout, renderHelpOverlay, InputFocuser } from "./layout";
 
 // Re-exported so existing importers keep working after the types moved to
 // resultTypes.ts.
@@ -53,7 +53,10 @@ export class SpotlightModal extends Modal {
 	private shortcutsEl!: HTMLDivElement;
 	private statusEl!: HTMLSpanElement;
 	private modeBadgeEl!: HTMLSpanElement;
+	private helpBtn!: HTMLButtonElement;
 	private hintEl!: HTMLDivElement;
+	// The keyboard-shortcut overlay (Mod+/ or the header button), or null when closed.
+	private helpEl: HTMLDivElement | null = null;
 	// The row index currently carrying is-selected in the DOM, so a selection move
 	// only restyles the two affected rows instead of all of them. -1 whenever the
 	// list holds no real rows (empty/loading/skeletons).
@@ -159,6 +162,11 @@ export class SpotlightModal extends Modal {
 			drillFile: () => this.modes.drillFile,
 			activeWorkflowId: () => this.modes.activeWorkflowId,
 			setBadge: (text, cls) => setModeBadge(this.modeBadgeEl, text, cls),
+			// The large field, not just the small badge, must say what the active mode
+			// searches — otherwise it invites "search notes" while Capture mode appends.
+			setPlaceholder: (mode) => {
+				this.inputEl.placeholder = getModePlaceholder(mode);
+			},
 			renderResults: () => this.renderResults(),
 			renderEmptyState: (icon, title, desc) => this.renderEmptyState(icon, title, desc),
 			renderLoading: () => this.renderLoading(),
@@ -211,6 +219,7 @@ export class SpotlightModal extends Modal {
 			proUnlockLead: `Unlock ${PRO_UNLOCK_SUMMARY}.`,
 		});
 		this.modeBadgeEl = refs.modeBadgeEl;
+		this.helpBtn = refs.helpBtn;
 		this.inputEl = refs.inputEl;
 		this.hintEl = refs.hintEl;
 		this.bodyEl = refs.bodyEl;
@@ -220,6 +229,7 @@ export class SpotlightModal extends Modal {
 		this.statusEl = refs.statusEl;
 
 		this.focuser.pendingSelectAll = this.initialQuery.length > 0;
+		this.helpBtn.addEventListener("click", () => this.toggleHelp());
 		this.updateHint();
 
 		// Row interactions (hover/click/star/context-menu) are delegated to the list
@@ -280,9 +290,9 @@ export class SpotlightModal extends Modal {
 		// ourselves and release it in onClose().
 		this.metadataRef = this.app.metadataCache.on("resolved", () => {
 			if (this.search.hasMetadataFilters()) {
-				// A passive index refresh must not move the user's place.
-				this.search.preserveSelection = true;
-				this.search.scheduleSearch();
+				// A passive index refresh must not move the user's place. Pass the intent
+				// through scheduleSearch so a racing keystroke can't inherit it.
+				this.search.scheduleSearch(true);
 			}
 		});
 
@@ -303,6 +313,8 @@ export class SpotlightModal extends Modal {
 		// untracked timers), so release it alongside the others.
 		this.clearDrillTimer();
 		this.focuser.clear();
+		// The overlay is a child of contentEl (emptied below), so just drop the ref.
+		this.helpEl = null;
 		this.preview.unload();
 		this.plugin.onSpotlightClosed(this);
 		this.containerEl.removeClass("vault-spotlight-container");
@@ -376,6 +388,11 @@ export class SpotlightModal extends Modal {
 		if (this.plugin.settings.workflowPresets.length === 0) {
 			this.hintEl.appendText(" · starter workflows in Browse");
 		}
+		// A permanent path back to the full trigger sheet, regardless of open count —
+		// so discoverability never dead-ends once the inline hints condense.
+		this.hintEl.appendText(" · ");
+		this.hintEl.createEl("code", { text: `${mod}+/` });
+		this.hintEl.appendText(" shortcuts");
 	}
 
 	private renderLoading(): void {
@@ -525,7 +542,8 @@ export class SpotlightModal extends Modal {
 		row?.toggleClass("is-starred", item.isStarred);
 		const starBtn = row?.querySelector<HTMLElement>(".vault-spotlight-star-btn");
 		if (starBtn) {
-			setIcon(starBtn, item.isStarred ? "star" : "star-off");
+			// Hollow star for both states; on/off is signalled by colour (see resultRow).
+			setIcon(starBtn, "star");
 			starBtn.setAttr("aria-label", item.isStarred ? "Unstar" : "Star");
 		}
 	}
@@ -573,15 +591,74 @@ export class SpotlightModal extends Modal {
 			createFromQuery: () => void this.modes.createFromQuery(),
 			openActionPalette: () => this.modes.openActionPalette(),
 			escape: () => {
-				if (this.modes.actionContext) this.modes.closeActionPalette();
+				// The help overlay is the outermost transient layer: dismiss it first so
+				// Escape closes the cheatsheet before unwinding action/drill/modal state.
+				if (this.helpEl) this.closeHelp();
+				else if (this.modes.actionContext) this.modes.closeActionPalette();
 				else if (this.modes.drillFile) this.modes.exitDrill();
 				else this.close();
 			},
 			cycleMode: (delta: 1 | -1) => this.modes.cycleMode(delta),
 			saveWorkflow: () => this.workflows.saveCurrentWorkflow(),
+			toggleHelp: () => this.toggleHelp(),
 			toggleCheck: () => this.toggleCheck(),
 			toggleStarSelected: () => this.toggleStarSelected(),
+		}, () => this.helpEl !== null);
+	}
+
+	/** Toggle the keyboard-shortcut overlay (Mod+/ or the header button). */
+	private toggleHelp(): void {
+		if (this.helpEl) this.closeHelp();
+		else this.openHelp();
+	}
+
+	/**
+	 * Mount the shortcut cheatsheet over the modal. The overlay derives its mode
+	 * triggers from the LIVE, user-configurable prefixes so the full vocabulary stays
+	 * reachable forever — the fix for the header hints collapsing after five opens.
+	 */
+	private openHelp(): void {
+		if (this.helpEl) return;
+		const sections = getHelpSections({
+			isPro: this.plugin.settings.isPro,
+			prefixes: this.plugin.settings.modePrefixes,
+			modifierLabel: this.modifierLabel,
+			escapeChar: this.plugin.settings.escapeChar,
 		});
+		this.helpEl = renderHelpOverlay(this.contentEl, sections, {
+			onClose: () => this.closeHelp(),
+			// Only offer to silence the inline hints when they're actually still showing
+			// (i.e. the user hasn't already dismissed them), and actually persist it —
+			// wiring the onboardingDismissed flag that previously had no writer.
+			onDismissHints: this.plugin.settings.onboardingDismissed
+				? null
+				: () => this.dismissInlineHints(),
+		});
+		this.helpBtn.addClass("is-active");
+		this.helpBtn.setAttr("aria-expanded", "true");
+		// Move focus into the dialog so a screen reader announces it and Tab reaches the
+		// Close / Hide-inline-hints controls (the scope's own keys are inert while it's
+		// open). Focus returns to the input in closeHelp().
+		this.helpEl.querySelector<HTMLElement>(".vault-spotlight-help-close")?.focus();
+	}
+
+	private closeHelp(): void {
+		if (!this.helpEl) return;
+		this.helpEl.remove();
+		this.helpEl = null;
+		this.helpBtn.removeClass("is-active");
+		this.helpBtn.setAttr("aria-expanded", "false");
+		this.focusInput();
+	}
+
+	/** Persist the "don't show the first-run inline hints" choice and collapse them
+	 * now, then rebuild the overlay so its dismiss button disappears. */
+	private dismissInlineHints(): void {
+		this.plugin.settings.onboardingDismissed = true;
+		void this.plugin.saveSettings();
+		this.updateHint();
+		this.closeHelp();
+		this.openHelp();
 	}
 
 	private focusInput(): void {

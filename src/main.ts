@@ -213,9 +213,10 @@ export default class VaultSpotlightPlugin extends Plugin {
 				this.openSpotlight(q, isSpotlightMode(mode) ? mode : "files");
 			},
 			search: async (query: string) => {
-				// Content search is a Pro feature; the API honors the same gate.
+				// Content search is a Pro feature; the API honors the same gate and
+				// resolves [] on the free tier (the documented contract — no console
+				// noise on a normal, non-error code path).
 				if (!this.settings.isPro) {
-					console.warn("[VaultSpotlight] api.search requires a Pro license.");
 					return [];
 				}
 				const results = await this.contentSearcher.search(query, {

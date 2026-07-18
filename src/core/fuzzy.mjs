@@ -1,3 +1,8 @@
+// Any code unit outside 7-bit ASCII. Gates the lowercase/fold fast paths: within
+// ASCII, an equal-length transform is guaranteed to be a 1:1 index map; outside it,
+// it is not (final sigma, cancelling fold expand/contract) — see lowerWithMap/foldWithMap.
+const NON_ASCII = /[^\x00-\x7f]/;
+
 export function fuzzyMatch(query, text, options = {}) {
 	// An empty/whitespace-only query is "no match", not a zero-score match: every
 	// caller treats a falsy return as "skip", but a truthy {score:0} object would
@@ -30,7 +35,9 @@ export function fuzzyMatch(query, text, options = {}) {
 
 	for (let ti = 0; ti < t.length && qi < q.length; ti++) {
 		if (t[ti] === q[qi]) {
-			indices.push(indexMap[ti]);
+			// indexMap is null on the fast path (length-preserving transform), where the
+			// folded index IS the original index — see lowerWithMap/foldWithMap.
+			indices.push(indexMap ? indexMap[ti] : ti);
 			if (lastMatch === ti - 1) {
 				score += 8;
 			} else if (ti === 0 || /[\s\-_/]/.test(t[ti - 1] ?? "")) {
@@ -67,6 +74,15 @@ export function fuzzyMatch(query, text, options = {}) {
  */
 function foldWithMap(value) {
 	const str = String(value);
+	// Fast path: fold the whole string at once and skip the per-character index map.
+	// Restricted to ASCII: outside ASCII, a length-preserving fold can still shift
+	// indices when an expansion and a contraction cancel out (e.g. a base char that
+	// keeps a non-diacritic combining mark alongside a standalone diacritic that folds
+	// to nothing), which would misplace highlight marks. No ASCII code point expands
+	// under stripDiacritics+lowercase, so within ASCII equal length ⇒ a true 1:1 map.
+	// Any non-ASCII text falls through to the already-correct mapped path.
+	const bulk = stripDiacritics(str).toLowerCase();
+	if (bulk.length === str.length && !NON_ASCII.test(str)) return { folded: bulk, map: null };
 	let folded = "";
 	const map = [];
 	for (let i = 0; i < str.length; i++) {
@@ -89,6 +105,13 @@ function foldWithMap(value) {
  */
 function lowerWithMap(value) {
 	const str = String(value);
+	// Fast path: lowercase the whole string at once and skip the per-character index
+	// map. Restricted to ASCII: whole-string toLowerCase can differ from per-character
+	// lowercasing outside ASCII (e.g. Greek context-sensitive final sigma Σ→ς, which is
+	// length-preserving yet changes which characters match), so a non-ASCII string must
+	// use the per-character path to stay byte-for-byte identical to the old behaviour.
+	const bulk = str.toLowerCase();
+	if (bulk.length === str.length && !NON_ASCII.test(str)) return { folded: bulk, map: null };
 	let folded = "";
 	const map = [];
 	for (let i = 0; i < str.length; i++) {

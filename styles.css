@@ -101,6 +101,8 @@
 .vault-spotlight-modal {
 	display: flex;
 	flex-direction: column;
+	/* Anchor the absolutely-positioned help overlay to the modal, not the viewport. */
+	position: relative;
 	min-height: var(--vs-modal-min-height, 480px);
 	max-height: var(--vs-modal-max-height, min(80dvh, 760px));
 	background: var(--background-primary);
@@ -151,6 +153,191 @@
 .vault-spotlight-mode-badge.is-content {
 	background: color-mix(in srgb, var(--color-blue) 16%, transparent);
 	color: var(--color-blue);
+}
+
+/* Title-row right cluster: the help button and the mode badge. */
+.vault-spotlight-title-aside {
+	display: flex;
+	align-items: center;
+	gap: var(--vs-sp-3);
+	flex-shrink: 0;
+}
+
+/* Header help button — opens the shortcut cheatsheet (also bound to Mod+/). */
+.vault-spotlight-help-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 26px;
+	padding: 0;
+	border: none;
+	border-radius: var(--vs-radius-sm);
+	background: transparent;
+	color: var(--text-muted);
+	cursor: pointer;
+	box-shadow: none;
+	flex-shrink: 0;
+	transition: background 0.15s ease, color 0.15s ease;
+}
+
+.vault-spotlight-help-btn .svg-icon {
+	width: 16px;
+	height: 16px;
+}
+
+.vault-spotlight-help-btn:hover,
+.vault-spotlight-help-btn.is-active {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.vault-spotlight-help-btn:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+}
+
+/* Keyboard-shortcut overlay — laid over the whole modal (Mod+/ or the header
+   button). A modeless dialog: the cheatsheet plus a close button. Its triggers
+   are built from the LIVE mode prefixes so the vocabulary stays reachable forever. */
+.vault-spotlight-help {
+	position: absolute;
+	inset: 0;
+	z-index: 5;
+	display: flex;
+	padding: var(--vs-sp-6);
+	background: color-mix(in srgb, var(--background-primary) 82%, transparent);
+	animation: vault-spotlight-help-in 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes vault-spotlight-help-in {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+
+.vault-spotlight-help-panel {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	border-radius: var(--vs-radius-md);
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.5);
+	overflow: hidden;
+}
+
+.vault-spotlight-help-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--vs-sp-4);
+	padding: var(--vs-sp-4) var(--vs-sp-6);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.vault-spotlight-help-title {
+	font-size: var(--vs-fz-meta);
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	color: var(--text-normal);
+}
+
+.vault-spotlight-help-close {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 26px;
+	padding: 0;
+	border: none;
+	border-radius: var(--vs-radius-sm);
+	background: transparent;
+	color: var(--text-muted);
+	cursor: pointer;
+	box-shadow: none;
+}
+
+.vault-spotlight-help-close:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.vault-spotlight-help-close:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+}
+
+.vault-spotlight-help-grid {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--vs-sp-5) var(--vs-sp-7);
+	padding: var(--vs-sp-6);
+}
+
+.vault-spotlight-help-section-title {
+	font-size: var(--vs-fz-badge);
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--text-muted);
+	margin-bottom: var(--vs-sp-2);
+}
+
+.vault-spotlight-help-row {
+	display: flex;
+	align-items: baseline;
+	gap: var(--vs-sp-4);
+	padding: 3px 0;
+}
+
+.vault-spotlight-help-keys {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	min-width: 78px;
+}
+
+.vault-spotlight-help-label {
+	flex: 1;
+	min-width: 0;
+	font-size: var(--vs-fz-meta);
+	line-height: 1.4;
+	color: var(--text-normal);
+}
+
+.vault-spotlight-help-foot {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--vs-sp-4);
+	padding: var(--vs-sp-3) var(--vs-sp-6);
+	border-top: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	font-size: var(--vs-fz-micro);
+	color: var(--text-muted);
+}
+
+.vault-spotlight-help-foot-hint {
+	font-size: var(--vs-fz-micro);
+	color: var(--text-muted);
+}
+
+.vault-spotlight-help-dismiss {
+	font-size: var(--vs-fz-micro);
+}
+
+/* On a narrow (mobile) modal the two-column cheatsheet crushes the labels; stack
+   it to a single column so every shortcut stays readable. */
+@media (max-width: 600px) {
+	.vault-spotlight-help-grid {
+		grid-template-columns: 1fr;
+	}
 }
 
 .vault-spotlight-input-wrap {
@@ -209,10 +396,11 @@
 	color: var(--text-muted);
 }
 
-/* One keycap treatment everywhere: the header hints and the footer both use
-   this bordered cap so keyboard keys never render two different ways. */
+/* One keycap treatment everywhere: the header hints, the footer, and the help
+   overlay all use this bordered cap so keyboard keys never render two different ways. */
 .vault-spotlight-hint code,
-.vault-spotlight-footer kbd {
+.vault-spotlight-footer kbd,
+.vault-spotlight-help-keys kbd {
 	font-size: var(--vs-fz-badge);
 	font-family: var(--font-monospace);
 	padding: 1px 6px;
@@ -298,7 +486,10 @@
 	align-items: center;
 	gap: var(--vs-sp-5);
 	padding: 9px var(--vs-sp-5);
-	margin-bottom: var(--vs-radius-xs);
+	/* Inter-row gap on the spacing ramp, not the radius ramp: it used to borrow
+	   --vs-radius-xs, so retuning the selection-bar/mark corner radius would have
+	   silently changed row rhythm. The two token scales are now independent. */
+	margin-bottom: var(--vs-sp-1);
 	cursor: pointer;
 	border-radius: var(--vs-radius-md);
 	border: 1px solid transparent;
@@ -342,7 +533,18 @@
 
 .vault-spotlight-item.is-checked {
 	background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-modifier-hover));
-	border-color: var(--interactive-accent);
+	/* Softer than the selected row's own border so a checked-but-not-current row
+	   never reads as more "current" than the keyboard cursor. The check glyph, not a
+	   loud border, is what marks a row as checked. */
+	border-color: color-mix(in srgb, var(--interactive-accent) 45%, transparent);
+}
+
+/* A row that is BOTH the keyboard cursor and checked keeps the selected fill +
+   accent bar (this higher-specificity rule wins regardless of source order), so
+   the selection is never out-shouted by the multi-select highlight. */
+.vault-spotlight-item.is-selected.is-checked {
+	background: var(--vs-selected-bg);
+	border-color: color-mix(in srgb, var(--interactive-accent) 22%, transparent);
 }
 
 .vault-spotlight-item-icon-wrap {
@@ -357,7 +559,10 @@
 }
 
 .vault-spotlight-item.is-selected .vault-spotlight-item-icon-wrap {
-	color: var(--interactive-accent);
+	/* --vs-accent-fg (accent mixed toward the body colour), not raw --interactive-accent:
+	   the glyph sits on the accent-tinted --vs-selected-bg, where a flat accent collapses
+	   to ~1.5:1 on pale accents — the exact case that token was created to fix. */
+	color: var(--vs-accent-fg);
 }
 
 /* Emphasis states (calculator, create-new) keep the framed tile so they read
@@ -419,6 +624,25 @@
 	background: var(--background-modifier-hover);
 	color: var(--text-muted);
 	flex-shrink: 0;
+	/* Cap the badge and ellipsise its own text rather than letting a long pill
+	   (e.g. an aliased command name) shrink the title — the title is what the user
+	   scans, so it must win the horizontal contest. */
+	max-width: 45%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Multi-word state labels ('Recent search', 'Create daily note') read badly as
+   cramped 10px uppercase; sentence-case them. The short qualifiers the badge
+   system was designed for (type/count/engine) keep the uppercase treatment. */
+.vault-spotlight-item-badge.is-phrase {
+	text-transform: none;
+	letter-spacing: normal;
+	/* Phrase badges are a small, bounded set of short developer-defined labels
+	   (e.g. "Create daily note"), not arbitrary user text, so they opt out of the
+	   title-protecting cap rather than ellipsising to "Create dail…". */
+	max-width: none;
 }
 
 .vault-spotlight-item-badge.is-action {
@@ -885,6 +1109,14 @@
 	color: var(--text-normal);
 }
 
+/* A real interactive control, so it needs a keyboard focus ring — not only a hover
+   state — for keyboard and high-contrast users reaching it via Tab. */
+.vault-spotlight-preview-copy:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+	color: var(--text-normal);
+}
+
 .vault-spotlight-preview-copy .svg-icon {
 	width: 16px;
 	height: 16px;
@@ -981,6 +1213,11 @@ input.vault-spotlight-prefix-input {
 
 	/* No summon entrance — the modal simply appears. */
 	.modal-container.vault-spotlight-container .modal {
+		animation: none;
+	}
+
+	/* The help overlay appears without a fade. */
+	.vault-spotlight-help {
 		animation: none;
 	}
 

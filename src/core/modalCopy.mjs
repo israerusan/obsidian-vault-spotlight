@@ -77,6 +77,93 @@ export function getPreviewFocusText(item) {
 }
 
 /**
+ * The input placeholder for the active mode. The tiny mode badge is easy to miss,
+ * so the large field itself should say what Enter will do — in Capture mode the
+ * default "Search notes…" copy is an outright lie. Falls back to the files prompt
+ * for any unknown mode so a new mode can never leave the field blank.
+ */
+const MODE_PLACEHOLDERS = {
+	files: "Search notes, tags, or properties…",
+	content: "Search inside your notes…",
+	headings: "Jump to a heading…",
+	symbols: "Jump to a symbol in this note…",
+	commands: "Search commands…",
+	links: "Find linked notes…",
+	editors: "Switch to an open tab…",
+	folders: "Jump to a folder…",
+	capture: "Capture to your daily note…",
+	snippets: "Insert a snippet…",
+};
+
+export function getModePlaceholder(mode) {
+	return MODE_PLACEHOLDERS[mode] ?? MODE_PLACEHOLDERS.files;
+}
+
+/**
+ * Build the keyboard-shortcut cheatsheet shown by the in-modal help overlay
+ * (Mod+/). Pure so the content is unit-tested without spinning up the modal:
+ * the whole point of the overlay is that the mode-trigger vocabulary stays
+ * reachable forever, not only during the first five opens, so it derives every
+ * trigger from the live, user-configurable prefixes rather than hard-coded glyphs.
+ */
+export function getHelpSections({ isPro = false, prefixes = {}, modifierLabel = "Ctrl", escapeChar = "\\" } = {}) {
+	const mod = modifierLabel;
+	const trigger = (mode, label) => ({ keys: [prefixes[mode] ?? ""], label, proOnly: PRO_ONLY_MODES.has(mode) });
+	const sections = [
+		{
+			title: "Navigate",
+			entries: [
+				{ keys: ["↑", "↓"], label: "Move selection" },
+				{ keys: [mod, "N"], label: "Down / up (also Ctrl+P)" },
+				{ keys: ["PgUp", "PgDn"], label: "Jump a page" },
+				{ keys: ["Home", "End"], label: "First / last result" },
+				{ keys: ["Tab"], label: "Next mode" },
+				{ keys: ["Shift", "Tab"], label: "Previous mode" },
+			],
+		},
+		{
+			title: "Act on a result",
+			entries: [
+				{ keys: ["↵"], label: "Open" },
+				{ keys: [mod, "↵"], label: "Open in new tab" },
+				{ keys: [mod, "Alt", "↵"], label: "Open in split" },
+				{ keys: ["Alt", "↵"], label: "Result actions menu" },
+				{ keys: ["Shift", "↵"], label: "Create a new note" },
+				{ keys: [mod, "K"], label: "Action palette" },
+				{ keys: [mod, "S"], label: "Save this search as a workflow" },
+			],
+		},
+		{
+			title: "Modes — type a trigger to switch",
+			entries: [
+				trigger("content", "Search inside notes"),
+				trigger("headings", "Jump to a heading"),
+				trigger("commands", "Run a command"),
+				trigger("symbols", "Outline of the active note"),
+				trigger("links", "Backlinks and outlinks"),
+				trigger("editors", "Open tabs and panes"),
+				trigger("folders", "Find and browse a folder"),
+				trigger("capture", "Quick-capture a thought"),
+				trigger("snippets", "Insert a snippet"),
+				{ keys: ["#tag"], label: "Filter by tag" },
+				{ keys: ["2+2"], label: "Inline calculator" },
+				{ keys: [escapeChar], label: "Search a trigger literally" },
+			],
+		},
+	];
+	if (isPro) {
+		sections.push({
+			title: "Pro",
+			entries: [
+				{ keys: [mod, "D"], label: "Star / unstar the selected note" },
+				{ keys: [mod, "Space"], label: "Multi-select for batch actions" },
+			],
+		});
+	}
+	return sections;
+}
+
+/**
  * Return only the shortcuts that are actually useful for the currently
  * highlighted row, so the footer never advertises dead or misleading keys.
  */

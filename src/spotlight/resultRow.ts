@@ -73,7 +73,10 @@ export function renderResultRow(
 		// as scannable as the filename mode (and matches the preview pane's hit mark).
 		const snippetEl = body.createDiv({ cls: "vault-spotlight-item-snippet" });
 		renderHighlightedText(snippetEl, item.snippet, item.matchIndices);
-		body.createDiv({ cls: "vault-spotlight-item-meta", text: item.file.path });
+		// Parent folder only, not the full path: the basename is already the title and
+		// the icon marks the kind, so the full path just restated it and pushed the
+		// (already 2-line) content row taller than every other mode's single meta line.
+		body.createDiv({ cls: "vault-spotlight-item-meta", text: item.file.parent?.path || "/" });
 	} else if (item.kind === "heading") {
 		setIcon(iconWrap, "heading");
 		renderHighlightedText(title, item.heading, item.matchIndices);
@@ -118,22 +121,22 @@ export function renderResultRow(
 	} else if (item.kind === "history") {
 		setIcon(iconWrap, "history");
 		title.setText(item.query);
-		titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: "Recent search" });
+		titleRow.createSpan({ cls: "vault-spotlight-item-badge is-phrase", text: "Recent search" });
 		body.createDiv({ cls: "vault-spotlight-item-meta", text: "Press ↵ to search again" });
 	} else if (item.kind === "collection") {
 		setIcon(iconWrap, item.isPinned ? "star" : "search");
 		title.setText(item.name);
-		titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isPinned ? "Pinned collection" : "Smart collection" });
+		titleRow.createSpan({ cls: "vault-spotlight-item-badge is-phrase", text: item.isPinned ? "Pinned collection" : "Smart collection" });
 		body.createDiv({ cls: "vault-spotlight-item-meta", text: item.query });
 	} else if (item.kind === "profile") {
 		setIcon(iconWrap, item.isActive ? "check-circle" : "sliders-horizontal");
 		title.setText(item.name);
-		titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isActive ? "Active profile" : "Search profile" });
+		titleRow.createSpan({ cls: "vault-spotlight-item-badge is-phrase", text: item.isActive ? "Active profile" : "Search profile" });
 		body.createDiv({ cls: "vault-spotlight-item-meta", text: `${item.defaultMode}${item.defaultQuery ? ` · ${item.defaultQuery}` : ""}` });
 	} else if (item.kind === "workflow") {
 		setIcon(iconWrap, item.isPinned ? "sparkles" : "play-circle");
 		title.setText(item.name);
-		titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.isStarter ? "Starter workflow" : "Workflow" });
+		titleRow.createSpan({ cls: "vault-spotlight-item-badge is-phrase", text: item.isStarter ? "Starter workflow" : "Workflow" });
 		if (item.rankingMode) {
 			titleRow.createSpan({ cls: "vault-spotlight-item-badge is-type", text: item.rankingMode });
 		}
@@ -141,7 +144,7 @@ export function renderResultRow(
 	} else if (item.kind === "action") {
 		setIcon(iconWrap, item.action.requiresPro ? "sparkles" : "bolt");
 		title.setText(item.action.name);
-		titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.action.requiresPro ? "Pro action" : "Action" });
+		titleRow.createSpan({ cls: item.action.requiresPro ? "vault-spotlight-item-badge is-phrase" : "vault-spotlight-item-badge", text: item.action.requiresPro ? "Pro action" : "Action" });
 		body.createDiv({ cls: "vault-spotlight-item-meta", text: item.action.description });
 	} else if (item.kind === "calc") {
 		row.addClass("is-calc");
@@ -154,7 +157,7 @@ export function renderResultRow(
 		setIcon(iconWrap, "calendar-days");
 		title.setText(item.label);
 		titleRow.createSpan({
-			cls: item.exists ? "vault-spotlight-item-badge is-active" : "vault-spotlight-item-badge is-action",
+			cls: item.exists ? "vault-spotlight-item-badge is-phrase is-active" : "vault-spotlight-item-badge is-phrase is-action",
 			text: item.exists ? "Daily note" : "Create daily note",
 		});
 		body.createDiv({ cls: "vault-spotlight-item-meta", text: item.path });
@@ -256,7 +259,6 @@ export function renderResultList(
 		});
 
 		if (ctx.isPro && item.kind === "file") {
-			const starItem = item;
 			// A focusable/interactive descendant is invalid inside role=option, so
 			// this stays a mouse-only affordance (tabindex -1, hidden from AT); the
 			// keyboard/AT path to star is the Mod+D shortcut.
@@ -264,7 +266,11 @@ export function renderResultList(
 				cls: "vault-spotlight-star-btn",
 				attr: { type: "button", tabindex: "-1", "aria-hidden": "true" },
 			});
-			setIcon(starBtn, starItem.isStarred ? "star" : "star-off");
+			// Always the hollow "star" glyph: the starred vs unstarred state is carried
+			// by colour/opacity (faint outline → filled yellow), the conventional
+			// add-to-favourites affordance. The "star-off" (slashed) icon read as
+			// "starring disabled", not "not yet starred".
+			setIcon(starBtn, "star");
 		}
 	});
 
