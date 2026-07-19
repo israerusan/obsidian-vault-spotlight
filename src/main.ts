@@ -584,6 +584,7 @@ export default class VaultSpotlightPlugin extends Plugin {
 		// Delight-layer settings: coerce to safe shapes.
 		this.settings.enableCalculator = this.settings.enableCalculator !== false;
 		this.settings.enableDateJump = this.settings.enableDateJump !== false;
+		this.settings.showHomeActions = this.settings.showHomeActions !== false;
 		if (typeof this.settings.currencyRates !== "string") this.settings.currencyRates = "";
 		if (typeof this.settings.captureInboxPath !== "string") this.settings.captureInboxPath = "";
 		if (typeof this.settings.captureHeading !== "string") this.settings.captureHeading = "";

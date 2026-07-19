@@ -16,6 +16,7 @@ import { evaluateExpression, parseCurrencyRates } from "../core/calculator.mjs";
 import { parseNaturalDate } from "../core/naturalDates.mjs";
 import { describeCaptureTarget } from "../core/modalCopy.mjs";
 import { isProOnlyMode } from "../core/featureGates.mjs";
+import { homeActionDescriptors } from "../core/homeActions.mjs";
 import {
 	itemFile,
 	type ResultItem,
@@ -427,6 +428,23 @@ export class SearchController {
 					// Saved objects (Workflows first, then advanced profiles, then legacy
 					// collections) sit above the file list — see buildSavedObjectItems.
 					this.items = [...buildSavedObjectItems(this.plugin.settings, isPro), ...this.items];
+
+					// Quick actions cap the top of the home view so the launcher offers an
+					// immediate action, not just a list, the moment it opens. Free — capture
+					// and daily-note jump are both core. Placed above the saved objects so
+					// the default (index 0) selection is the non-destructive capture row.
+					if (this.plugin.settings.showHomeActions) {
+						const quickActions: ResultItem[] = homeActionDescriptors({
+							enableDateJump: this.plugin.settings.enableDateJump,
+						}).map((descriptor) => ({
+							kind: "quickaction",
+							action: descriptor.action,
+							label: descriptor.label,
+							description: descriptor.description,
+							icon: descriptor.icon,
+						}));
+						this.items = [...quickActions, ...this.items];
+					}
 				}
 
 				// Ambient calculator / date-jump: when the query is a calculation or

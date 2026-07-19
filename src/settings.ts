@@ -140,6 +140,9 @@ export interface VaultSpotlightSettings {
 	enableCalculator: boolean;
 	currencyRates: string;
 	enableDateJump: boolean;
+	// Show the "Quick actions" cluster (Quick capture, Today's daily note) at the top
+	// of the empty-query home view.
+	showHomeActions: boolean;
 	captureInboxPath: string;
 	captureMode: "append" | "prepend";
 	captureHeading: string;
@@ -192,6 +195,7 @@ export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	enableCalculator: true,
 	currencyRates: "",
 	enableDateJump: true,
+	showHomeActions: true,
 	captureInboxPath: "",
 	captureMode: "append",
 	captureHeading: "",
@@ -450,6 +454,16 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.enableDateJump).onChange((value) => {
 					this.plugin.settings.enableDateJump = value;
+					void this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Home quick actions")
+			.setDesc("Show a Quick actions row (Quick capture, Today's daily note) at the top of the launcher when it opens on an empty query. Today's daily note follows the date-jump setting above.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.showHomeActions).onChange((value) => {
+					this.plugin.settings.showHomeActions = value;
 					void this.plugin.saveSettings();
 				})
 			);

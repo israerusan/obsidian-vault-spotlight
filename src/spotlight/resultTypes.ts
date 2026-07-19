@@ -128,6 +128,17 @@ export type ResultItem =
 			action: SpotlightAction;
 	  }
 	| {
+			// The home "Quick actions" cluster (empty-query browse only). Data, not a
+			// closure: ModeController.activateSelection maps `action` to the side effect
+			// (capture = enter capture mode; daily-today = open/create today's note), so
+			// activation stays in one place — the same pattern as folder/history rows.
+			kind: "quickaction";
+			action: "capture" | "daily-today";
+			label: string;
+			description: string;
+			icon: string;
+	  }
+	| {
 			kind: "create";
 			name: string;
 	  }

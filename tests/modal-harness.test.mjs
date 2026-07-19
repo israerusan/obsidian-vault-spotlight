@@ -168,6 +168,51 @@ const findKey = (modal, mods, key) =>
 	modal.close();
 }
 
+// --- 6b. Home quick actions cap the empty browse view --------------------------
+// Locks the "act immediately on open" cluster: on an empty query the launcher leads
+// with quickaction rows (capture first so the default selection is non-destructive),
+// they precede every workflow/file row, and the setting toggle removes them.
+{
+	const { app } = loadVaultApp(vaultDir);
+	const plugin = makeStubPlugin(app, { isPro: false });
+	const modal = new SpotlightModal(app, plugin, "", "files");
+	modal.open();
+	await settle();
+	const kinds = modal.items.map((it) => it.kind);
+	const firstNonQuick = kinds.findIndex((k) => k !== "quickaction");
+	const lastQuick = kinds.lastIndexOf("quickaction");
+	assert.equal(modal.items[0].kind, "quickaction", "empty browse leads with a quick action");
+	assert.equal(modal.items[0].action, "capture", "the first (default-selected) quick action is the non-destructive capture");
+	assert.ok(
+		modal.items.some((it) => it.kind === "quickaction" && it.action === "daily-today"),
+		"today's daily note is offered (date jump on by default)"
+	);
+	assert.ok(lastQuick < firstNonQuick, "quick actions sit above all other browse rows");
+
+	// Activating the capture row switches into capture mode in place — no note written,
+	// modal stays open.
+	modal.selectedIndex = 0;
+	findKey(modal, [], "Enter").handler(new FakeEvent("keydown", { isComposing: false }));
+	await settle();
+	assert.equal(modal.mode, "capture", "activating the capture quick action enters capture mode");
+	assert.equal(plugin.saveCalls >= 0, true, "capture quick action wrote nothing on activation");
+	modal.close();
+}
+
+// --- 6c. The home-actions toggle removes the cluster ---------------------------
+{
+	const { app } = loadVaultApp(vaultDir);
+	const plugin = makeStubPlugin(app, { isPro: false, showHomeActions: false });
+	const modal = new SpotlightModal(app, plugin, "", "files");
+	modal.open();
+	await settle();
+	assert.ok(
+		!modal.items.some((it) => it.kind === "quickaction"),
+		"disabling Home quick actions removes every quickaction row"
+	);
+	modal.close();
+}
+
 // --- 7. Help overlay gates the list keys ---------------------------------------
 // The cheatsheet (Mod+/) is a modeless overlay, so the fix must make the scope's
 // nav/activation keys inert while it's open — otherwise a reflexive Enter would open

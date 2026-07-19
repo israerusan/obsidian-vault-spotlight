@@ -43,6 +43,7 @@ export function getShortcutHints(args: {
 		| "datejump"
 		| "capture"
 		| "snippet"
+		| "quickaction"
 		| null;
 	defaultNewTab?: boolean;
 	isPro?: boolean;

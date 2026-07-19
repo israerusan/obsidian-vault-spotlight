@@ -166,6 +166,11 @@ export function renderResultRow(
 		title.setText(item.text || "Type something to capture…");
 		titleRow.createSpan({ cls: "vault-spotlight-item-badge", text: item.label });
 		body.createDiv({ cls: "vault-spotlight-item-meta", text: item.description });
+	} else if (item.kind === "quickaction") {
+		setIcon(iconWrap, item.icon);
+		title.setText(item.label);
+		titleRow.createSpan({ cls: "vault-spotlight-item-badge is-action", text: "Quick action" });
+		body.createDiv({ cls: "vault-spotlight-item-meta", text: item.description });
 	} else if (item.kind === "snippet") {
 		setIcon(iconWrap, "clipboard-type");
 		renderHighlightedText(title, item.name, item.matchIndices);
@@ -186,6 +191,7 @@ export function renderResultRow(
  * collections) and the file browse buckets (Starred / Bookmarks / Recent / All).
  */
 function browseSection(item: ResultItem, isEmptyQuery: boolean): string | null {
+	if (item.kind === "quickaction" && isEmptyQuery) return "Quick actions";
 	if (item.kind === "workflow" && isEmptyQuery) return "Workflows";
 	if (item.kind === "profile" && isEmptyQuery) return "Search profiles";
 	if (item.kind === "collection" && isEmptyQuery) return "Smart collections";

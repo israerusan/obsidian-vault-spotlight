@@ -221,6 +221,11 @@ export function getShortcutHints({ itemKind = null, defaultNewTab = false, isPro
 		hints.splice(1, 0, { keys: ["↵"], label: "insert" });
 	} else if (itemKind === "create") {
 		hints.splice(1, 0, { keys: ["↵"], label: "create note" });
+	} else if (itemKind === "quickaction") {
+		// Home quick actions have no action palette (see actionPaletteKinds), so just
+		// the confirm chip. The verb differs per action (capture vs open daily note),
+		// so "run" is the honest generic label for the shared row kind.
+		hints.splice(1, 0, { keys: ["↵"], label: "run" });
 	} else {
 		hints.splice(1, 0,
 			{ keys: ["↵"], label: "open" },

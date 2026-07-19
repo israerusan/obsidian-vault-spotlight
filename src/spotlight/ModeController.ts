@@ -233,6 +233,25 @@ export class ModeController {
 			return;
 		}
 
+		if (selected.kind === "quickaction") {
+			if (selected.action === "capture") {
+				// Enter capture mode in place (like the folder-browse branch): the query
+				// clears and the capture rows appear, so the user types their note and
+				// confirms. No close — nothing has been written yet.
+				this._drillFile = null;
+				this._mode = "capture";
+				this.host.setQuery("");
+				this.host.focusInput();
+				this.host.runSearch();
+				return;
+			}
+			// daily-today: open (or create) today's daily note. resolveDatePath formats
+			// the date, so any timestamp within today resolves to the same note.
+			this.host.close();
+			await this.host.capture.openOrCreateDatedNote(Date.now());
+			return;
+		}
+
 		if (selected.kind === "history") {
 			// Re-run a past search without leaving the modal.
 			this.host.setQuery(selected.query);
@@ -398,7 +417,7 @@ export class ModeController {
 	}
 
 	openActionPalette(context: ResultItem | null = this.host.selectedItem()): void {
-		if (!context || context.kind === "action" || context.kind === "history" || context.kind === "create") return;
+		if (!context || context.kind === "action" || context.kind === "history" || context.kind === "create" || context.kind === "quickaction") return;
 		this._actionContext = context;
 		this._actionReturnQuery = this.host.inputValue();
 		this._actionReturnMode = this._mode;

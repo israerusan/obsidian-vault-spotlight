@@ -3,6 +3,18 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.15.0] - 2026-07-19
+
+### Added
+
+- **Home quick actions.** Opening the launcher on an empty query now leads with a
+  *Quick actions* row — **Quick capture** (drops you into capture mode to jot a line
+  into your daily note or inbox) and **Today's daily note** (opens or creates it) —
+  so Spotlight offers something to *do* the moment it opens, not just a list to scroll.
+  Capture sits first so a reflexive `↵` on an empty launcher does nothing destructive.
+  Toggle it under Settings → *Home quick actions*; the daily-note action follows your
+  existing date-jump setting.
+
 ## [2.14.0] - 2026-07-18
 
 ### Added
