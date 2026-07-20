@@ -1062,6 +1062,25 @@
 	overscroll-behavior: contain;
 	padding: var(--vs-sp-6) var(--vs-sp-8);
 	background: var(--background-primary);
+	/* The body carries `markdown-rendered`, so banner plugins / CSS snippets
+	   (Banners, Pixel Banner, custom `img[src*="banner"]` rules) inject an
+	   ABSOLUTELY- or FIXED-positioned banner into the rendered note. Without a
+	   containing block here it resolves against the modal and floats up over the
+	   header + results list, covering the rows and swallowing their clicks (the
+	   note becomes unselectable). `position: relative` + `contain: layout paint`
+	   makes this pane the containing block for absolute AND fixed descendants and
+	   clips them to its box, so any banner stays inside the preview. */
+	position: relative;
+	contain: layout paint;
+}
+
+/* Belt-and-braces: even a banner element that positions itself must not tower
+   over the preview. Cap injected banners to the pane so the excerpt below stays
+   visible. (Plain body images are capped by the `img` rule further down.) */
+.vault-spotlight-preview-body :where(.obsidian-banner, .obsidian-banner-wrapper, .pixel-banner-image, [class*="banner"]) {
+	max-width: 100%;
+	max-height: 220px;
+	height: auto;
 }
 
 /* Title + copy button sit on one row above the divider. */
@@ -1137,6 +1156,9 @@
 
 .vault-spotlight-preview-body img {
 	max-width: 100%;
+	/* Cap tall lead/banner images so one image can't fill the whole pane. */
+	max-height: 220px;
+	height: auto;
 }
 
 .vault-spotlight-preview-hit {

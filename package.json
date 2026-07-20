@@ -1,6 +1,6 @@
 {
   "name": "obsidian-vault-spotlight",
-  "version": "2.15.0",
+  "version": "2.15.1",
   "description": "A keyboard-first command center for Obsidian: fast search, saved workflows, and result actions — find, reopen recurring work, and act without leaving the keyboard",
   "main": "main.js",
   "scripts": {

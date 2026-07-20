@@ -3,6 +3,18 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.15.1] - 2026-07-20
+
+### Fixed
+
+- **Banner notes are selectable again in the Pro preview.** When a highlighted note
+  used a banner (via a banner plugin or CSS snippet), the banner was injected as an
+  absolutely-positioned element into the rendered preview. Because the preview pane
+  wasn't a containing block, the banner escaped it and floated over the header and
+  results list — covering the rows and swallowing their clicks, so you couldn't pick
+  the note. The preview pane now traps and clips any rendered banner inside itself,
+  and caps tall banner/lead images, so the results stay clickable.
+
 ## [2.15.0] - 2026-07-19
 
 ### Added
