@@ -101,6 +101,11 @@ export class SearchController {
 	private loadingTimer: number | null = null;
 	private searchGeneration = 0;
 	private isLoading = false;
+	// True while the Alt+↓ recent-search list is on screen (see showRecentSearches).
+	// It is a transient overlay on top of whatever mode is active: any real search
+	// (typing → runSearch, or an Escape restore) clears it. The view reads this so
+	// Escape restores the live search before it starts unwinding modal state.
+	private showingHistory = false;
 
 	private fileSearcher: FileSearcher;
 	private headingSearcher: HeadingSearcher;
@@ -175,8 +180,53 @@ export class SearchController {
 		this.searchTimer = window.setTimeout(() => void this.runSearch(), SEARCH_DEBOUNCE_MS);
 	}
 
+	get isShowingHistory(): boolean {
+		return this.showingHistory;
+	}
+
+	/**
+	 * Alt+↓: replace the result list with the recent-search history so a past query
+	 * can be re-run without retyping it (the browser / SAP "recent searches" gesture).
+	 * Mode-agnostic and transient — the rows are `history` items whose activation
+	 * already fills the query and re-runs the search (see ModeController). When the
+	 * field already has text, the list is narrowed to matching past queries, so it
+	 * doubles as an autocomplete over what you've searched before.
+	 */
+	showRecentSearches(): void {
+		// Drop any pending debounce so a keystroke that landed just before Alt+↓
+		// can't overwrite the history list a beat later.
+		this.cancelTimers();
+		this.showingHistory = true;
+		this.isLoading = false;
+		const { body } = this.host.resolveQuery(this.host.inputValue());
+		const filter = body.trim().toLowerCase();
+		const all = this.plugin.settings.recentSearches ?? [];
+		const history = filter ? all.filter((entry) => entry.toLowerCase().includes(filter)) : all;
+		this.host.setBadge("Recent", "is-content");
+		this.items = history.map((query) => ({ kind: "history" as const, query }));
+		this.selectedIndex = 0;
+		if (this.items.length === 0) {
+			// Distinguish "you've searched nothing yet" from "nothing matches what you
+			// typed" so the empty state is never misleading.
+			this.host.renderEmptyState(
+				"history",
+				all.length === 0 ? "No recent searches yet" : "No recent searches match",
+				all.length === 0
+					? "Searches you run are remembered here. Press Alt+↓ any time to bring them back."
+					: "None of your recent searches contain that text. Clear the field and press Alt+↓ to see them all."
+			);
+			this.host.updateStatus(0);
+			return;
+		}
+		this.host.renderResults();
+		this.host.updateStatus(this.items.length);
+		this.host.updatePreview();
+	}
+
 	async runSearch(): Promise<void> {
 		const generation = ++this.searchGeneration;
+		// Any real query execution supersedes the transient Alt+↓ history list.
+		this.showingHistory = false;
 		// If this run should keep the user's place (a background re-index), record
 		// the selected row's identity so it can be re-found after the rebuild.
 		const preservedKey = this.preserveSelection ? this.itemKey(this.items[this.selectedIndex]) : null;

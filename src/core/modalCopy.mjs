@@ -115,6 +115,7 @@ export function getHelpSections({ isPro = false, prefixes = {}, modifierLabel = 
 			entries: [
 				{ keys: ["↑", "↓"], label: "Move selection" },
 				{ keys: [mod, "N"], label: "Down / up (also Ctrl+P)" },
+				{ keys: ["Alt", "↓"], label: "Recent searches" },
 				{ keys: ["PgUp", "PgDn"], label: "Jump a page" },
 				{ keys: ["Home", "End"], label: "First / last result" },
 				{ keys: ["Tab"], label: "Next mode" },

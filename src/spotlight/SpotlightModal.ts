@@ -590,10 +590,14 @@ export class SpotlightModal extends Modal {
 			},
 			createFromQuery: () => void this.modes.createFromQuery(),
 			openActionPalette: () => this.modes.openActionPalette(),
+			showHistory: () => this.showHistory(),
 			escape: () => {
 				// The help overlay is the outermost transient layer: dismiss it first so
 				// Escape closes the cheatsheet before unwinding action/drill/modal state.
 				if (this.helpEl) this.closeHelp();
+				// The Alt+↓ recent-search list is the next layer in: Escape dismisses it
+				// back to the live search rather than closing the whole modal.
+				else if (this.search.isShowingHistory) void this.search.runSearch();
 				else if (this.modes.actionContext) this.modes.closeActionPalette();
 				else if (this.modes.drillFile) this.modes.exitDrill();
 				else this.close();
@@ -604,6 +608,18 @@ export class SpotlightModal extends Modal {
 			toggleCheck: () => this.toggleCheck(),
 			toggleStarSelected: () => this.toggleStarSelected(),
 		}, () => this.helpEl !== null);
+	}
+
+	/**
+	 * Alt+↓: surface the recent-search history (the browser / SAP gesture). Inert
+	 * while the help overlay or the action palette owns the list — showing past
+	 * queries mid-action would strand the palette. Drill-in state is left intact:
+	 * Escape restores the live search, which rebuilds whatever mode/drill was active.
+	 */
+	private showHistory(): void {
+		if (this.helpEl || this.modes.actionContext) return;
+		this.focusInput();
+		this.search.showRecentSearches();
 	}
 
 	/** Toggle the keyboard-shortcut overlay (Mod+/ or the header button). */

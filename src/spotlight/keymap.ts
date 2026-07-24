@@ -16,6 +16,7 @@ export interface SpotlightKeymapActions {
 	openContextMenuForSelection(): void;
 	createFromQuery(): void;
 	openActionPalette(): void;
+	showHistory(): void;
 	escape(): void;
 	cycleMode(delta: 1 | -1): void;
 	saveWorkflow(): void;
@@ -58,6 +59,17 @@ export function registerSpotlightScope(
 		if (evt.isComposing || isHelpOpen()) return true;
 		evt.preventDefault();
 		actions.moveSelection(-1);
+		return false;
+	});
+	// Alt+↓ summons the recent-search history — the same gesture that opens the
+	// recent list in a browser search box or SAP field. Mode-agnostic and transient:
+	// the searcher fills the list with past queries, and typing (or Escape) restores
+	// the live search. Registered with the plain ArrowDown handler above so a bare
+	// ↓ still moves the selection (the modifiers arrays match exactly).
+	scope.register(["Alt"], "ArrowDown", (evt) => {
+		if (evt.isComposing || isHelpOpen()) return true;
+		evt.preventDefault();
+		actions.showHistory();
 		return false;
 	});
 	// Jump-to-ends and page navigation for long lists; defer during IME composition.

@@ -3,6 +3,18 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.16.0] - 2026-07-24
+
+### Added
+
+- **Recent searches, on demand (Alt+↓).** Press **Alt+↓** in any mode to replace the
+  results with the queries you've run recently — the same gesture that reopens the
+  recent list in a browser search box or a SAP field. Press `↵` on one to run it
+  again; type to narrow the list to matching past searches (so it doubles as an
+  autocomplete over your own history); press Escape to drop back to the live search.
+  The shortcut is listed in the in-modal cheatsheet (Mod+/). History stays entirely
+  local — nothing leaves your vault.
+
 ## [2.15.1] - 2026-07-20
 
 ### Fixed
