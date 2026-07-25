@@ -165,7 +165,7 @@ export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	licenseKey: "",
 	isPro: false,
 	licenseEmail: "",
-	purchaseUrl: "https://buymeacoffee.com/vaultspotlight",
+	purchaseUrl: "https://buymeacoffee.com/vaultspotlight/e/560202",
 	recentPaths: [],
 	starredPaths: [],
 	maxRecent: 30,

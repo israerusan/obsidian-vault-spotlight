@@ -66,7 +66,7 @@ Free is genuinely useful on day one. Pro adds deeper search, unlimited workflows
 | Workflow scope, aliases & advanced query (OR, filters) | No | Yes |
 | Canvas / PDF / Bases discovery & search | No | Yes |
 
-Purchase: [Buy Me a Coffee — Vault Spotlight Pro](https://buymeacoffee.com/vaultspotlight). License keys are verified **offline** (Ed25519) — no account, server, or subscription.
+Purchase: [Buy Me a Coffee — Vault Spotlight Pro](https://buymeacoffee.com/vaultspotlight/e/560202). License keys are verified **offline** (Ed25519) — no account, server, or subscription.
 
 ## Advanced & automation
 
@@ -84,7 +84,7 @@ Vault Spotlight never phones home. All state lives in the plugin's local `data.j
 
 ## Activate Pro
 
-1. Purchase on [Buy Me a Coffee](https://buymeacoffee.com/vaultspotlight).
+1. Purchase on [Buy Me a Coffee](https://buymeacoffee.com/vaultspotlight/e/560202).
 2. You'll receive a license key by email (usually within 24 hours).
 3. Obsidian → Settings → Vault Spotlight → paste the key. Pro unlocks immediately (offline verification).
 
