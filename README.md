@@ -85,7 +85,7 @@ Vault Spotlight never phones home. All state lives in the plugin's local `data.j
 ## Activate Pro
 
 1. Purchase on [Buy Me a Coffee](https://buymeacoffee.com/vaultspotlight/e/560202).
-2. You'll receive a license key by email (usually within 24 hours).
+2. Your license key is emailed to you **automatically, within seconds** — delivery is fully automated, no waiting.
 3. Obsidian → Settings → Vault Spotlight → paste the key. Pro unlocks immediately (offline verification).
 
 ## Development
