@@ -851,5 +851,25 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			);
 			this.appendUpgrade(usage);
 		}
+
+		// Support links, not promotion: GitHub issues are the only place bugs and
+		// feature requests are tracked. Rendered last so it never pushes real settings
+		// down the tab. window.open (not a raw anchor) so Obsidian hands it to the
+		// system browser on desktop and mobile alike.
+		new Setting(containerEl).setName("Feedback").setHeading();
+
+		new Setting(containerEl)
+			.setName("Bugs and feature requests")
+			.setDesc("Issues and ideas are tracked on GitHub. Opens in your browser.")
+			.addButton((button) =>
+				button.setButtonText("Report a bug").onClick(() => {
+					window.open("https://github.com/israerusan/obsidian-vault-spotlight/issues/new?labels=bug");
+				})
+			)
+			.addButton((button) =>
+				button.setButtonText("Request a feature").onClick(() => {
+					window.open("https://github.com/israerusan/obsidian-vault-spotlight/issues/new?labels=enhancement");
+				})
+			);
 	}
 }
