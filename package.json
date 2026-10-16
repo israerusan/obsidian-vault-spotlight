@@ -17,7 +17,7 @@
     "plugin",
     "search"
   ],
-  "author": "iavil",
+  "author": "Israel Avila",
   "license": "MIT",
   "type": "module",
   "devDependencies": {
