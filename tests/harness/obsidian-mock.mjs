@@ -27,7 +27,18 @@ export class TFile extends TAbstractFile {
 	}
 }
 
-export class TFolder extends TAbstractFile {}
+export class TFolder extends TAbstractFile {
+	constructor(path = "/") {
+		super();
+		this.path = path;
+		this.name = path === "/" ? "" : path.slice(path.lastIndexOf("/") + 1);
+		this.children = [];
+		this.parent = null;
+	}
+	isRoot() {
+		return this.path === "/";
+	}
+}
 export class WorkspaceLeaf {}
 export class App {}
 export class Notice {

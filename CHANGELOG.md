@@ -3,6 +3,29 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Create notes inside a folder (#14).** After browsing into a folder (Enter on a
+  folder in Folders mode), **Shift+Enter** now creates the note in that folder
+  instead of Obsidian's default new-note location — and the `in:"…"` filter no longer
+  leaks into the filename. The "Create …" row shown when a search inside a folder
+  finds nothing targets that folder too. In Folders mode, **Shift+Enter** on a folder
+  asks for a name and creates the note there, and the folder's action palette
+  (Mod+K) gains **New note here**, **Browse folder**, and **Copy path**.
+- **Option to hide keyboard hints (#13).** Settings → Display → *Show keyboard hints*
+  hides the shortcut hints under the search field and the footer shortcut chips. The
+  keyboard button (or Mod+/) still opens the full shortcut list.
+
+### Changed
+
+- **The modal no longer jumps while you type (#12).** It is now anchored a fixed
+  distance from the top of the window and grows downward only, like macOS
+  Spotlight, so the search field and first result stay put as the result count
+  changes. The offset is tunable via the `--vs-modal-top-offset` CSS variable
+  (default `12dvh`). Phones keep Obsidian's own modal positioning.
+
 ## [2.16.2] - 2026-11-22
 
 A hardening and polish release. Every fix below was found in an outside code review and

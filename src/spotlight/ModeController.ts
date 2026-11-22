@@ -1,9 +1,12 @@
-import { App, MarkdownView, Notice, TFile, type WorkspaceLeaf, normalizePath } from "obsidian";
+import { App, MarkdownView, Notice, TFile, TFolder, type WorkspaceLeaf, normalizePath } from "obsidian";
 import type VaultSpotlightPlugin from "../main";
 import { detectModeFromPrefix } from "../core/modeTriggers.mjs";
 import { resolveOpenTargets, type PaneOverride } from "../core/activationIntent.mjs";
 import { cycleMode as cycleModeHelper } from "../core/modalCopy.mjs";
 import { detectSearchIntegrations, type SearchIntegrations } from "../core/integrations.mjs";
+import { resolveCreateTarget } from "../core/createTarget.mjs";
+import { tokenizeQuery } from "../search/fuzzy";
+import { PromptModal } from "./PromptModal";
 import {
 	itemFile,
 	type PaneTarget,
@@ -149,11 +152,63 @@ export class ModeController {
 			this.safeActivate();
 			return;
 		}
-		const { body } = this.resolveQuery(this.host.inputValue());
+		// Folders mode: Shift+Enter on a folder row is "New note here" — the query is
+		// the folder filter text, not a note name, so ask for the name.
+		if (selected?.kind === "folder") {
+			this.promptNewNoteIn(selected.folder.path);
+			return;
+		}
+		const { mode, body } = this.resolveQuery(this.host.inputValue());
 		if (!body) return;
+		// After browsing into a folder (query `in:"<folder>" …`), create the note IN
+		// that folder, named from the plain words only — previously the filter text
+		// leaked into the filename (`in"Projects" Kickoff.md`) at the default location.
+		if (mode === "files") {
+			const target = this.createTargetFor(body);
+			if (target.folder !== null) {
+				if (!target.name) {
+					this.promptNewNoteIn(target.folder);
+					return;
+				}
+				this.host.recordSearch();
+				this.host.close();
+				await this.createAndOpen(target.name, target.folder);
+				return;
+			}
+		}
 		this.host.recordSearch();
 		this.host.close();
 		await this.createAndOpen(body);
+	}
+
+	/** Resolve a files-mode query's single `in:` filter to an existing folder. */
+	createTargetFor(body: string): { folder: string | null; name: string } {
+		return resolveCreateTarget(tokenizeQuery(body), () =>
+			this.app.vault
+				.getAllLoadedFiles()
+				.filter((f): f is TFolder => f instanceof TFolder && !f.isRoot())
+				.map((f) => f.path)
+		);
+	}
+
+	/** Browse a folder's files without leaving Spotlight (also exits the action palette). */
+	browseFolder(folderPath: string): void {
+		this._actionContext = null;
+		this._drillFile = null;
+		this._mode = "files";
+		this.host.setQuery(`in:"${folderPath}" `);
+		this.host.focusInput();
+		this.host.runSearch();
+	}
+
+	/** Close Spotlight and ask for a note name, then create it inside `folderPath`. */
+	promptNewNoteIn(folderPath: string): void {
+		this.host.close();
+		new PromptModal(this.app, {
+			title: `New note in ${folderPath || "/"}`,
+			cta: "Create",
+			onSubmit: (name) => void this.createAndOpen(name, folderPath),
+		}).open();
 	}
 
 	drillInto(file: TFile, mode: SpotlightMode): void {
@@ -224,12 +279,7 @@ export class ModeController {
 		}
 
 		if (selected.kind === "folder") {
-			// Browse the folder's files without leaving Spotlight.
-			this._drillFile = null;
-			this._mode = "files";
-			this.host.setQuery(`in:"${selected.folder.path}" `);
-			this.host.focusInput();
-			this.host.runSearch();
+			this.browseFolder(selected.folder.path);
 			return;
 		}
 
@@ -305,7 +355,7 @@ export class ModeController {
 		if (selected.kind === "create") {
 			this.host.recordSearch();
 			this.host.close();
-			await this.createAndOpen(selected.name);
+			await this.createAndOpen(selected.name, selected.folder ?? null);
 			return;
 		}
 
@@ -405,13 +455,21 @@ export class ModeController {
 		editor.scrollIntoView({ from: pos, to: pos }, true);
 	}
 
-	private async createAndOpen(rawName: string): Promise<void> {
+	/**
+	 * Create (or open, if it already exists) a note. `folderPath` routes it into a
+	 * specific folder (folder browse / "New note here"); when null — or when that
+	 * folder vanished meanwhile — it uses Obsidian's configured new-note location.
+	 */
+	private async createAndOpen(rawName: string, folderPath: string | null = null): Promise<void> {
 		try {
 			const cleaned = rawName.replace(/[\\/:*?"<>|]/g, "").trim() || "Untitled";
-			const parent = this.app.fileManager.getNewFileParent(
-				this.app.workspace.getActiveFile()?.path ?? ""
-			);
-			const dir = parent.path ? `${parent.path}/` : "";
+			const explicit = folderPath !== null ? this.app.vault.getAbstractFileByPath(folderPath) : null;
+			const parent =
+				explicit instanceof TFolder
+					? explicit
+					: this.app.fileManager.getNewFileParent(this.app.workspace.getActiveFile()?.path ?? "");
+			// The vault root's path is "/" — never prefix that onto the file path.
+			const dir = parent.path && parent.path !== "/" ? `${parent.path}/` : "";
 			const path = normalizePath(`${dir}${cleaned}.md`);
 			const existing = this.app.vault.getAbstractFileByPath(path);
 			const file = existing instanceof TFile ? existing : await this.app.vault.create(path, "");
@@ -521,6 +579,8 @@ export class ModeController {
 				this.host.runSearch();
 			},
 			closeActionPalette: () => this.closeActionPalette(),
+			newNoteInFolder: (path) => this.promptNewNoteIn(path),
+			browseFolder: (path) => this.browseFolder(path),
 		};
 	}
 

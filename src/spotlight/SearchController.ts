@@ -69,6 +69,8 @@ export interface SearchHost {
 	availableActions(context: ResultItem): SpotlightAction[];
 	drillFile(): TFile | null;
 	activeWorkflowId(): string;
+	/** Where a "create note" from this files-mode query lands (see core/createTarget). */
+	createTargetFor(body: string): { folder: string | null; name: string };
 	setBadge(text: string, cls: "is-content" | "is-pro" | null): void;
 	setPlaceholder(mode: SpotlightMode): void;
 	renderResults(): void;
@@ -514,7 +516,11 @@ export class SearchController {
 					// Original-case words (textTokensRaw), so a plain "Meeting Notes" search
 					// creates "Meeting Notes.md", not "meeting notes.md" — and matches the
 					// name the Shift+Enter (createFromQuery) path produces for the same query.
-					this.items = [{ kind: "create", name: parsed.textTokensRaw.join(" ") }];
+					// Inside a browsed folder (`in:"<folder>"`), the row creates there too.
+					const target = this.host.createTargetFor(body);
+					this.items = [
+						{ kind: "create", name: parsed.textTokensRaw.join(" "), ...(target.folder ? { folder: target.folder } : {}) },
+					];
 				}
 			}
 		} catch (err) {

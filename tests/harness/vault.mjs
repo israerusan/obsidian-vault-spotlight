@@ -4,7 +4,7 @@
 // its TFile instances are the SAME class the searchers import (instanceof checks).
 import fs from "node:fs";
 import path from "node:path";
-import { TFile } from "obsidian";
+import { TFile, TFolder } from "obsidian";
 
 function walk(dir, base, out) {
 	for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -120,8 +120,31 @@ export function loadVaultApp(vaultDir) {
 		if (file.extension === "md") cacheByPath.set(rel, parseMarkdown(content));
 	}
 
+	// Folders (root + every directory holding a file) so folder mode, folder browse,
+	// and folder-targeted note creation have something real to resolve against.
+	const root = new TFolder("/");
+	const folders = [root];
+	const folderFor = (dir) => {
+		if (!dir) return root;
+		const existing = byPath.get(dir);
+		if (existing instanceof TFolder) return existing;
+		const folder = new TFolder(dir);
+		const slash = dir.lastIndexOf("/");
+		folder.parent = folderFor(slash === -1 ? "" : dir.slice(0, slash));
+		folder.parent.children.push(folder);
+		folders.push(folder);
+		byPath.set(dir, folder);
+		return folder;
+	};
+	for (const file of files) {
+		const slash = file.path.lastIndexOf("/");
+		file.parent = folderFor(slash === -1 ? "" : file.path.slice(0, slash));
+		file.parent.children.push(file);
+	}
+
 	const noop = () => {};
 	const openedFiles = [];
+	const createdFiles = []; // test-visible record of vault.create() paths
 	const leaf = {
 		openFile: (file) => {
 			openedFiles.push(file);
@@ -132,8 +155,25 @@ export function loadVaultApp(vaultDir) {
 	};
 	const app = {
 		openedFiles, // test-visible record of workspace.openFile() calls
+		createdFiles,
+		fileManager: {
+			// Obsidian's default "new note location" — the vault root in the fixture.
+			getNewFileParent: () => root,
+			generateMarkdownLink: (file) => `[[${file.basename}]]`,
+		},
 		vault: {
 			getFiles: () => files.slice(),
+			getAllLoadedFiles: () => [...folders, ...files],
+			create: (p) => {
+				const file = new TFile(p, (mtime += 1000), mtime);
+				const slash = p.lastIndexOf("/");
+				file.parent = folderFor(slash === -1 ? "" : p.slice(0, slash));
+				files.push(file);
+				byPath.set(p, file);
+				contentByPath.set(p, "");
+				createdFiles.push(p);
+				return Promise.resolve(file);
+			},
 			getMarkdownFiles: () => files.filter((f) => f.extension === "md"),
 			getAbstractFileByPath: (p) => byPath.get(p) ?? null,
 			cachedRead: (file) => Promise.resolve(contentByPath.get(file.path) ?? ""),

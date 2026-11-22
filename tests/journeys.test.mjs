@@ -159,5 +159,95 @@ const press = (modal, mods, key) => findKey(modal, mods, key).handler(new FakeEv
 	modal.close();
 }
 
+// --- Journey 6: create notes inside a folder (issue #14)
+{
+	const submitPrompt = (name) => {
+		const prompt = Modal.opened[Modal.opened.length - 1];
+		const input = prompt.contentEl.querySelector("input");
+		input.value = name;
+		input.dispatchEvent(new FakeEvent("keydown", { key: "Enter" }));
+		return prompt;
+	};
+
+	// 6a: browse into a folder from Folders mode, type a name, Shift+Enter → the
+	// note lands in THAT folder, and the in:"…" filter never leaks into the filename.
+	{
+		const { app } = loadVaultApp(vaultDir);
+		const plugin = makeStubPlugin(app, { isPro: false });
+		const modal = new SpotlightModal(app, plugin, "", "folders");
+		modal.open();
+		await settle();
+		const idx = modal.items.findIndex((it) => it.kind === "folder" && it.folder.path === "Projects");
+		assert.ok(idx >= 0, "J6a: the Projects folder is listed in Folders mode");
+		modal.selectedIndex = idx;
+		press(modal, [], "Enter");
+		await settle();
+		assert.equal(modal.inputEl.value, 'in:"Projects" ', "J6a: Enter on a folder browses it");
+		modal.inputEl.value = 'in:"Projects" Kickoff Plan';
+		press(modal, ["Shift"], "Enter");
+		await settle();
+		assert.deepEqual(app.createdFiles, ["Projects/Kickoff Plan.md"], "J6a: Shift+Enter created the note inside the browsed folder");
+	}
+
+	// 6b: Shift+Enter with a folder row selected = "New note here" (asks for a name).
+	{
+		const { app } = loadVaultApp(vaultDir);
+		const plugin = makeStubPlugin(app, { isPro: false });
+		const modal = new SpotlightModal(app, plugin, "arch", "folders");
+		modal.open();
+		await settle();
+		modal.selectedIndex = modal.items.findIndex((it) => it.kind === "folder" && it.folder.path === "Archive");
+		press(modal, ["Shift"], "Enter");
+		submitPrompt("Retro");
+		await settle();
+		assert.deepEqual(app.createdFiles, ["Archive/Retro.md"], "J6b: folder-row Shift+Enter created the note in that folder");
+	}
+
+	// 6c: the folder's action palette (Mod+K) offers "New note here".
+	{
+		const { app } = loadVaultApp(vaultDir);
+		const plugin = makeStubPlugin(app, { isPro: false });
+		const modal = new SpotlightModal(app, plugin, "", "folders");
+		modal.open();
+		await settle();
+		modal.selectedIndex = modal.items.findIndex((it) => it.kind === "folder" && it.folder.path === "Projects");
+		press(modal, ["Mod"], "k");
+		await settle();
+		const actionIdx = modal.items.findIndex((it) => it.kind === "action" && it.action.id === "new-note-here");
+		assert.ok(actionIdx >= 0, "J6c: the folder action palette lists New note here");
+		modal.selectedIndex = actionIdx;
+		press(modal, [], "Enter");
+		submitPrompt("From Palette");
+		await settle();
+		assert.deepEqual(app.createdFiles, ["Projects/From Palette.md"], "J6c: New note here created the note in the folder");
+	}
+
+	// 6d: a no-match search inside a folder offers a Create row scoped to it.
+	{
+		const { app } = loadVaultApp(vaultDir);
+		const plugin = makeStubPlugin(app, { isPro: false });
+		const modal = new SpotlightModal(app, plugin, 'in:"Projects" zzqx nothing', "files");
+		modal.open();
+		await settle();
+		assert.equal(modal.items[0]?.kind, "create", "J6d: the empty result offers a Create row");
+		assert.equal(modal.items[0].folder, "Projects", "J6d: the Create row targets the browsed folder");
+		press(modal, [], "Enter");
+		await settle();
+		assert.deepEqual(app.createdFiles, ["Projects/zzqx nothing.md"], "J6d: Create row wrote into the folder");
+	}
+
+	// 6e: without an in: filter, Shift+Enter keeps Obsidian's default location.
+	{
+		const { app } = loadVaultApp(vaultDir);
+		const plugin = makeStubPlugin(app, { isPro: false });
+		const modal = new SpotlightModal(app, plugin, "Loose Thought", "files");
+		modal.open();
+		await settle();
+		press(modal, ["Shift"], "Enter");
+		await settle();
+		assert.deepEqual(app.createdFiles, ["Loose Thought.md"], "J6e: default location unchanged");
+	}
+}
+
 uninstallWindow();
 console.log("journey tests passed");

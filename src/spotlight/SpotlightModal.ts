@@ -161,6 +161,7 @@ export class SpotlightModal extends Modal {
 			availableActions: (context) => this.modes.availableActions(context),
 			drillFile: () => this.modes.drillFile,
 			activeWorkflowId: () => this.modes.activeWorkflowId,
+			createTargetFor: (body) => this.modes.createTargetFor(body),
 			setBadge: (text, cls) => setModeBadge(this.modeBadgeEl, text, cls),
 			// The large field, not just the small badge, must say what the active mode
 			// searches — otherwise it invites "search notes" while Capture mode appends.
@@ -208,6 +209,8 @@ export class SpotlightModal extends Modal {
 		// community review guidelines and popout-window safety).
 		this.modifierLabel = getModifierLabel(Platform.isMacOS || Platform.isIosApp ? "mac" : "");
 		this.containerEl.addClass("vault-spotlight-container");
+		// Opt-out for the inline keyboard hints (header + footer chips); CSS hides them.
+		this.containerEl.toggleClass("vs-hide-hints", !this.plugin.settings.showKeyboardHints);
 		this.titleEl.empty();
 		const { contentEl } = this;
 		contentEl.empty();
@@ -319,6 +322,7 @@ export class SpotlightModal extends Modal {
 		this.plugin.onSpotlightClosed(this);
 		this.containerEl.removeClass("vault-spotlight-container");
 		this.containerEl.removeClass("has-preview");
+		this.containerEl.removeClass("vs-hide-hints");
 		this.contentEl.empty();
 	}
 

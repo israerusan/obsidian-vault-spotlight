@@ -588,6 +588,7 @@ export default class VaultSpotlightPlugin extends Plugin {
 		// would then drive behavior). Defaults: showModifiedTime/useFrecency and the
 		// file-type includes are on, showPreview is off.
 		this.settings.showModifiedTime = this.settings.showModifiedTime !== false;
+		this.settings.showKeyboardHints = this.settings.showKeyboardHints !== false;
 		this.settings.useFrecency = this.settings.useFrecency !== false;
 		this.settings.showPreview = this.settings.showPreview === true;
 		this.settings.includeCanvas = this.settings.includeCanvas !== false;

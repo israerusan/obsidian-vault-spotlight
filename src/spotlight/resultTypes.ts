@@ -141,6 +141,8 @@ export type ResultItem =
 	| {
 			kind: "create";
 			name: string;
+			/** Target folder when the query was scoped with `in:` (folder browse). */
+			folder?: string;
 	  }
 	| {
 			kind: "calc";

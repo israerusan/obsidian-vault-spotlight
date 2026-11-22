@@ -181,7 +181,10 @@ export function renderResultRow(
 		setIcon(iconWrap, "file-plus");
 		title.setText(`Create “${item.name}”`);
 		titleRow.createSpan({ cls: "vault-spotlight-item-badge is-action", text: "New" });
-		body.createDiv({ cls: "vault-spotlight-item-meta", text: "Create a new note" });
+		body.createDiv({
+			cls: "vault-spotlight-item-meta",
+			text: item.folder ? `Create a new note in ${item.folder}` : "Create a new note",
+		});
 	}
 }
 

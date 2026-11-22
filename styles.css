@@ -58,6 +58,22 @@
 	   than the screen; 78dvh < the 80dvh max keeps min-height <= max-height always. */
 	--vs-modal-min-height: min(480px, 78dvh);
 	--vs-modal-max-height: min(80dvh, 760px);
+	/* Spotlight-style anchoring (issue #12): the modal sits a fixed distance from the
+	   top and grows DOWNWARD only, so the search field and first result never shift
+	   as the result count changes mid-typing. Obsidian's container centers the modal
+	   vertically, which moved the top edge by up to (max − min) / 2. 12dvh + the 80dvh
+	   max height = 92dvh worst case, so it never overflows the viewport. */
+	--vs-modal-top-offset: 12dvh;
+	align-items: flex-start;
+}
+
+/* Phones: Obsidian lays modals out edge-to-edge, so keep its own positioning there. */
+.is-phone .modal-container.vault-spotlight-container {
+	align-items: center;
+}
+
+.is-phone .modal-container.vault-spotlight-container .modal {
+	margin-top: 0;
 }
 
 .modal-container.vault-spotlight-container .modal-title {
@@ -66,7 +82,8 @@
 
 .modal-container.vault-spotlight-container .modal {
 	padding: 0;
-	margin: 0;
+	/* Top offset only — see --vs-modal-top-offset on the container (issue #12). */
+	margin: var(--vs-modal-top-offset, 12dvh) 0 0;
 	width: var(--vs-modal-width, min(680px, 92vw));
 	max-width: calc(100vw - 32px);
 	border-radius: var(--vs-radius-lg, 14px);
@@ -914,6 +931,19 @@
 	font-size: var(--vs-fz-micro);
 	color: var(--text-muted);
 	white-space: nowrap;
+}
+
+/* "Show keyboard hints" off (issue #13): drop the header trigger hints and the
+   footer shortcut chips. The footer stays for the result-count status (an aria-live
+   region), pinned right where it always sits; the header keyboard button keeps the
+   full cheatsheet one click / Mod+/ away. */
+.vault-spotlight-container.vs-hide-hints .vault-spotlight-hint,
+.vault-spotlight-container.vs-hide-hints .vault-spotlight-shortcuts {
+	display: none;
+}
+
+.vault-spotlight-container.vs-hide-hints .vault-spotlight-status {
+	margin-left: auto;
 }
 
 .vault-spotlight-pro-cta {

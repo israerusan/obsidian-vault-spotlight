@@ -32,6 +32,10 @@ export interface ActionHost {
 	/** Exit the action palette and run the collection's saved query. */
 	runCollectionQuery(query: string): void;
 	closeActionPalette(): void;
+	/** Close Spotlight and prompt for a note name to create inside `folderPath`. */
+	newNoteInFolder(folderPath: string): void;
+	/** Exit the action palette and list the folder's files (Enter on a folder row). */
+	browseFolder(folderPath: string): void;
 }
 
 export function buildAvailableActions(context: ResultItem, host: ActionHost): SpotlightAction[] {
@@ -139,6 +143,30 @@ export function buildAvailableActions(context: ResultItem, host: ActionHost): Sp
 
 	const file = itemFile(context);
 	const actions: SpotlightAction[] = [];
+	// Folder rows: act ON the folder (issue #14) — create a note in it or browse it.
+	if (context.kind === "folder") {
+		const path = context.folder.path;
+		actions.push(
+			{
+				id: "new-note-here",
+				name: "New note here",
+				description: `Create a note in ${path}.`,
+				run: () => host.newNoteInFolder(path),
+			},
+			{
+				id: "browse-folder",
+				name: "Browse folder",
+				description: "List this folder's files.",
+				run: () => host.browseFolder(path),
+			},
+			{
+				id: "copy-folder-path",
+				name: "Copy path",
+				description: "Copy this folder path.",
+				run: () => batchOps.copyToClipboard(path, "Path copied"),
+			}
+		);
+	}
 	if (file) {
 		actions.push(
 			{

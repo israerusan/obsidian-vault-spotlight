@@ -124,6 +124,8 @@ export interface VaultSpotlightSettings {
 	ranking: RankingSettings;
 	searchAliases: string;
 	showModifiedTime: boolean;
+	/** Show the header trigger hints and footer shortcut chips (issue #13). */
+	showKeyboardHints: boolean;
 	ripgrepCommand: string;
 	includeCanvas: boolean;
 	includePdf: boolean;
@@ -179,6 +181,7 @@ export const DEFAULT_SETTINGS: VaultSpotlightSettings = {
 	ranking: { ...DEFAULT_RANKING_SETTINGS },
 	searchAliases: "",
 	showModifiedTime: true,
+	showKeyboardHints: true,
 	ripgrepCommand: "rg",
 	includeCanvas: true,
 	includePdf: true,
@@ -312,6 +315,18 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.showModifiedTime).onChange((value) => {
 					this.plugin.settings.showModifiedTime = value;
+					void this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Show keyboard hints")
+			.setDesc(
+				"Show the shortcut hints under the search field and in the footer. The keyboard button (or Mod+/) still opens the full shortcut list."
+			)
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.showKeyboardHints).onChange((value) => {
+					this.plugin.settings.showKeyboardHints = value;
 					void this.plugin.saveSettings();
 				})
 			);
