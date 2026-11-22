@@ -230,12 +230,21 @@ export class FileSearcher {
 		if (!this.matchesAdvancedFileFilters(file, clause, ranking.ignoreDiacritics, isStarred, isBookmarked)) return null;
 		if (!this.matchesFilters(file, clause)) return null;
 
-		const hasActiveFilters =
-			clause.tags.length > 0 || clause.properties.length > 0 || clause.extFilters.length > 0;
-		const isBrowse = clause.textTokens.length === 0 && !hasActiveFilters;
-		const isFilterOnly = clause.textTokens.length === 0 && hasActiveFilters;
-		// Build the combined token list once per clause, not per file.
+		// Build the combined token list once per clause, not per file. `name:` terms
+		// are scored like text tokens, so they count when deciding browse vs. scored:
+		// keying off textTokens alone made `name:roadmap` an unscored "browse"
+		// (score 1, no highlight) where the exact name wasn't preferred.
 		const searchTokens = [...(clause.nameTerms ?? []), ...clause.textTokens];
+		// Quoted phrases and path: terms are membership filters (checked above), so
+		// a query of only those is "filters", not an empty browse.
+		const hasActiveFilters =
+			clause.tags.length > 0 ||
+			clause.properties.length > 0 ||
+			clause.extFilters.length > 0 ||
+			(clause.phrases?.length ?? 0) > 0 ||
+			(clause.pathTerms?.length ?? 0) > 0;
+		const isBrowse = searchTokens.length === 0 && !hasActiveFilters;
+		const isFilterOnly = searchTokens.length === 0 && hasActiveFilters;
 
 		const basename = file.basename;
 		let score = 0;
@@ -259,7 +268,7 @@ export class FileSearcher {
 					continue;
 				}
 				const pathMatch = fuzzyMatch(token, file.path, { ignoreDiacritics: ranking.ignoreDiacritics });
-				const aliasHit = this.aliasMatches(file, token);
+				const aliasHit = this.aliasMatches(file, token, ranking.ignoreDiacritics);
 				if (!pathMatch && !aliasHit) {
 					matched = false;
 					break;
@@ -285,10 +294,10 @@ export class FileSearcher {
 		return extFilters.includes(file.extension.toLowerCase());
 	}
 
-	private aliasMatches(file: TFile, token: string): boolean {
+	private aliasMatches(file: TFile, token: string, ignoreDiacritics = false): boolean {
 		if (file.extension !== "md") return false;
 		const cache = this.app.metadataCache.getFileCache(file);
-		return frontmatterAliasMatches(cache?.frontmatter ?? null, token);
+		return frontmatterAliasMatches(cache?.frontmatter ?? null, token, { ignoreDiacritics });
 	}
 
 	private matchesFilters(file: TFile, clause: FileSearchClause): boolean {

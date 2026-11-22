@@ -77,5 +77,7 @@ export function getHelpSections(args?: {
 	prefixes?: Record<string, string>;
 	modifierLabel?: string;
 	escapeChar?: string;
+	/** "Open in new tab by default" — swaps the Enter / Mod+Enter labels. */
+	defaultNewTab?: boolean;
 }): HelpSection[];
 

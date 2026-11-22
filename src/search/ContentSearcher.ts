@@ -5,6 +5,7 @@ import { BaseSearcher } from "./BaseSearcher";
 import { WorkerIndex, WorkerTimeoutError } from "./WorkerIndex";
 import { isPathExcluded, normalizeExcludeFolders } from "./vaultFiles";
 import { parseContentQuery } from "../core/advancedQuery.mjs";
+import { buildSnippetWindow } from "../core/previewWindow.mjs";
 
 export interface ContentSearchResult {
 	file: TFile;
@@ -135,7 +136,9 @@ export class ContentSearcher {
 
 	async search(query: string, options: ContentSearchOptions): Promise<ContentSearchResult[]> {
 		if (!query.trim()) return [];
-		const limit = options.limit ?? 40;
+		// Positive int, else 40 — MUST match the worker's clamp (workerSource.mjs)
+		// so 0/negative/NaN can't throw (results.length = -1) or differ by engine.
+		const limit = Math.max(1, Math.floor(options.limit ?? 40)) || 40;
 		const excluded = normalizeExcludeFolders(options.excludeFolders);
 		// DNF groups: AND within a group, OR across groups. `tokens` is the flat
 		// union used only for snippet highlighting so a row matched via one OR
@@ -169,8 +172,10 @@ export class ContentSearcher {
 		if (base === null) base = await this.searchVaultIndex(groups, limit, excluded);
 
 		const results = extras.length === 0 ? base : this.mergeResults(base, extras, limit);
-		// Annotate in one place so every engine's rows highlight identically.
+		// Window + annotate in one place so every engine's rows display and
+		// highlight identically (engines return the whole trimmed line).
 		for (const result of results) {
+			result.snippet = buildSnippetWindow(result.snippet, tokens);
 			result.matchIndices = snippetMatchIndices(result.snippet, tokens);
 		}
 		return results;
@@ -257,7 +262,9 @@ export class ContentSearcher {
 				results.push({
 					file,
 					line: i + 1,
-					snippet: line.trim().slice(0, 160),
+					// Whole trimmed line (already capped at MAX_INDEXED_LINE_LEN);
+					// search() cuts the display window. MUST match workerSource.mjs.
+					snippet: line.trim(),
 					// Gentle early-line preference with a floor — a match on line
 					// 5000 must still rank, never go negative.
 					score: Math.max(1, 100 - Math.floor(i / 10)),
@@ -338,7 +345,10 @@ export class ContentSearcher {
 		this.workerIndex?.dispose();
 		this.workerIndex = null;
 		// Release the in-process index too, so the retained vault text isn't kept
-		// alive by a lingering reference to the searcher after unload.
+		// alive by a lingering reference to the searcher after unload. Bump the
+		// epoch so an in-flight build stops instead of refilling it.
+		this.indexEpoch++;
+		this.buildPromise = null;
 		this.index.clear();
 		this.indexBuilt = false;
 	}
@@ -350,10 +360,14 @@ export class ContentSearcher {
 		if (this.buildPromise) return this.buildPromise;
 		if (this.indexBuilt) return Promise.resolve();
 		const epoch = this.indexEpoch;
-		this.buildPromise = (async () => {
+		const build: Promise<void> = (async () => {
 			for (const file of this.app.vault.getMarkdownFiles()) {
+				// invalidate()/dispose() mid-build: stop refilling a cleared index
+				// (after unload that would re-retain the whole vault's text).
+				if (epoch !== this.indexEpoch) return;
 				try {
 					const content = await this.app.vault.cachedRead(file);
+					if (epoch !== this.indexEpoch) return;
 					this.index.set(file.path, splitIndexedLines(content));
 				} catch {
 					// Skip a file that vanished or is unreadable mid-build rather
@@ -364,8 +378,11 @@ export class ContentSearcher {
 			// leave indexBuilt false so the next caller triggers a fresh build.
 			if (epoch === this.indexEpoch) this.indexBuilt = true;
 		})().finally(() => {
-			this.buildPromise = null;
+			// Identity check: invalidate() may have dropped this promise and a
+			// fresh build started — don't clobber the newer one.
+			if (this.buildPromise === build) this.buildPromise = null;
 		});
-		return this.buildPromise;
+		this.buildPromise = build;
+		return build;
 	}
 }

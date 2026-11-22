@@ -23,7 +23,18 @@ export interface BatchOpsContext {
 }
 
 function filesForBatch(ctx: BatchOpsContext): TFile[] {
-	return ctx.resultItems().map((item) => itemFile(item)).filter((file): file is TFile => !!file);
+	// Dedupe by path: content mode yields one row per matching line, so without
+	// this a note with 15 hits got 15 parallel frontmatter writes and the notice
+	// over-counted ("tag added to 15 notes" for one note).
+	const seen = new Set<string>();
+	const files: TFile[] = [];
+	for (const item of ctx.resultItems()) {
+		const file = itemFile(item);
+		if (!file || seen.has(file.path)) continue;
+		seen.add(file.path);
+		files.push(file);
+	}
+	return files;
 }
 
 /**

@@ -18,6 +18,11 @@ export interface PreviewHost {
 export class PreviewPane {
 	private el: HTMLDivElement | null = null;
 	private component: Component | null = null;
+	// Child component owning the on-screen render's embeds/post-processors. Each
+	// render gets its own child so the previous one can be unloaded on swap —
+	// sharing `component` across renders kept every detached render alive until
+	// the modal closed.
+	private renderChild: Component | null = null;
 	private timer: number | null = null;
 	// Bumped on every update() so a slower async read from an earlier selection
 	// can't render into the pane after a newer selection replaced it.
@@ -60,12 +65,14 @@ export class PreviewPane {
 			// costs no visible flash.
 			if (!file) {
 				this.currentFile = null;
+				this.releaseRenderChild(component);
 				previewEl.empty();
 				renderPreviewEmpty(previewEl, "eye", "Nothing selected", "Pick a result and its note previews here, scrolled to the match.");
 				return;
 			}
 			if (file.extension !== "md") {
 				this.currentFile = null;
+				this.releaseRenderChild(component);
 				previewEl.empty();
 				renderPreviewEmpty(
 					previewEl,
@@ -90,6 +97,11 @@ export class PreviewPane {
 			});
 			setIcon(copyBtn, "copy");
 			const bodyEl = staged.createDiv({ cls: "vault-spotlight-preview-body markdown-rendered" });
+			let child: Component | null = null;
+			const dropChild = () => {
+				if (child && child !== this.renderChild) component.removeChild(child);
+				child = null;
+			};
 			void this.app.vault
 				.cachedRead(file)
 				.then((content) => {
@@ -101,10 +113,22 @@ export class PreviewPane {
 						this.showCopyMenu(evt, file, content);
 					};
 					const excerpt = buildPreviewExcerpt(content, { focusText, terms });
-					return MarkdownRenderer.render(this.app, excerpt, bodyEl, file.path, component).then(() => content);
+					child = component.addChild(new Component());
+					return MarkdownRenderer.render(this.app, excerpt, bodyEl, file.path, child).then(() => content);
 				})
 				.then((content) => {
-					if (this.token !== token || this.component !== component || !previewEl.isConnected) return;
+					if (this.token !== token || this.component !== component || !previewEl.isConnected) {
+						// Lost the race: this render never reaches the screen, release it now.
+						dropChild();
+						return;
+					}
+					if (content === undefined) {
+						dropChild();
+						return;
+					}
+					// The new render takes over; unload the one it replaces.
+					this.releaseRenderChild(component);
+					this.renderChild = child;
 					// Replacement is fully rendered — swap it in, then highlight/scroll
 					// on the now-connected nodes so scrollIntoView actually moves.
 					previewEl.empty();
@@ -115,8 +139,12 @@ export class PreviewPane {
 					hit?.scrollIntoView({ block: "center" });
 				})
 				.catch(() => {
+					dropChild();
 					if (this.token !== token || !previewEl.isConnected) return;
 					this.currentFile = null;
+					// The pane is being emptied, so whatever render was on screen
+					// (possibly this one, if it failed after the swap) goes too.
+					this.releaseRenderChild(component);
 					previewEl.empty();
 					renderPreviewEmpty(previewEl, "alert-triangle", "Preview unavailable", "This note couldn't be read. Try selecting it again.");
 				});
@@ -129,8 +157,11 @@ export class PreviewPane {
 	 * in the browser. Anything else falls through to the default behavior.
 	 */
 	private handleLinkClick(evt: MouseEvent): void {
-		const target = evt.target;
-		if (!(target instanceof HTMLElement)) return;
+		// Duck-typed rather than `instanceof HTMLElement`: in a popout window the
+		// target belongs to that window's realm, so the main-window HTMLElement
+		// check failed and every preview link click was ignored.
+		const target = evt.target as Element | null;
+		if (!target || typeof target.closest !== "function") return;
 		const anchor = target.closest("a");
 		if (!anchor) return;
 
@@ -149,9 +180,11 @@ export class PreviewPane {
 		}
 
 		if (anchor.classList.contains("external-link")) {
-			evt.preventDefault();
 			const href = anchor.getAttribute("href") ?? "";
-			if (!/^https?:\/\//i.test(href)) return;
+			// Only take over schemes we know how to open; anything else keeps the
+			// default behaviour instead of being swallowed by preventDefault.
+			if (!/^(https?:\/\/|mailto:|obsidian:\/\/)/i.test(href)) return;
+			evt.preventDefault();
 			// Open in the pane's own window so popout modals open links correctly.
 			anchor.ownerDocument.defaultView?.open(href, "_blank");
 		}
@@ -182,7 +215,16 @@ export class PreviewPane {
 		menu.showAtMouseEvent(evt);
 	}
 
+	/** Unload the child component owning the currently-displayed render. */
+	private releaseRenderChild(component: Component): void {
+		if (this.renderChild) {
+			component.removeChild(this.renderChild);
+			this.renderChild = null;
+		}
+	}
+
 	unload(): void {
+		this.renderChild = null; // unloaded with its parent below
 		if (this.timer !== null) {
 			window.clearTimeout(this.timer);
 			this.timer = null;

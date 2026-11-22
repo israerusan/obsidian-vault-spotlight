@@ -1,5 +1,5 @@
 import { App, TFile } from "obsidian";
-import { compareContentRows, type ContentSearchResult } from "./ContentSearcher";
+import { compareContentRows, MAX_INDEXED_LINE_LEN, type ContentSearchResult } from "./ContentSearcher";
 import { isPathExcluded } from "./vaultFiles";
 
 /**
@@ -41,7 +41,7 @@ export class BaseSearcher {
 				results.push({
 					file,
 					line: i + 1,
-					snippet: text.slice(0, 160),
+					snippet: text, // capped at MAX_INDEXED_LINE_LEN; ContentSearcher windows it
 					// Slightly below markdown and canvas matches, floored so it
 					// never goes negative.
 					score: Math.max(1, 85 - Math.floor(i / 10)),
@@ -67,15 +67,19 @@ export class BaseSearcher {
 	/** Split lines for one base file, served from cache unless its mtime moved. */
 	private async getLines(file: TFile): Promise<string[]> {
 		const cached = this.cache.get(file.path);
-		if (cached && cached.mtime === file.stat.mtime) return cached.lines;
+		// Capture mtime BEFORE the read (see CanvasSearcher.getSearchableLines).
+		const mtime = file.stat.mtime;
+		if (cached && cached.mtime === mtime) return cached.lines;
 		let raw: string;
 		try {
 			raw = await this.app.vault.cachedRead(file);
 		} catch {
 			return [];
 		}
-		const lines = raw.split("\n");
-		this.cache.set(file.path, { mtime: file.stat.mtime, lines });
+		// Same per-line cap as markdown (MAX_INDEXED_LINE_LEN) so one huge YAML
+		// line isn't lowercased on every content keystroke.
+		const lines = raw.split("\n").map((l) => (l.length > MAX_INDEXED_LINE_LEN ? l.slice(0, MAX_INDEXED_LINE_LEN) : l));
+		this.cache.set(file.path, { mtime, lines });
 		return lines;
 	}
 }

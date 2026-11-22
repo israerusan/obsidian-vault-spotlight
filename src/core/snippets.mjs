@@ -36,9 +36,18 @@ export function normalizeSnippets(raw) {
 	return out;
 }
 
-/** Build a new snippet record. */
-export function createSnippet(name, body) {
-	return { id: nextId(String(name ?? "").length), name: String(name ?? "").trim(), body: String(body ?? "") };
+/**
+ * Build a new snippet record. Pass the ids already in use: the id counter is
+ * module-level and restarts at 0 on every launch, so without this an Add after a
+ * restart could mint an id an existing snippet already has — and Remove (which
+ * filters by id) would then delete both.
+ */
+export function createSnippet(name, body, existingIds) {
+	const seed = String(name ?? "").length;
+	const taken = existingIds instanceof Set ? existingIds : new Set(Array.isArray(existingIds) ? existingIds : []);
+	let id = nextId(seed);
+	while (taken.has(id)) id = nextId(seed);
+	return { id, name: String(name ?? "").trim(), body: String(body ?? "") };
 }
 
 /**

@@ -52,6 +52,10 @@ export class WorkflowController {
 		if (!profile) return;
 		this.settings.activeProfileId = profile.id;
 		void this.host.plugin.saveSettings();
+		// A programmatic setQuery() doesn't go through resetNavigation, so drop the
+		// active workflow explicitly — otherwise its scope keeps winning the
+		// scope fallback in SearchController after the profile change.
+		this.host.setActiveWorkflowId("");
 		this.host.clearActionContext();
 		this.host.setMode(profile.defaultMode);
 		this.host.setQuery(profile.defaultQuery);
@@ -62,6 +66,7 @@ export class WorkflowController {
 	clearProfile(): void {
 		this.settings.activeProfileId = "";
 		void this.host.plugin.saveSettings();
+		this.host.setActiveWorkflowId("");
 		this.host.clearActionContext();
 		this.host.setQuery("");
 		this.host.setMode("files");

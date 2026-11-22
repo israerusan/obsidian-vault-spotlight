@@ -219,7 +219,11 @@ export default class VaultSpotlightPlugin extends Plugin {
 				if (!this.settings.isPro) {
 					return [];
 				}
-				const results = await this.contentSearcher.search(query, {
+				// Same coercion as open(): a non-string from an external caller would
+				// otherwise reject inside ContentSearcher (query.trim) instead of
+				// resolving per the contract.
+				const q = typeof query === "string" ? query : String(query ?? "");
+				const results = await this.contentSearcher.search(q, {
 					useRipgrep: true,
 					includeCanvas: this.settings.includeCanvas,
 					includeBases: this.settings.includeBases,
@@ -401,7 +405,10 @@ export default class VaultSpotlightPlugin extends Plugin {
 
 	private bumpFrecency(path: string): void {
 		const fr = this.settings.fileFrecency;
-		const entry = fr[path] ?? { count: 0, last: 0 };
+		// Own-key lookup: a path like "constructor" or "__proto__" would otherwise
+		// resolve to an inherited Object.prototype member and be mutated in place.
+		if (path === "__proto__") return;
+		const entry = Object.prototype.hasOwnProperty.call(fr, path) ? fr[path] : { count: 0, last: 0 };
 		entry.count += 1;
 		entry.last = Date.now();
 		fr[path] = entry;
@@ -525,7 +532,11 @@ export default class VaultSpotlightPlugin extends Plugin {
 		if (!this.settings.searchProfiles.some((profile) => profile.id === this.settings.activeProfileId)) {
 			this.settings.activeProfileId = "";
 		}
-		if (!Array.isArray(this.settings.excludeFolders)) this.settings.excludeFolders = [];
+		// Entries must be strings too: every search path calls .trim() on them, so a
+		// hand-edited `[null]` would make every query fail with "Search failed".
+		this.settings.excludeFolders = Array.isArray(this.settings.excludeFolders)
+			? this.settings.excludeFolders.filter((f): f is string => typeof f === "string")
+			: [];
 		if (!Array.isArray(this.settings.recentSearches)) {
 			this.settings.recentSearches = [];
 		} else {
@@ -549,6 +560,7 @@ export default class VaultSpotlightPlugin extends Plugin {
 			for (const [key, value] of Object.entries(this.settings.fileFrecency)) {
 				const entry = value as { count?: unknown; last?: unknown } | null;
 				if (
+					key !== "__proto__" &&
 					entry !== null &&
 					typeof entry === "object" &&
 					Number.isFinite(entry.count) &&
@@ -632,7 +644,8 @@ export default class VaultSpotlightPlugin extends Plugin {
 		// sum of the legacy caps, so nothing is truncated. Ids are reused verbatim so a
 		// migrated custom search keeps its custom-search-<id> command and hotkey.
 		this.settings.savedWorkflows = normalizeSavedWorkflows(this.settings.savedWorkflows);
-		if (loaded.savedWorkflows === undefined) {
+		// Treat a corrupt non-array (e.g. null) like absent, so legacy data still migrates.
+		if (!Array.isArray(loaded.savedWorkflows)) {
 			this.settings.savedWorkflows = normalizeSavedWorkflows(buildSavedWorkflows(this.settings));
 			if (this.settings.schemaVersion < 1) this.settings.schemaVersion = 1;
 		}

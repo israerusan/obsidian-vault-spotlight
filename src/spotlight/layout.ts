@@ -218,7 +218,7 @@ export class InputFocuser {
 			el.focus({ preventScroll: true });
 			if (this.pendingSelectAll) {
 				// Seeded query: select it so the first keystroke replaces the seed
-				// (arrow/End still edit in place). Only once, on first focus.
+				// (Left/Right still edit in place; Home/End move the result list). Only once, on first focus.
 				this.pendingSelectAll = false;
 				el.select();
 			} else {

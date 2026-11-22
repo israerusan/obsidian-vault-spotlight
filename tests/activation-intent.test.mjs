@@ -13,6 +13,14 @@ assert.equal(r.target, "tab", "defaultNewTab opens a single result in a tab");
 r = resolveOpenTargets({ selectedPath: "a.md", checkedPaths: [], visiblePaths: ["a.md"], paneOverride: "split", defaultNewTab: true });
 assert.equal(r.target, "split", "pane override beats defaultNewTab");
 
+// "same" forces the current pane even with defaultNewTab (Mod+Enter's inverse).
+r = resolveOpenTargets({ selectedPath: "a.md", checkedPaths: [], visiblePaths: ["a.md"], paneOverride: "same", defaultNewTab: true });
+assert.equal(r.target, null, "\"same\" override opens in the current pane despite defaultNewTab");
+
+// Duplicate visible paths (content mode: one row per matching line) open once.
+r = resolveOpenTargets({ selectedPath: "a.md", checkedPaths: ["a.md", "b.md"], visiblePaths: ["a.md", "a.md", "b.md", "a.md"] });
+assert.deepEqual(r.paths, ["a.md", "b.md"], "a checked note with several hits opens once");
+
 // Batch: multiple checked rows in view → always tabs, regardless of override.
 r = resolveOpenTargets({ selectedPath: "a.md", checkedPaths: ["a.md", "b.md", "c.md"], visiblePaths: ["a.md", "b.md", "c.md"], paneOverride: "split" });
 assert.deepEqual(r, { paths: ["a.md", "b.md", "c.md"], target: "tab", isBatch: true }, "batch opens all checked in tabs");

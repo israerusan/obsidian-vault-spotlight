@@ -168,5 +168,13 @@ assert.deepEqual(parseContentQuery("A OR B").groups, [["a"], ["b"]], "uppercase 
 assert.deepEqual(parseContentQuery("cats or dogs").groups, [["cats", "or", "dogs"]], "lowercase or is a token");
 assert.deepEqual(parseContentQuery("   ").groups, [], "blank query -> no groups");
 assert.deepEqual(parseContentQuery("foo OR").groups, [["foo"]], "trailing OR drops the empty group");
+// Quoted phrases: the quote marks are syntax, not part of the token.
+assert.deepEqual(parseContentQuery('"launch plan"').groups, [["launch plan"]], "quoted phrase is one token without quotes");
+assert.deepEqual(parseContentQuery('"Launch Plan" q3').groups, [["launch plan", "q3"]], "phrase + word AND group");
+assert.deepEqual(parseContentQuery('cats "OR" dogs').groups, [["cats", "or", "dogs"]], 'quoted "OR" stays a literal term');
+assert.deepEqual(parseContentQuery('"a b" OR c').groups, [["a b"], ["c"]], "phrase in an OR group");
+assert.deepEqual(parseContentQuery('"unclosed phr').groups, [["unclosed phr"]], "unclosed quote: rest is the phrase");
+assert.deepEqual(parseContentQuery('say"hi').groups, [['say"hi']], "mid-word quote stays literal");
+assert.deepEqual(parseContentQuery('""').groups, [], "empty quotes -> no groups");
 
 console.log("search tests passed");

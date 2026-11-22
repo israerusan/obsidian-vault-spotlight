@@ -7,7 +7,7 @@ export interface Snippet {
 export const MAX_SNIPPETS: number;
 
 export function normalizeSnippets(raw: unknown): Snippet[];
-export function createSnippet(name: string, body: string): Snippet;
+export function createSnippet(name: string, body: string, existingIds?: Iterable<string> | string[] | Set<string>): Snippet;
 export function expandSnippet(
 	body: string,
 	ctx?: { date?: string; time?: string; clipboard?: string; selection?: string }

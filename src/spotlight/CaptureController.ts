@@ -164,12 +164,14 @@ export class CaptureController {
 			const initial = item.target === "daily" ? await this.dailyTemplateContent(now) : "";
 			if (!(file instanceof TFile)) file = await this.app.vault.create(path, initial);
 			if (file instanceof TFile) {
-				const existing = await this.app.vault.read(file);
-				const updated = insertCapture(existing, text, {
+				// vault.process is an atomic read-modify-write, so a sync or another
+				// plugin writing the note between our read and write can't be clobbered
+				// (same pattern batchOps uses).
+				const opts = {
 					mode: settings.isPro ? settings.captureMode : "append",
 					heading: settings.isPro ? settings.captureHeading : "",
-				});
-				await this.app.vault.modify(file, updated);
+				};
+				await this.app.vault.process(file, (existing) => insertCapture(existing, text, opts));
 				new Notice(`Vault Spotlight: captured to ${file.basename}.`);
 			}
 		} catch (err) {

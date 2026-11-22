@@ -582,7 +582,9 @@ export class SpotlightModal extends Modal {
 			selectLast: () => this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "last" })),
 			pageMove: (delta: 1 | -1) => this.setSelectedIndex(nextSelectedIndex(this.selectedIndex, this.items.length, { type: "page", delta, pageSize: this.pageSize() })),
 			activateDefault: () => this.modes.safeActivate(),
-			activatePreferredTab: () => this.modes.safeActivate(this.plugin.settings.defaultNewTab ? null : "tab"),
+			// With "open in new tab by default" on, Mod+Enter is the escape hatch to the
+			// SAME tab (as the footer hint says); null would fall back to the default.
+			activatePreferredTab: () => this.modes.safeActivate(this.plugin.settings.defaultNewTab ? "same" : "tab"),
 			activateSplit: () => this.modes.safeActivate("split"),
 			openContextMenuForSelection: () => {
 				const item = this.items[this.selectedIndex];
@@ -640,6 +642,7 @@ export class SpotlightModal extends Modal {
 			prefixes: this.plugin.settings.modePrefixes,
 			modifierLabel: this.modifierLabel,
 			escapeChar: this.plugin.settings.escapeChar,
+			defaultNewTab: this.plugin.settings.defaultNewTab,
 		});
 		this.helpEl = renderHelpOverlay(this.contentEl, sections, {
 			onClose: () => this.closeHelp(),
@@ -652,6 +655,9 @@ export class SpotlightModal extends Modal {
 		});
 		this.helpBtn.addClass("is-active");
 		this.helpBtn.setAttr("aria-expanded", "true");
+		// Cancel any queued input-focus retries (e.g. from closeHelp() during the
+		// "Hide inline hints" rebuild) so they can't pull focus back out of the dialog.
+		this.focuser.clear();
 		// Move focus into the dialog so a screen reader announces it and Tab reaches the
 		// Close / Hide-inline-hints controls (the scope's own keys are inert while it's
 		// open). Focus returns to the input in closeHelp().

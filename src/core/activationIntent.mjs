@@ -16,7 +16,10 @@
  * @param {string|null} params.selectedPath   file path of the highlighted row (null if it has no file)
  * @param {string[]} params.checkedPaths       currently-checked file paths
  * @param {string[]} params.visiblePaths       file paths of the in-view rows, order preserved
- * @param {"tab"|"split"|"window"|null} [params.paneOverride]
+ * @param {"tab"|"split"|"window"|"same"|null} [params.paneOverride]
+ *   "same" forces the current pane — Mod+Enter's inverse of "open in new tab by
+ *   default". Passing null there fell through to the default and opened a tab,
+ *   contradicting the footer hint ("same tab").
  * @param {boolean} [params.defaultNewTab]
  * @returns {{paths: string[], target: "tab"|"split"|"window"|null, isBatch: boolean}}
  */
@@ -27,11 +30,14 @@ export function resolveOpenTargets(params) {
 	const checked = new Set(Array.isArray(params.checkedPaths) ? params.checkedPaths : []);
 	const visible = Array.isArray(params.visiblePaths) ? params.visiblePaths : [];
 
-	const inViewChecked = checked.size > 0 ? visible.filter((p) => checked.has(p)) : [];
+	// Dedupe: content mode yields one row per matching line, so the same note can
+	// appear in `visible` many times. Without this a checked note with N hits
+	// opened N tabs.
+	const inViewChecked = checked.size > 0 ? [...new Set(visible.filter((p) => checked.has(p)))] : [];
 	const isBatch = inViewChecked.length > 0;
 	const paths = isBatch ? inViewChecked : selectedPath ? [selectedPath] : [];
 
 	const defaultTarget = defaultNewTab ? "tab" : null;
-	const target = paths.length > 1 ? "tab" : paneOverride ?? defaultTarget;
+	const target = paths.length > 1 ? "tab" : paneOverride === "same" ? null : paneOverride ?? defaultTarget;
 	return { paths, target, isBatch };
 }

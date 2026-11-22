@@ -1,5 +1,5 @@
 import { App, TFile } from "obsidian";
-import { compareContentRows, type ContentSearchResult } from "./ContentSearcher";
+import { compareContentRows, MAX_INDEXED_LINE_LEN, type ContentSearchResult } from "./ContentSearcher";
 import { isPathExcluded } from "./vaultFiles";
 
 interface CanvasNode {
@@ -41,7 +41,7 @@ export class CanvasSearcher {
 				results.push({
 					file,
 					line,
-					snippet: text.slice(0, 160),
+					snippet: text, // capped at MAX_INDEXED_LINE_LEN; ContentSearcher windows it
 					// Slightly below markdown matches, floored so it never goes negative.
 					score: Math.max(1, 90 - Math.floor(line / 10)),
 					engine: "canvas",
@@ -68,7 +68,11 @@ export class CanvasSearcher {
 	/** Parsed searchable lines for one canvas, served from cache unless its mtime moved. */
 	private async getSearchableLines(file: TFile): Promise<Array<{ line: number; text: string }>> {
 		const cached = this.cache.get(file.path);
-		if (cached && cached.mtime === file.stat.mtime) return cached.lines;
+		// Capture mtime BEFORE the read: a save landing mid-read would otherwise
+		// cache the old text under the new mtime, pinning stale results until the
+		// next save.
+		const mtime = file.stat.mtime;
+		if (cached && cached.mtime === mtime) return cached.lines;
 		let raw: string;
 		try {
 			raw = await this.app.vault.cachedRead(file);
@@ -76,7 +80,7 @@ export class CanvasSearcher {
 			return [];
 		}
 		const lines = this.extractSearchableLines(raw);
-		this.cache.set(file.path, { mtime: file.stat.mtime, lines });
+		this.cache.set(file.path, { mtime, lines });
 		return lines;
 	}
 
@@ -96,14 +100,16 @@ export class CanvasSearcher {
 						: typeof value === "number" || typeof value === "boolean"
 							? String(value)
 							: "";
-				const text = raw.trim();
+				// Same per-line cap as markdown (MAX_INDEXED_LINE_LEN): a multi-MB
+				// card would otherwise be lowercased on every content keystroke.
+				const text = raw.trim().slice(0, MAX_INDEXED_LINE_LEN);
 				if (text) {
 					lines.push({ line: index + 1, text });
 				}
 			});
 		} catch {
 			raw.split("\n").forEach((text, index) => {
-				const trimmed = text.trim();
+				const trimmed = text.trim().slice(0, MAX_INDEXED_LINE_LEN);
 				if (trimmed) lines.push({ line: index + 1, text: trimmed });
 			});
 		}

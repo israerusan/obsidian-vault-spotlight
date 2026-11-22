@@ -3,6 +3,78 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.16.2] - 2026-11-22
+
+A hardening and polish release. Every fix below was found in an outside code review and
+confirmed against the code before it was changed.
+
+### Fixed
+
+- **Quoted phrases work in content search.** `> "launch plan"` used to search for the
+  quote marks themselves and matched nothing. It now matches the phrase, and a quoted
+  `"OR"` stays a literal word, as the advanced-search docs describe. This applies to
+  ripgrep, the background index and the mobile index alike.
+- **Content snippets show the match.** A hit past the 160th character of a long line used
+  to show the start of the line, with nothing highlighted. The snippet is now a window
+  around the match, with ellipses where it's cut. The `snippet` field returned by
+  `vaultSpotlight.search()` follows the same rule, so it can now begin or end with `…`.
+- **Batch actions touch each note once.** In content mode a note with several matching
+  lines appears several times. Tag, property, move and export actions used to write that
+  note once per hit, in parallel, and the notice over-counted ("tag added to 15 notes").
+  Opening checked results also opened one tab per hit. Each note is now handled once.
+- **Mod+Enter opens in the same tab when "Open in new tab by default" is on,** as the
+  footer hint says. Before, it opened a new tab like plain Enter.
+- **Removed workflows stay removed.** Removing a workflow that came from an older
+  version's presets or custom searches no longer brings it back in the launcher, or as a
+  command after a restart.
+- **Snippets added after a restart no longer share an id** with an existing snippet. A
+  shared id made Remove delete both.
+- **Quick capture is atomic.** Capture uses Obsidian's atomic read-modify-write, so a sync
+  or another plugin writing the note at the same moment can't be overwritten.
+- **Capture "prepend" no longer breaks frontmatter** in a note that ends right at the
+  closing `---`.
+- **Capture under a heading respects longer code fences.** A ```` fence that contains a
+  ``` line is no longer cut short, and the capture no longer lands inside the code block.
+- **Preview links work in popout windows.** Clicks on `mailto:` and `obsidian://` links
+  in the preview are no longer swallowed.
+- **Switching or clearing a search profile drops the active workflow's folder scope.**
+  Before, results stayed filtered by the old workflow.
+- **"Hide inline hints" in the shortcut sheet no longer moves focus** back to the search
+  box behind the dialog.
+- **Failed opens are reported.** A note that can't be opened (for example, deleted while
+  the launcher was open) now shows a notice instead of failing silently. This covers Enter
+  and the result context menu.
+- **The shortcut sheet shows the right keys.** It shows Ctrl+N / Ctrl+P (not Cmd+N on
+  macOS), and its Enter / Mod+Enter labels follow the new-tab setting.
+- **`name:` queries are ranked.** `name:roadmap` used to be treated as an unranked browse,
+  so the exact match wasn't preferred and nothing was highlighted. Quoted-phrase and
+  `path:`-only queries are now labelled as filters.
+- **"Ignore diacritics" applies to aliases,** as its description says (alias `Café` matches
+  `cafe`).
+- **Greek titles ending in Σ match.** Final sigma (ς) and σ now compare equal.
+- **Excluded folders behave the same with ripgrep.** Folder names containing `[`, `{`,
+  `*`, `?` or `!` are now excluded literally, as they already were without ripgrep.
+- **Ripgrep results are never shown under the wrong note.** On macOS, files with accented
+  names are no longer dropped from ripgrep results.
+
+### Hardening
+
+- License keys pasted with stray spaces or line breaks (for example, wrapped by a mail
+  client) now verify. Verification is still fully offline.
+- A hand-edited `data.json` is handled safely: non-text excluded-folder entries are
+  dropped (they used to make every search fail), a `null` saved-workflow list still
+  migrates, and inherited object names can't be used as frecency keys, unit names or
+  currency names (`1 constructor to m` used to return "NaN m").
+- `vaultSpotlight.search()` called with something other than text now resolves instead
+  of rejecting.
+- The live preview frees each rendered note when you move to the next one, and caps
+  excerpts of huge single-line notes. Very long canvas cards and base lines are capped
+  like Markdown lines, so they can't stall typing.
+- Content index builds stop when the plugin unloads or the index is reset. A healthy but
+  slow background index on a large vault is no longer retired after a few slow searches.
+- "Open in new window" is hidden on mobile. The ripgrep command setting is shown only on
+  desktop, where ripgrep can run.
+
 ## [2.16.0] - 2026-07-24
 
 ### Added

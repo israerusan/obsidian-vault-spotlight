@@ -36,6 +36,17 @@ const fencedResult = insertCapture(fenced, "- c", { heading: "Log" });
 assert.ok(fencedResult.indexOf("- c") > fencedResult.indexOf("# not a heading"), "capture goes past the code fence");
 assert.ok(fencedResult.indexOf("- c") < fencedResult.indexOf("## Next"), "capture stays before the real next heading");
 assert.ok(fencedResult.includes("```\n# not a heading\n```"), "code fence content is untouched");
+// A ``` line inside a ```` fence is content, not the closer (CommonMark).
+{
+	const doc4 = "# Log\n- a\n\n````md\n```\n# Log\n````\n\n# Next\n- b\n";
+	const out = insertCapture(doc4, "- c", { heading: "Log" });
+	assert.ok(out.includes("````md\n```\n# Log\n````"), "four-backtick fence content untouched");
+	assert.ok(out.indexOf("- c") > out.lastIndexOf("````") && out.indexOf("- c") < out.indexOf("# Next"), "capture lands after the real fence, before # Next");
+}
+// Prepend to a note that ends right at the frontmatter closer.
+assert.equal(insertCapture("---\ntitle: x\n---", "hello", { mode: "prepend" }), "---\ntitle: x\n---\nhello\n", "prepend after an unterminated closer keeps the closer on its own line");
+assert.equal(insertCapture("---\ntitle: x\n---\n", "hello", { mode: "prepend" }), "---\ntitle: x\n---\nhello\n", "prepend to frontmatter-only note");
+assert.ok(insertCapture("---\na: 1\n---bar\nbody", "hi", { mode: "prepend" }).startsWith("hi\n"), "a ---bar line is not a frontmatter closer");
 
 // --- Snippets: normalize ----------------------------------------------------
 assert.deepEqual(normalizeSnippets(null), [], "non-array normalizes to empty");
@@ -50,6 +61,13 @@ assert.equal(normalized[1].name, "Draft", "empty-body snippet survives reload");
 
 const created = createSnippet("Greeting", "Hi {{cursor}}");
 assert.ok(created.id.length > 0 && created.name === "Greeting", "createSnippet builds a record");
+// The id counter restarts on every launch; existing ids must never be re-minted.
+{
+	const first = createSnippet("Snippet 1", "");
+	const taken = [first.id, `sn-9-${Number(first.id.split("-")[2]) + 1}`, `sn-9-${Number(first.id.split("-")[2]) + 2}`];
+	const next = createSnippet("Snippet 2", "", taken);
+	assert.ok(!taken.includes(next.id), "createSnippet skips ids already in use");
+}
 
 // --- Snippets: placeholder expansion ---------------------------------------
 const ctx = { date: "2026-07-03", time: "15:30", clipboard: "PASTED", selection: "SEL" };

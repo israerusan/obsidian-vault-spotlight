@@ -38,6 +38,16 @@ for (const mode of ["files", "content", "headings", "symbols", "commands", "link
 	assert.equal(contentEntry.proOnly, PRO_ONLY_MODES.has("content"), "content entry carries its Pro flag");
 	const foldersEntry = modeSection.entries.find((e) => /folder/i.test(e.label));
 	assert.equal(foldersEntry.proOnly, false, "folders is a free mode");
+
+	// The Emacs down/up alias is literal Ctrl (keymap.ts), never the Mod label —
+	// on macOS the sheet must not claim Cmd+N.
+	const nav = custom.find((s) => /navigate/i.test(s.title));
+	const emacs = nav.entries.find((e) => e.keys.includes("N"));
+	assert.deepEqual(emacs.keys, ["Ctrl", "N"], "Ctrl+N shown as Ctrl even with Cmd modifier label");
+	// Enter / Mod+Enter labels follow "open in new tab by default", like the footer hints.
+	const actLabels = (opts) => getHelpSections(opts).find((s) => /act on/i.test(s.title)).entries.slice(0, 2).map((e) => e.label);
+	assert.deepEqual(actLabels({ modifierLabel: "Cmd" }), ["Open", "Open in new tab"], "default Enter labels");
+	assert.deepEqual(actLabels({ modifierLabel: "Cmd", defaultNewTab: true }), ["Open in new tab", "Open in same tab"], "swapped labels with defaultNewTab");
 }
 
 {

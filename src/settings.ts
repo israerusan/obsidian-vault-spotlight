@@ -557,7 +557,9 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 			render(setting);
 		};
 
-		proSearch(
+		// Ripgrep needs a child process, which only exists on desktop; on mobile the
+		// field would save a value that is never used.
+		if (Platform.isDesktopApp) proSearch(
 			"Ripgrep command",
 			"Faster content search when ripgrep (rg) is installed. Leave as rg — common install locations (winget, scoop, chocolatey, Homebrew, VS Code's bundled rg) are auto-detected when it isn't on your PATH.",
 			(setting) => {
@@ -682,7 +684,11 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 				.setDesc(`Snippets appear in snippet mode and insert at the cursor. Placeholders: {{date}} {{time}} {{clipboard}} {{selection}} {{cursor}}. ${this.plugin.settings.snippets.length}/${MAX_SNIPPETS} used.`)
 				.addButton((button) =>
 					button.setButtonText("Add snippet").onClick(() => {
-						const snippet = createSnippet(`Snippet ${this.plugin.settings.snippets.length + 1}`, "");
+						const snippet = createSnippet(
+							`Snippet ${this.plugin.settings.snippets.length + 1}`,
+							"",
+							this.plugin.settings.snippets.map((s) => s.id)
+						);
 						this.plugin.settings.snippets = [...this.plugin.settings.snippets, snippet].slice(0, MAX_SNIPPETS);
 						void this.plugin.saveSettings().then(() => this.display());
 					})
@@ -718,7 +724,9 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 					remove.setAttribute("aria-label", `Remove snippet ${snippet.name}`);
 					remove.addEventListener("click", () => {
 						const removed = snippet;
-						this.plugin.settings.snippets = this.plugin.settings.snippets.filter((s) => s.id !== removed.id);
+						// By identity, not id: even if two rows ever share an id, Remove
+						// deletes only the row that was clicked (and Undo restores it).
+						this.plugin.settings.snippets = this.plugin.settings.snippets.filter((s) => s !== removed);
 						// Offer a quick undo so a mis-click isn't silently destructive.
 						const notice = new Notice("", 6000);
 						notice.noticeEl.createSpan({ text: `Removed "${removed.name}". ` });
@@ -835,10 +843,19 @@ export class VaultSpotlightSettingTab extends PluginSettingTab {
 				const remove = row.createEl("button", { text: workflow.starter ? "Hide" : "Remove" });
 				remove.setAttribute("aria-label", `${workflow.starter ? "Hide" : "Remove"} workflow ${workflow.name}`);
 				remove.addEventListener("click", () => {
-					this.plugin.settings.savedWorkflows = this.plugin.settings.savedWorkflows.filter((entry) => entry.id !== workflow.id);
+					const s = this.plugin.settings;
+					s.savedWorkflows = s.savedWorkflows.filter((entry) => entry.id !== workflow.id);
+					// Also drop the id from the legacy arrays kept for the migration
+					// read-through window. Otherwise resolveSavedWorkflows() unions a
+					// removed preset straight back into the launcher, and the next
+					// load re-registers a removed custom search's command.
+					const wasLegacySearch = s.customSearches.some((entry) => entry.id === workflow.id);
+					s.workflowPresets = s.workflowPresets.filter((entry) => entry.id !== workflow.id);
+					s.customSearches = s.customSearches.filter((entry) => entry.id !== workflow.id);
+					s.pinnedCustomSearchIds = s.pinnedCustomSearchIds.filter((id) => id !== workflow.id);
 					// A command-exposed workflow also unregisters its custom-search-<id>
 					// command so a removed row can't leave a live (bindable) command.
-					if (workflow.exposeAsCommand) this.plugin.unregisterSavedWorkflowCommand(workflow.id);
+					if (workflow.exposeAsCommand || wasLegacySearch) this.plugin.unregisterSavedWorkflowCommand(workflow.id);
 					void this.plugin.saveSettings().then(() => this.display());
 				});
 			}

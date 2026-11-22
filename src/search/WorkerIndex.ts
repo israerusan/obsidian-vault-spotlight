@@ -70,7 +70,16 @@ export class WorkerIndex {
 			const msg = evt.data as { type?: string; id?: number; results?: WorkerIndexRow[] };
 			if (msg?.type !== "results" || typeof msg.id !== "number") return;
 			const entry = this.pending.get(msg.id);
-			if (!entry) return;
+			if (!entry) {
+				// A reply for a search that already timed out: the worker is alive,
+				// just slower than the WARM deadline on this vault. Drop back to the
+				// COLD deadline so the next scans get time to answer, instead of a
+				// consistently-slow-but-healthy worker timing out repeatedly and
+				// being retired for the session (pushing every scan onto the main
+				// thread).
+				this.warm = false;
+				return;
+			}
 			this.pending.delete(msg.id);
 			entry.resolve(msg.results ?? []);
 		};
@@ -87,10 +96,14 @@ export class WorkerIndex {
 		if (this.buildPromise) return this.buildPromise;
 		if (this.built) return Promise.resolve();
 		const epoch = this.epoch;
-		this.buildPromise = (async () => {
+		const build: Promise<void> = (async () => {
 			for (const file of this.app.vault.getMarkdownFiles()) {
+				// invalidate()/dispose() mid-build: stop posting into a cleared or
+				// terminated worker.
+				if (epoch !== this.epoch) return;
 				try {
 					const content = await this.app.vault.cachedRead(file);
+					if (epoch !== this.epoch) return;
 					this.worker.postMessage({ type: "set", path: file.path, content });
 				} catch {
 					// Skip a file that vanished or is unreadable mid-build.
@@ -100,9 +113,12 @@ export class WorkerIndex {
 			// leave built=false so the next caller triggers a fresh full build.
 			if (epoch === this.epoch) this.built = true;
 		})().finally(() => {
-			this.buildPromise = null;
+			// Identity check: invalidate() may already have dropped this promise and
+			// a fresh build started — don't clobber the newer one.
+			if (this.buildPromise === build) this.buildPromise = null;
 		});
-		return this.buildPromise;
+		this.buildPromise = build;
+		return build;
 	}
 
 	async search(groups: string[][], limit: number, excluded: string[]): Promise<WorkerIndexRow[]> {
@@ -159,10 +175,16 @@ export class WorkerIndex {
 		this.epoch++;
 		this.built = false;
 		this.warm = false;
+		// Drop the stale build so the next search starts a fresh, complete one
+		// rather than awaiting it and scanning a half-cleared index (mirrors
+		// ContentSearcher.invalidate()).
+		this.buildPromise = null;
 		this.worker.postMessage({ type: "clear" });
 	}
 
 	dispose(): void {
+		this.epoch++; // stop any in-flight build loop
+		this.buildPromise = null;
 		this.failPending(new Error("content index worker disposed"));
 		this.worker.terminate();
 		URL.revokeObjectURL(this.blobUrl);

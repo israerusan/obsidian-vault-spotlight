@@ -16,7 +16,11 @@ export class LicenseManager {
 	private static readonly PRODUCT = "vault-spotlight";
 
 	static verify(licenseKey: string): LicenseVerification {
-		const trimmed = String(licenseKey ?? "").trim();
+		// Strip ALL whitespace, not just the ends: keys are URL-safe base64
+		// (`payload.signature`), which never contains whitespace, so a space or line
+		// break a mail client wrapped into a pasted key can only be noise. The
+		// revocation check sees the same normalized value.
+		const trimmed = String(licenseKey ?? "").replace(/\s+/g, "");
 		if (isRevoked(trimmed)) {
 			return { valid: false, error: "This license key has been revoked." };
 		}

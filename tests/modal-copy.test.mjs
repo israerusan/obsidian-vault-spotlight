@@ -56,6 +56,7 @@ assert.deepEqual(
 
 // --- Preview focus ----------------------------------------------------------
 assert.equal(getPreviewFocusText({ kind: "content", snippet: "matched passage here" }), "matched passage here");
+assert.equal(getPreviewFocusText({ kind: "content", snippet: "…middle of a long line…" }), "middle of a long line", "windowed snippet ellipses are stripped so focus text is verbatim note text");
 assert.equal(getPreviewFocusText({ kind: "heading", heading: "Roadmap" }), "Roadmap");
 assert.equal(getPreviewFocusText({ kind: "symbol", text: "Implementation" }), "Implementation");
 assert.equal(getPreviewFocusText({ kind: "file" }), "", "plain file rows do not force preview focus text");

@@ -9,8 +9,15 @@ export function extractAliases(frontmatter) {
 	return raw.map((value) => String(value).trim()).filter(Boolean);
 }
 
-export function aliasMatches(frontmatter, query) {
-	const q = String(query || "").toLowerCase().trim();
+// Same fold as core/fuzzy.mjs's stripDiacritics, so "Ignore diacritics" (whose
+// setting text promises filenames AND aliases) treats both identically.
+function foldDiacritics(value) {
+	return String(value).normalize("NFD").replace(/\p{Diacritic}+/gu, "");
+}
+
+export function aliasMatches(frontmatter, query, options = {}) {
+	const fold = options && options.ignoreDiacritics === true ? foldDiacritics : (s) => s;
+	const q = fold(String(query || "")).toLowerCase().trim();
 	if (!q) return false;
-	return extractAliases(frontmatter).some((alias) => alias.toLowerCase().includes(q));
+	return extractAliases(frontmatter).some((alias) => fold(alias).toLowerCase().includes(q));
 }

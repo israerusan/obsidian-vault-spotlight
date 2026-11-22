@@ -73,4 +73,10 @@ approx(evaluateExpression("-10 c to f").value, 14, "negative Celsius converts");
 assert.equal(evaluateExpression("-40 c to f").kind, "temp", "negative conversion keeps temp kind");
 approx(evaluateExpression("-5 km to mi").value, -3.10685596, "negative linear-unit conversion");
 
+// Inherited Object.prototype names are not units/currencies.
+assert.equal(evaluateExpression("1 constructor to m"), null, "inherited 'constructor' is not a unit");
+assert.equal(evaluateExpression("1 toString to valueOf"), null, "inherited names are not currencies");
+// Unary minus binds tighter than ^ by design (spreadsheet convention; see calculator.mjs).
+assert.equal(evaluateExpression("-2^2")?.value, 4, "-2^2 is (-2)^2 by design");
+
 console.log("calculator tests passed");

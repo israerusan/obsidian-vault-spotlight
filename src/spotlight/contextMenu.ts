@@ -2,7 +2,7 @@
 // SpotlightModal.openActionsMenu so the menu construction is isolated; the modal
 // supplies a small host of bound operations. Builds an Obsidian Menu — the only
 // DOM-adjacent piece here — from fixed items.
-import { Menu, type App, type WorkspaceLeaf } from "obsidian";
+import { Menu, Notice, Platform, type App, type WorkspaceLeaf } from "obsidian";
 import { itemFile, type ResultItem } from "./resultTypes";
 import * as batchOps from "./batchOps";
 
@@ -29,12 +29,20 @@ export function openResultContextMenu(item: ResultItem, evt: MouseEvent | undefi
 			await leaf.openFile(file);
 			host.seekToItemLine(leaf, item);
 			host.trackRecent(file.path);
-		})();
+		})().catch((err) => {
+			// The modal is already closed, so surface the failure (e.g. the file was
+			// deleted while the menu was open) instead of an unhandled rejection.
+			console.error("[VaultSpotlight] failed to open", file.path, err);
+			new Notice(`Vault Spotlight: couldn't open ${file.basename}.`);
+		});
 	};
 
 	menu.addItem((i) => i.setTitle("Open in new tab").setIcon("file-plus").onClick(() => openIn("tab")));
 	menu.addItem((i) => i.setTitle("Open to the right").setIcon("separator-vertical").onClick(() => openIn("split")));
-	menu.addItem((i) => i.setTitle("Open in new window").setIcon("picture-in-picture-2").onClick(() => openIn("window")));
+	// Popout windows are a desktop-only concept.
+	if (!Platform.isMobile) {
+		menu.addItem((i) => i.setTitle("Open in new window").setIcon("picture-in-picture-2").onClick(() => openIn("window")));
+	}
 	menu.addSeparator();
 	menu.addItem((i) =>
 		i

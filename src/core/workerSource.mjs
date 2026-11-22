@@ -44,7 +44,8 @@ self.onmessage = (evt) => {
 		// work. MUST stay identical to ContentSearcher.searchVaultIndex's DNF test.
 		const groups = msg.groups || (msg.tokens && msg.tokens.length ? [msg.tokens] : []);
 		const excluded = msg.excluded || [];
-		const limit = msg.limit || 40;
+		// MUST match ContentSearcher.search's clamp (parity): positive int, else 40.
+		const limit = Math.max(1, Math.floor(msg.limit)) || 40;
 		// Bound memory without dropping the true top matches: a one-character
 		// query matches nearly every line. Whenever the working set grows past a
 		// soft cap, sort and keep only the current top \`limit\`; discarded rows
@@ -79,7 +80,9 @@ self.onmessage = (evt) => {
 				results.push({
 					path,
 					line: i + 1,
-					snippet: lines[i].trim().slice(0, 160),
+					// Whole trimmed line (capped at 2000 above); ContentSearcher windows
+					// it — MUST match searchVaultIndex.
+					snippet: lines[i].trim(),
 					score: Math.max(1, 100 - Math.floor(i / 10)),
 				});
 				if (results.length >= softCap) {

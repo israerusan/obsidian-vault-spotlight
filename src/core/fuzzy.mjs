@@ -3,6 +3,14 @@
 // it is not (final sigma, cancelling fold expand/contract) — see lowerWithMap/foldWithMap.
 const NON_ASCII = /[^\x00-\x7f]/;
 
+// Greek final sigma: whole-string toLowerCase() turns a word-final Σ into ς, while
+// per-character lowercasing always yields σ, and users type either form. Fold ς→σ
+// on BOTH sides (length-preserving, so index maps are unaffected) so "ΟΔΟΣ",
+// "οδος" and "οδός" all compare equal.
+function foldFinalSigma(s) {
+	return s.indexOf("ς") === -1 ? s : s.replace(/ς/g, "σ");
+}
+
 export function fuzzyMatch(query, text, options = {}) {
 	// An empty/whitespace-only query is "no match", not a zero-score match: every
 	// caller treats a falsy return as "skip", but a truthy {score:0} object would
@@ -14,7 +22,7 @@ export function fuzzyMatch(query, text, options = {}) {
 	}
 
 	const ignoreDiacritics = options.ignoreDiacritics === true;
-	const q = (ignoreDiacritics ? stripDiacritics(query) : String(query)).toLowerCase();
+	const q = foldFinalSigma((ignoreDiacritics ? stripDiacritics(query) : String(query)).toLowerCase());
 	// When folding diacritics, positions in the folded string no longer line up
 	// with the original (decomposed NFD combining marks collapse away, so every
 	// character after an accent shifts). Match against the folded text but keep a
@@ -86,7 +94,7 @@ function foldWithMap(value) {
 	let folded = "";
 	const map = [];
 	for (let i = 0; i < str.length; i++) {
-		const piece = stripDiacritics(str[i]).toLowerCase();
+		const piece = foldFinalSigma(stripDiacritics(str[i]).toLowerCase());
 		for (let j = 0; j < piece.length; j++) {
 			folded += piece[j];
 			map.push(i);
@@ -115,7 +123,7 @@ function lowerWithMap(value) {
 	let folded = "";
 	const map = [];
 	for (let i = 0; i < str.length; i++) {
-		const piece = str[i].toLowerCase();
+		const piece = foldFinalSigma(str[i].toLowerCase());
 		for (let j = 0; j < piece.length; j++) {
 			folded += piece[j];
 			map.push(i);

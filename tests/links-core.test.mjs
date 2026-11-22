@@ -28,6 +28,9 @@ assert.deepEqual(
 assert.deepEqual(extractAliases({ aliases: ["CRM", "Client Dashboard"], alias: "Sales" }), ["CRM", "Client Dashboard", "Sales"]);
 assert.equal(aliasMatches({ aliases: ["Client Dashboard"] }, "client"), true, "frontmatter aliases should match partial queries");
 assert.equal(aliasMatches({ aliases: ["Client Dashboard"] }, "finance"), false, "unrelated aliases should not match");
+assert.equal(aliasMatches({ aliases: ["Café"] }, "cafe"), false, "accent-sensitive by default");
+assert.equal(aliasMatches({ aliases: ["Café"] }, "cafe", { ignoreDiacritics: true }), true, "ignoreDiacritics folds the alias");
+assert.equal(aliasMatches({ aliases: ["Cafe"] }, "café", { ignoreDiacritics: true }), true, "ignoreDiacritics folds the query");
 
 const related = findRelatedBySharedTags([
 	{ path: "a.md", tags: ["client", "active"] },

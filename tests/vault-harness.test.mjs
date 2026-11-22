@@ -238,6 +238,12 @@ function makeDenseVault(nLines) {
 		results.some((r) => r.file.path === "Wide.md"),
 		"a token in columns 501-2000 of a long line is still found (fallback line cap is 2000)"
 	);
+	// …and its snippet is windowed around the match (not the line's first 160
+	// chars of padding), so the hit is visible and highlighted.
+	const wide = results.find((r) => r.file.path === "Wide.md");
+	assert.ok(wide.snippet.toLowerCase().includes("sentinelword"), "wide-line snippet contains the match");
+	assert.ok(wide.snippet.length <= 162, "wide-line snippet stays at display width (+ ellipses)");
+	assert.ok((wide.matchIndices ?? []).length > 0, "wide-line snippet has highlight indices");
 }
 
 // --- 10. Canvas + Base structure search --------------------------------------

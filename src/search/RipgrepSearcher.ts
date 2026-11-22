@@ -196,12 +196,17 @@ export class RipgrepSearcher {
 		];
 
 		for (const folder of options.excludeFolders ?? []) {
-			const f = folder.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+			const f = String(folder).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 			// --iglob (case-insensitive) so excluding "notes" also skips "Notes",
 			// matching the in-process fallback, which lowercases both sides. A
 			// case-sensitive -g here would leak excluded folders into rg results
 			// only, giving different output depending on whether rg resolved.
-			if (f) args.push("--iglob", `!${f}/**`);
+			// Escape glob metacharacters: the fallback treats the folder as a
+			// literal prefix, so "docs[old]" must not become a character class (which
+			// leaked docs[old]/ and hid docso/, docsd/ … only when rg was the engine).
+			// Backslashes were already turned into "/" above, so escaping is safe.
+			const literal = f.replace(/[[\]{}*?!]/g, "\\$&");
+			if (f) args.push("--iglob", `!${literal}/**`);
 		}
 
 		// One `-e` fixed-string pattern per group anchor gives OR across groups at
@@ -306,7 +311,12 @@ export class RipgrepSearcher {
 		for (const line of lines) {
 			const resolved = this.resolveRgLine(line, () => (suffixMap ??= this.buildSuffixMap()));
 			if (!resolved) continue;
-			const { file, lineNum, snippet } = resolved;
+			const { file, lineNum } = resolved;
+			// Drop rg's `--max-columns-preview` marker (appended to lines over 2000
+			// BYTES — so a shorter non-ASCII line can carry it too). It isn't note
+			// text: left in, it showed in snippets (rg engine only) and could even
+			// satisfy the token post-filter below ("omitted", "line").
+			const snippet = resolved.snippet.replace(/ ?\[\.\.\. omitted end of long line\]\s*$/, "");
 
 			// DNF post-filter: rg only guaranteed one anchor per line, so keep the
 			// line only if it fully satisfies ANY group (every token of that group
@@ -319,7 +329,8 @@ export class RipgrepSearcher {
 			results.push({
 				file,
 				line: lineNum,
-				snippet: snippet.trim().slice(0, 160),
+				// Whole trimmed line, capped like the index; ContentSearcher windows it.
+				snippet: snippet.trim().slice(0, MAX_INDEXED_LINE_LEN),
 				// Gentle early-line preference with a floor — never negative, so a
 				// late-line match can't sort below everything regardless of relevance.
 				// Base 100 (NOT higher) so it matches the in-process/worker markdown
@@ -362,10 +373,16 @@ export class RipgrepSearcher {
 			const normalized = rawPath.replace(/\\/g, "/").replace(/^\.\//, "");
 			let file: TFile | undefined;
 			const direct = this.app.vault.getAbstractFileByPath(normalized);
+			// rg reports paths as the filesystem stores them — NFD on macOS — while
+			// Obsidian keys its files in NFC, so "Café.md" missed the direct lookup
+			// and the line was dropped (the in-process index still found it).
+			const nfc = direct instanceof TFile ? null : this.app.vault.getAbstractFileByPath(normalized.normalize("NFC"));
 			if (direct instanceof TFile) {
 				file = direct;
+			} else if (nfc instanceof TFile) {
+				file = nfc;
 			} else {
-				file = this.findFileBySuffix(getSuffixMap(), normalized);
+				file = this.findFileBySuffix(getSuffixMap(), normalized.normalize("NFC"));
 			}
 			if (file) {
 				return { file, lineNum: Number(m[1]), snippet: line.slice(m.index + m[0].length) };
@@ -384,11 +401,25 @@ export class RipgrepSearcher {
 
 	private findFileBySuffix(fileMap: Map<string, TFile>, path: string): TFile | undefined {
 		const suffix = path.replace(/\\/g, "/");
+		// rg runs with cwd = vault on ".", so it emits vault-relative paths and the
+		// direct lookup normally hits. The only legitimate leftover case is an
+		// ABSOLUTE path (older rg invocations) ending in "/<vault path>". A relative
+		// miss is a file Obsidian doesn't index (e.g. ignored/readme.md) and must be
+		// dropped — binding it to whichever vault "readme.md" came first showed one
+		// note's line under another note's name.
+		const isAbsolute = /^(\/|[A-Za-z]:\/)/.test(suffix);
+		let best: TFile | undefined;
+		let bestLen = -1;
 		for (const [key, file] of fileMap) {
 			// Require a path-separator boundary so "notes.md" can't claim a
-			// match that actually lives in "Bar/mynotes.md".
-			if (key === suffix || key.endsWith(`/${suffix}`) || suffix.endsWith(`/${key}`)) return file;
+			// match that actually lives in "Bar/mynotes.md"; prefer the longest
+			// (most specific) key when several vault paths are suffixes.
+			const matches = key === suffix || (isAbsolute && suffix.endsWith(`/${key}`));
+			if (matches && key.length > bestLen) {
+				best = file;
+				bestLen = key.length;
+			}
 		}
-		return undefined;
+		return best;
 	}
 }

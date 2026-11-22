@@ -4,7 +4,9 @@
  * frontmatter edge cases are unit-tested rather than discovered in a live vault.
  */
 
-const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
+// The closing `---` must be a line of its own (end of line or end of file), so
+// a "---bar" line isn't mistaken for the closer.
+const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/;
 
 /** Normalize a heading string ("## Log", "log") to its comparable text. */
 function headingText(line) {
@@ -18,15 +20,21 @@ function headingText(line) {
  */
 function fencedLines(lines) {
 	const inFence = new Array(lines.length).fill(false);
-	let fence = null; // the active fence marker, or null
+	let fence = null; // the active fence { ch, len }, or null
 	for (let i = 0; i < lines.length; i++) {
-		const marker = lines[i].match(/^\s*(```+|~~~+)/);
-		if (fence === null && marker) {
-			fence = marker[1][0];
+		if (fence === null) {
+			const open = lines[i].match(/^\s*(`{3,}|~{3,})/);
+			if (open) {
+				fence = { ch: open[1][0], len: open[1].length };
+				inFence[i] = true;
+			}
+		} else {
 			inFence[i] = true;
-		} else if (fence !== null) {
-			inFence[i] = true;
-			if (marker && marker[1][0] === fence) fence = null; // closing fence
+			// CommonMark: a closing fence is the same character, at least as long as
+			// the opener, with nothing but whitespace after it. So a ``` line inside
+			// a ```` block is content, not the end of the block.
+			const close = lines[i].match(/^\s*(`{3,}|~{3,})\s*$/);
+			if (close && close[1][0] === fence.ch && close[1].length >= fence.len) fence = null;
 		}
 	}
 	return inFence;
@@ -43,8 +51,13 @@ function appendToEnd(existing, text) {
 function prependToTop(existing, text) {
 	const fm = existing.match(FRONTMATTER);
 	if (fm) {
+		// A note that ends right at the closing `---` (no trailing newline) must
+		// still get the capture on its own line, or the closer becomes "---text"
+		// and the frontmatter stops parsing.
+		const head = fm[0].endsWith("\n") ? fm[0] : `${fm[0]}\n`;
 		const rest = existing.slice(fm[0].length);
-		return `${fm[0]}${text}\n${rest.startsWith("\n") ? "" : "\n"}${rest}`;
+		if (rest.length === 0) return `${head}${text}\n`;
+		return `${head}${text}\n${rest.startsWith("\n") ? "" : "\n"}${rest}`;
 	}
 	return `${text}\n${existing.startsWith("\n") ? "" : "\n"}${existing}`;
 }

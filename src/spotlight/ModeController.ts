@@ -1,7 +1,7 @@
 import { App, MarkdownView, Notice, TFile, type WorkspaceLeaf, normalizePath } from "obsidian";
 import type VaultSpotlightPlugin from "../main";
 import { detectModeFromPrefix } from "../core/modeTriggers.mjs";
-import { resolveOpenTargets } from "../core/activationIntent.mjs";
+import { resolveOpenTargets, type PaneOverride } from "../core/activationIntent.mjs";
 import { cycleMode as cycleModeHelper } from "../core/modalCopy.mjs";
 import { detectSearchIntegrations, type SearchIntegrations } from "../core/integrations.mjs";
 import {
@@ -204,14 +204,14 @@ export class ModeController {
 	 * `void`, an unguarded rejection would surface as an unhandled promise rejection
 	 * with the modal already closed and nothing shown to the user. Contain it here.
 	 */
-	safeActivate(paneOverride: PaneTarget = null): void {
+	safeActivate(paneOverride: PaneOverride = null): void {
 		this.activateSelection(paneOverride).catch((err) => {
 			console.error("[VaultSpotlight] activation failed", err);
 			new Notice("Vault Spotlight: could not complete that action.");
 		});
 	}
 
-	private async activateSelection(paneOverride: PaneTarget = null): Promise<void> {
+	private async activateSelection(paneOverride: PaneOverride = null): Promise<void> {
 		const selected = this.host.selectedItem();
 		if (!selected) return;
 
@@ -357,6 +357,7 @@ export class ModeController {
 		this.host.clearChecked();
 		this.host.close();
 
+		let failed = 0;
 		for (const item of targets) {
 			const file = itemFile(item);
 			if (!file) continue;
@@ -364,8 +365,14 @@ export class ModeController {
 				await this.openItem(item, decision.target);
 				this.plugin.trackRecent(file.path);
 			} catch (err) {
+				failed++;
 				console.error("[VaultSpotlight] failed to open", file.path, err);
 			}
+		}
+		// The modal is already closed, so a silent console error would look like
+		// Enter did nothing — tell the user.
+		if (failed > 0) {
+			new Notice(`Vault Spotlight: couldn't open ${failed} ${failed === 1 ? "note" : "notes"}.`);
 		}
 	}
 

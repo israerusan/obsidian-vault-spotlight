@@ -70,7 +70,10 @@ export function getDrillPrefixMatch(rawQuery, prefixes) {
 
 export function getPreviewFocusText(item) {
 	if (!item) return "";
-	if (item.kind === "content") return String(item.snippet ?? "");
+	// Strip the "…" a windowed long-line snippet carries at its cut ends: the
+	// focus text must be VERBATIM note text, or the preview can't find the line
+	// and falls back to the first occurrence of a term anywhere in the note.
+	if (item.kind === "content") return String(item.snippet ?? "").replace(/^…/, "").replace(/…$/, "");
 	if (item.kind === "heading") return String(item.heading ?? "");
 	if (item.kind === "symbol") return String(item.text ?? "");
 	return "";
@@ -106,15 +109,21 @@ export function getModePlaceholder(mode) {
  * reachable forever, not only during the first five opens, so it derives every
  * trigger from the live, user-configurable prefixes rather than hard-coded glyphs.
  */
-export function getHelpSections({ isPro = false, prefixes = {}, modifierLabel = "Ctrl", escapeChar = "\\" } = {}) {
+export function getHelpSections({ isPro = false, prefixes = {}, modifierLabel = "Ctrl", escapeChar = "\\", defaultNewTab = false } = {}) {
 	const mod = modifierLabel;
+	// Mirror the footer hints: with "open in new tab by default" on, plain Enter
+	// opens a tab and Mod+Enter is the same-tab escape hatch.
+	const openLabel = defaultNewTab ? "Open in new tab" : "Open";
+	const modOpenLabel = defaultNewTab ? "Open in same tab" : "Open in new tab";
 	const trigger = (mode, label) => ({ keys: [prefixes[mode] ?? ""], label, proOnly: PRO_ONLY_MODES.has(mode) });
 	const sections = [
 		{
 			title: "Navigate",
 			entries: [
 				{ keys: ["↑", "↓"], label: "Move selection" },
-				{ keys: [mod, "N"], label: "Down / up (also Ctrl+P)" },
+				// The Emacs aliases are bound to literal Ctrl (keymap.ts), not Mod —
+				// on macOS "Cmd+N" would be wrong.
+				{ keys: ["Ctrl", "N"], label: "Move down (Ctrl+P: up)" },
 				{ keys: ["Alt", "↓"], label: "Recent searches" },
 				{ keys: ["PgUp", "PgDn"], label: "Jump a page" },
 				{ keys: ["Home", "End"], label: "First / last result" },
@@ -125,8 +134,8 @@ export function getHelpSections({ isPro = false, prefixes = {}, modifierLabel = 
 		{
 			title: "Act on a result",
 			entries: [
-				{ keys: ["↵"], label: "Open" },
-				{ keys: [mod, "↵"], label: "Open in new tab" },
+				{ keys: ["↵"], label: openLabel },
+				{ keys: [mod, "↵"], label: modOpenLabel },
 				{ keys: [mod, "Alt", "↵"], label: "Open in split" },
 				{ keys: ["Alt", "↵"], label: "Result actions menu" },
 				{ keys: ["Shift", "↵"], label: "Create a new note" },

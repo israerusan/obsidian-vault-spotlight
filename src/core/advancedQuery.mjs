@@ -97,25 +97,59 @@ function parseClause(tokens) {
  * before lowercasing); everything else is a lowercased search token. `tokens` is
  * the de-duplicated union of every group, used for snippet highlighting so a hit
  * matched via one alternative still highlights that alternative's terms.
+ *
+ * A double-quoted run is ONE token with its inner spaces kept (`"launch plan"`
+ * matches that phrase as a substring), and a quoted `"OR"` is a literal term,
+ * as docs/advanced.md promises. Previously the quote marks themselves became
+ * part of the tokens, so a quoted phrase never matched anything. An unclosed
+ * quote (mid-typing) treats the rest of the query as the phrase.
  */
 export function parseContentQuery(query) {
-	const parts = String(query || "")
-		.trim()
-		.split(/\s+/)
-		.filter(Boolean);
+	const parts = splitContentParts(String(query || ""));
 	const groups = [];
 	let group = [];
-	for (const part of parts) {
-		if (part === "OR") {
+	for (const { value, quoted } of parts) {
+		if (value === "OR" && !quoted) {
 			if (group.length) groups.push(group);
 			group = [];
 			continue;
 		}
-		group.push(part.toLowerCase());
+		group.push(value.toLowerCase());
 	}
 	if (group.length) groups.push(group);
 	const tokens = Array.from(new Set(groups.flat()));
 	return { groups, tokens };
+}
+
+/** Whitespace-split, except a `"` at the start of a token opens a phrase that
+ * runs to the next `"`. A quote inside a word stays a literal character. */
+function splitContentParts(input) {
+	const parts = [];
+	let current = "";
+	let quoted = false;
+	for (let i = 0; i < input.length; i++) {
+		const ch = input[i];
+		if (quoted) {
+			if (ch === '"') {
+				if (current.trim()) parts.push({ value: current.trim(), quoted: true });
+				current = "";
+				quoted = false;
+			} else current += ch;
+			continue;
+		}
+		if (/\s/.test(ch)) {
+			if (current) parts.push({ value: current, quoted: false });
+			current = "";
+			continue;
+		}
+		if (ch === '"' && current === "") {
+			quoted = true;
+			continue;
+		}
+		current += ch;
+	}
+	if (current.trim()) parts.push({ value: quoted ? current.trim() : current, quoted });
+	return parts;
 }
 
 function addProperty(out, raw) {

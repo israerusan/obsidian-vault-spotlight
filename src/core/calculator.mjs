@@ -69,7 +69,9 @@ const TEMPERATURE_UNITS = new Set(["c", "celsius", "f", "fahrenheit", "k", "kelv
 /** Find which linear category a unit belongs to (or null). */
 function categoryOf(unit) {
 	for (const [name, table] of Object.entries(UNIT_CATEGORIES)) {
-		if (unit in table.units) return name;
+		// Own keys only: `in` also matched inherited names, so "1 constructor to m"
+		// was treated as a length unit and returned "NaN m".
+		if (Object.prototype.hasOwnProperty.call(table.units, unit)) return name;
 	}
 	return null;
 }
@@ -293,7 +295,7 @@ function evaluateConversion(input, rates) {
 	}
 
 	// Currency
-	if (from in rates && to in rates) {
+	if (Object.prototype.hasOwnProperty.call(rates, from) && Object.prototype.hasOwnProperty.call(rates, to)) {
 		const out = (value * rates[to]) / rates[from];
 		return { value: out, kind: "currency", formatted: `${formatNumber(out)} ${to.toUpperCase()}` };
 	}
