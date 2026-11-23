@@ -158,6 +158,15 @@ export class ModeController {
 			this.promptNewNoteIn(selected.folder.path);
 			return;
 		}
+		// A "Create …" row is selected: create exactly what the row promises (name
+		// without filter fragments, in its folder) — the raw query would leak
+		// `#tag`/`in:` text into the filename and disagree with the row.
+		if (selected?.kind === "create") {
+			this.host.recordSearch();
+			this.host.close();
+			await this.createAndOpen(selected.name, selected.folder ?? null);
+			return;
+		}
 		const { mode, body } = this.resolveQuery(this.host.inputValue());
 		if (!body) return;
 		// After browsing into a folder (query `in:"<folder>" …`), create the note IN
@@ -175,6 +184,19 @@ export class ModeController {
 				await this.createAndOpen(target.name, target.folder);
 				return;
 			}
+			// Filters that don't resolve to a folder (a partial `in:Proj`, `#tag`,
+			// `ext:`…) still must not end up in the filename: name the note from the
+			// plain words only, at the default location.
+			if (target.hasFilters) {
+				if (!target.name) {
+					new Notice("Type a name for the new note.");
+					return;
+				}
+				this.host.recordSearch();
+				this.host.close();
+				await this.createAndOpen(target.name);
+				return;
+			}
 		}
 		this.host.recordSearch();
 		this.host.close();
@@ -182,7 +204,7 @@ export class ModeController {
 	}
 
 	/** Resolve a files-mode query's single `in:` filter to an existing folder. */
-	createTargetFor(body: string): { folder: string | null; name: string } {
+	createTargetFor(body: string): { folder: string | null; name: string; hasFilters: boolean } {
 		return resolveCreateTarget(tokenizeQuery(body), () =>
 			this.app.vault
 				.getAllLoadedFiles()

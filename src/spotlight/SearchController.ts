@@ -70,7 +70,7 @@ export interface SearchHost {
 	drillFile(): TFile | null;
 	activeWorkflowId(): string;
 	/** Where a "create note" from this files-mode query lands (see core/createTarget). */
-	createTargetFor(body: string): { folder: string | null; name: string };
+	createTargetFor(body: string): { folder: string | null; name: string; hasFilters: boolean };
 	setBadge(text: string, cls: "is-content" | "is-pro" | null): void;
 	setPlaceholder(mode: SpotlightMode): void;
 	renderResults(): void;
@@ -512,15 +512,19 @@ export class SearchController {
 				// previously dead-ended with no actionable next step. Use the plain text
 				// tokens, not the raw body, so `#tag`/`ext:` fragments never leak into
 				// the new note's filename.
-				if (this.items.length === 0 && !isEmptyQuery && parsed.textTokensRaw.length > 0) {
-					// Original-case words (textTokensRaw), so a plain "Meeting Notes" search
-					// creates "Meeting Notes.md", not "meeting notes.md" — and matches the
-					// name the Shift+Enter (createFromQuery) path produces for the same query.
+				if (this.items.length === 0 && !isEmptyQuery) {
+					// Original-case words of EVERY OR alternative (target.name), so a plain
+					// "Meeting Notes" search creates "Meeting Notes.md", not "meeting notes.md",
+					// `#project OR Roadmap` still offers "Roadmap" (the flat fields only mirror
+					// the first clause), and the name matches what Shift+Enter
+					// (createFromQuery) produces for the same query.
 					// Inside a browsed folder (`in:"<folder>"`), the row creates there too.
 					const target = this.host.createTargetFor(body);
-					this.items = [
-						{ kind: "create", name: parsed.textTokensRaw.join(" "), ...(target.folder ? { folder: target.folder } : {}) },
-					];
+					if (target.name) {
+						this.items = [
+							{ kind: "create", name: target.name, ...(target.folder ? { folder: target.folder } : {}) },
+						];
+					}
 				}
 			}
 		} catch (err) {

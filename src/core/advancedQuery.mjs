@@ -1,3 +1,16 @@
+const BARE_FILTER_PREFIXES = new Set([
+	"#",
+	"@",
+	"in:",
+	"path:",
+	"name:",
+	"tag:",
+	"prop:",
+	"ext:",
+	"modified:",
+	"created:",
+]);
+
 export function parseAdvancedQuery(raw) {
 	const tokens = tokenizeAdvanced(raw);
 	// Split the token stream into OR-separated groups on a standalone, unquoted,
@@ -55,6 +68,11 @@ function parseClause(tokens) {
 		isBookmarked: false,
 		modifiedDays: null,
 		createdDays: null,
+		// True once ANY token is consumed as search syntax rather than a plain word —
+		// including ones whose value is invalid or empty (`modified:bogus`, `ext:`, a
+		// bare `#`), which leave no field set. "Create a note from this query" uses it
+		// to keep filter text out of filenames.
+		hasFilterTokens: false,
 	};
 	for (const token of tokens) {
 		const value = token.value.trim();
@@ -77,10 +95,21 @@ function parseClause(tokens) {
 		else if (lower.startsWith("created:") && lower.length > 8) out.createdDays = parseDays(lower.slice(8));
 		else if (lower === "is:starred") out.isStarred = true;
 		else if (lower === "is:bookmarked") out.isBookmarked = true;
-		else if (lower !== "#" && lower !== "@" && lower !== "ext:") {
+		// Any other `is:` (bare `is:`, unknown `is:foo`) is unsupported syntax, not a
+		// word: it must not land in a note name created from the query.
+		else if (lower.startsWith("is:")) {
+			/* consumed as syntax; flagged below */
+		}
+		// A bare, half-typed filter prefix (`in:`, `tag:`, `ext:`, `#`, …) is syntax
+		// with no value yet: it neither filters nor is a word to search or name a note
+		// after (filenames can't contain ":" anyway).
+		else if (!BARE_FILTER_PREFIXES.has(lower)) {
 			out.textTokens.push(lower);
 			out.textTokensRaw.push(value);
+			continue;
 		}
+		// Every non-text branch above (and a dropped bare `#`/`@`/`ext:`) lands here.
+		out.hasFilterTokens = true;
 	}
 	return out;
 }

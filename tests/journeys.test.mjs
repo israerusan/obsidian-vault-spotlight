@@ -247,6 +247,77 @@ const press = (modal, mods, key) => findKey(modal, mods, key).handler(new FakeEv
 		await settle();
 		assert.deepEqual(app.createdFiles, ["Loose Thought.md"], "J6e: default location unchanged");
 	}
+
+	// 6f: Shift+Enter on a Create row creates what the row says — filter fragments
+	// (#tag) never leak into the filename (Enter and Shift+Enter agree).
+	{
+		const { app } = loadVaultApp(vaultDir);
+		const plugin = makeStubPlugin(app, { isPro: false });
+		const modal = new SpotlightModal(app, plugin, "zzqx roadmap #nosuchtag", "files");
+		modal.open();
+		await settle();
+		assert.equal(modal.items[0]?.kind, "create", "J6f: the empty result offers a Create row");
+		press(modal, ["Shift"], "Enter");
+		await settle();
+		assert.deepEqual(app.createdFiles, ["zzqx roadmap.md"], "J6f: Shift+Enter used the row's clean name");
+	}
+
+	// 6g: a filter that MATCHES files (here #project on Projects/Roadmap.md) but does
+	// not resolve to a creation folder — same branch as `in:Project` naming a nested
+	// folder by its last segment. A real file row is selected; Shift+Enter must still
+	// strip the filter text from the new note's name.
+	{
+		const { app } = loadVaultApp(vaultDir);
+		const plugin = makeStubPlugin(app, { isPro: false });
+		const modal = new SpotlightModal(app, plugin, "Roadmap Retro #project", "files");
+		modal.open();
+		await settle();
+		assert.equal(modal.items[modal.selectedIndex]?.kind, "file", "J6g: #project still lists Projects/Roadmap.md");
+		press(modal, ["Shift"], "Enter");
+		await settle();
+		assert.deepEqual(app.createdFiles, ["Roadmap Retro.md"], "J6g: filter text stripped, default location");
+	}
+
+	// 6g2: the filter hides in a later OR clause / has an invalid value — still stripped.
+	for (const [query, expected] of [
+		["Roadmap Retro OR #project", "Roadmap Retro.md"],
+		["Roadmap Retro modified:bogus", "Roadmap Retro.md"],
+	]) {
+		const { app } = loadVaultApp(vaultDir);
+		const plugin = makeStubPlugin(app, { isPro: true });
+		const modal = new SpotlightModal(app, plugin, query, "files");
+		modal.open();
+		await settle();
+		press(modal, ["Shift"], "Enter");
+		await settle();
+		assert.deepEqual(app.createdFiles, [expected], `J6g2: ${query}`);
+	}
+
+	// 6g3: words only in a LATER OR clause still get a Create row (Enter == Shift+Enter).
+	{
+		const { app } = loadVaultApp(vaultDir);
+		const plugin = makeStubPlugin(app, { isPro: true });
+		const modal = new SpotlightModal(app, plugin, "#nosuchtag OR Zzqx Plan", "files");
+		modal.open();
+		await settle();
+		assert.equal(modal.items[0]?.kind, "create", "J6g3: Create row offered");
+		assert.equal(modal.items[0].name, "Zzqx Plan", "J6g3: named from the later clause");
+		press(modal, [], "Enter");
+		await settle();
+		assert.deepEqual(app.createdFiles, ["Zzqx Plan.md"], "J6g3: Enter created it");
+	}
+
+	// 6h: a filter-only query (no plain words) creates nothing and says why.
+	{
+		const { app } = loadVaultApp(vaultDir);
+		const plugin = makeStubPlugin(app, { isPro: false });
+		const modal = new SpotlightModal(app, plugin, "#project", "files");
+		modal.open();
+		await settle();
+		press(modal, ["Shift"], "Enter");
+		await settle();
+		assert.deepEqual(app.createdFiles, [], "J6h: nothing created from filter text alone");
+	}
 }
 
 uninstallWindow();

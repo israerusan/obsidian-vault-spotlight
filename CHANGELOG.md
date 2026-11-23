@@ -3,6 +3,29 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.17.1] - 2026-11-23
+
+### Fixed
+
+- **Shift+Enter on a "Create …" row creates exactly what the row shows.** Before,
+  it fell back to the raw query, so a search like `roadmap #project` that found
+  nothing created `roadmap #project.md` while the row (and Enter) created
+  `roadmap.md`.
+- **Shift+Enter never puts search filters in a new note's name.** When the query
+  holds filters (`#tag`, `ext:`, `-word`, or an `in:` that names a nested folder by
+  its last segment) and a matching file is selected, Shift+Enter now names the note
+  from the plain words only (`Roadmap Retro #project` → `Roadmap Retro.md`). This
+  also covers filters in a later `OR` alternative and filters with an invalid or
+  empty value (`modified:bogus`, `ext:`), a half-typed prefix such as a trailing
+  `in:` (which no longer turns into `… in.md`), and an unknown `is:` value. A filters-only query asks for a name
+  instead of creating a note.
+- **OR searches naming different folders create in the default location.**
+  `in:Projects a OR in:Archive b` used to route the new note into the first
+  folder; it now only targets a folder when every alternative names the same one.
+- **The "Create …" row appears for OR searches that start with a filter.**
+  `#project OR Roadmap` finding nothing now offers to create "Roadmap" (before, no
+  row appeared although Shift+Enter would create it).
+
 ## [2.17.0] - 2026-11-22
 
 ### Added

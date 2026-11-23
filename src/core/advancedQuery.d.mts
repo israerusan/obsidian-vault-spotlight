@@ -15,6 +15,8 @@ export interface AdvancedQueryClause {
 	isBookmarked: boolean;
 	modifiedDays: number | null;
 	createdDays: number | null;
+	/** Any token was parsed as search syntax (even with an invalid/empty value). */
+	hasFilterTokens: boolean;
 }
 
 /**
