@@ -3,7 +3,7 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.17.0] - 2026-11-22
 
 ### Added
 
