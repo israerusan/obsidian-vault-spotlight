@@ -128,7 +128,9 @@ export function parseNaturalDate(rawInput, options = {}) {
 	}
 
 	// [next|last|this] <weekday>
-	const wdMatch = input.match(/^(next|last|this)?\s*([a-z]+)$/);
+	// The modifier needs a space after it: `\s*` let "nextmonday" or "nextfriday" (a
+	// note name) resolve as a weekday, and its daily-note row then took Enter.
+	const wdMatch = input.match(/^(?:(next|last|this)\s+)?([a-z]+)$/);
 	if (wdMatch) {
 		const word = wdMatch[2];
 		const idx = weekdayIndex(word);

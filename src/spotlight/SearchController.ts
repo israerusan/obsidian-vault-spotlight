@@ -8,7 +8,7 @@ import { EditorSearcher } from "../search/EditorSearcher";
 import { parseHeadingQuery } from "../core/modeTriggers.mjs";
 import { expandSearchAlias } from "../core/searchAliases.mjs";
 import { fuzzyMatch, tokenizeQuery } from "../search/fuzzy";
-import { getVaultFileKind } from "../search/vaultFiles";
+import { getVaultFileKind, isPathExcluded, normalizeExcludeFolders } from "../search/vaultFiles";
 import { activeProfile, type CoreSearchProfile } from "../core/searchProfiles.mjs";
 import { resolveSavedWorkflows, type SavedWorkflow } from "../core/savedWorkflows.mjs";
 import { findBacklinks, findOutlinks } from "../core/linkGraph.mjs";
@@ -579,7 +579,14 @@ export class SearchController {
 
 	private linkModeItems(query: string): ResultItem[] {
 		const active = this.app.workspace.getActiveFile();
-		const files = this.app.vault.getMarkdownFiles();
+		// Excluded folders hide files from EVERY mode — the same scope chain file search
+		// uses (workflow scope, then the active profile, then the global setting).
+		const excluded = normalizeExcludeFolders(
+			this.currentWorkflow()?.scope?.excludeFolders ??
+				this.currentProfile()?.excludeFolders ??
+				this.plugin.settings.excludeFolders
+		);
+		const files = this.app.vault.getMarkdownFiles().filter((file) => !isPathExcluded(file.path, excluded));
 		const q = query.replace(/^(<-|->|\[\[)\s?/, "").trim().toLowerCase();
 
 		// otherwise the active note.

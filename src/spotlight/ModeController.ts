@@ -371,6 +371,7 @@ export class ModeController {
 		if (selected.kind === "command") {
 			this.host.close();
 			if (this.host.commandSearcher.execute(selected.id)) this.plugin.trackCommand(selected.id);
+			else new Notice("Vault Spotlight: that command could not run here.");
 			return;
 		}
 

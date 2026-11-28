@@ -1,7 +1,7 @@
 {
   "id": "vault-spotlight",
   "name": "Vault Spotlight",
-  "version": "2.17.1",
+  "version": "2.17.2",
   "minAppVersion": "1.5.0",
   "description": "A Raycast-style launcher for your vault: fuzzy-find notes, commands and headings, save searches as workflows, and act on results without the mouse.",
   "author": "Israel Avila",

@@ -80,4 +80,12 @@ assert.equal(parse("0050-01-01"), null, "year < 100 must not resolve to 1900+y")
 assert.equal(parse("0099-12-31"), null, "year 99 must not resolve to 1999");
 assert.ok(parse("2026-01-01"), "a normal 4-digit year still parses");
 
+// A modifier glued to the weekday is a word (often a note name), not a date (2.17.2).
+for (const glued of ["nextmonday", "nextfriday", "nextsat", "lastfri", "thismonday"]) {
+	assert.equal(parse(glued), null, `"${glued}" must not resolve to a weekday`);
+}
+assert.ok(parse("next friday"), "a spaced modifier still resolves");
+assert.ok(parse("saturday"), "a bare full weekday still resolves");
+assert.equal(parse("sat"), null, "a bare abbreviation still does not");
+
 console.log("natural-dates tests passed");

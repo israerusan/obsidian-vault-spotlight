@@ -118,6 +118,12 @@ export class WorkflowController {
 		// `|| liveMode` could never reach the live mode.
 		const mode = this.host.hasActionContext() ? this.host.actionReturnMode() : this.host.liveMode();
 		const query = (this.host.hasActionContext() ? this.host.actionReturnQuery() : this.host.liveQuery()).trim();
+		// A workflow replays a SEARCH. Capture and snippets aren't searches, and saving
+		// one used to store a file search for the typed text instead.
+		if (mode === "capture" || mode === "snippets") {
+			new Notice("Vault Spotlight: capture and snippets can't be saved as a workflow — save a search mode instead.");
+			return;
+		}
 		if (!canSaveSavedWorkflow(this.settings.savedWorkflows, this.settings.isPro)) {
 			new Notice(`Vault Spotlight: the free plan includes ${FREE_WORKFLOW_LIMIT} workflows — upgrade to Pro for unlimited.`);
 			return;

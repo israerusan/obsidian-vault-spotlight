@@ -10,6 +10,7 @@ import { clampIndex, nextSelectedIndex } from "../core/selectionReducer.mjs";
 import { showOnboarding } from "../core/onboarding.mjs";
 import { getHelpSections, getModePlaceholder, getModifierLabel, getPreviewFocusText } from "../core/modalCopy.mjs";
 import { PRO_UNLOCK_SUMMARY } from "../core/featureGates.mjs";
+import { resolveSavedWorkflows } from "../core/savedWorkflows.mjs";
 import { itemFile, type ResultItem, type SpotlightMode } from "./resultTypes";
 import { PreviewPane } from "./PreviewPane";
 import { CaptureController } from "./CaptureController";
@@ -266,7 +267,9 @@ export class SpotlightModal extends Modal {
 			hasNavigated: () => this.modes.hasNavigated,
 			resetNavigation: () => {
 				this.modes.hasNavigated = false;
-				this.modes.activeWorkflowId = "";
+				// A sticky workflow's scope persists after it is applied (that is what the
+				// flag means); every other workflow ends at the first keystroke, as before.
+				if (this.search.currentWorkflow()?.sticky !== true) this.modes.activeWorkflowId = "";
 			},
 			scheduleSearch: () => this.search.scheduleSearch(),
 			inputValue: () => this.inputEl.value,
@@ -389,7 +392,12 @@ export class SpotlightModal extends Modal {
 			this.hintEl.createEl("code", { text: `${mod}+D` });
 			this.hintEl.appendText(" star");
 		}
-		if (this.plugin.settings.workflowPresets.length === 0) {
+		// Starters are seeded only for Pro, and only while the user has no workflows of
+		// their own — advertise them exactly then, not on every free-tier open.
+		if (
+			isPro &&
+			resolveSavedWorkflows(this.plugin.settings.savedWorkflows, this.plugin.settings.workflowPresets).length === 0
+		) {
 			this.hintEl.appendText(" · starter workflows in Browse");
 		}
 		// A permanent path back to the full trigger sheet, regardless of open count —

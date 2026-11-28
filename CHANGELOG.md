@@ -3,6 +3,29 @@
 All notable changes to Vault Spotlight are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.17.2] - 2026-11-28
+
+Fixes from an outside-model review (Grok, Copilot, Codex).
+
+### Fixed
+
+- **Searching for a word like `nextfriday` no longer opens a daily note.** A date
+  modifier glued to a weekday (`nextmonday`, `nextsat`) was read as a date, so the
+  daily-note row took the top spot and Enter opened, or created, that daily note
+  instead of the file you were looking for. `next friday`, with a space, still jumps.
+- **Links mode respects excluded folders.** Every other mode hid them; backlinks
+  and outlinks still listed notes inside them.
+- **Mod+S in Capture or Snippets no longer saves a file search.** Those modes are
+  not searches, so a workflow saved from them replayed the typed text as a file
+  search. Spotlight now says so instead of saving.
+- **A sticky workflow keeps its scope while you type.** The first keystroke
+  dropped the workflow's folder scope and ranking, even though settings marked it
+  `sticky`.
+- **A command that cannot run says so.** Spotlight closed and nothing happened;
+  it now shows a notice.
+- The "starter workflows in Browse" hint shows only when Browse actually offers
+  them (Pro, before you have saved a workflow of your own).
+
 ## [2.17.1] - 2026-11-23
 
 ### Fixed
